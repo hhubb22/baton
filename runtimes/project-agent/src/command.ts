@@ -1,4 +1,7 @@
 import { releaseMetadata } from '@baton/protocol/release.mjs'
+import { Effect, Tracer } from 'effect'
+import type { Models } from '@earendil-works/pi-ai'
+import { captureTrace, telemetryLayer, withTraceSpan } from '@baton/telemetry'
 import { createConnection } from 'node:net'
 import { createInterface } from 'node:readline/promises'
 import { parseArgs } from 'node:util'
@@ -7,6 +10,8 @@ import { probe, runtimeModels, registeredProvider, credentials } from './auth.js
 import { checkedRPC, type Request } from './protocol.js'
 import { createDeviceCodeLoginInteraction, createLoginInteraction } from './login.js'
 import { Connections } from './connections.js'
+
+class ReportedRunFailure extends Error {}
 
 async function ipc(request: Request): Promise<unknown> {
   const endpoint = process.env.BATON_PROJECT_RUNTIME_ENDPOINT,
@@ -22,7 +27,7 @@ async function ipc(request: Request): Promise<unknown> {
     socket.destroy()
   }
 }
-export async function runProjectRuntimeCLI(args: string[]): Promise<void> {
+export async function runProjectRuntimeCLI(args: string[], options?: { models?: Models }): Promise<void> {
   const [command, provider] = args
   if (command === '--version') {
     console.log(JSON.stringify(releaseMetadata()))
@@ -155,10 +160,78 @@ export async function runProjectRuntimeCLI(args: string[]): Promise<void> {
     process.on('SIGINT', abort)
     process.stdin.on('close', abort)
     try {
-      await runMemory(
-        checkedRPC((request) => client.call(request)),
-        budget.maxOutputTokens,
-        cancel.signal,
+      const telemetryEnv = { ...process.env }
+      for (const name of Object.keys(process.env)) if (name.startsWith('OTEL_')) delete process.env[name]
+      const bootstrap = await client.call({ operation: 'memory_bootstrap' })
+      const boot = await checkedRPC(async () => bootstrap).call({ operation: 'memory_bootstrap' })
+      await Effect.runPromise(
+        withTraceSpan(
+          Effect.gen(function* () {
+            const trace = yield* captureTrace
+            const tracer = yield* Tracer.Tracer
+            const root = yield* Effect.currentSpan
+            let initial = true
+            let result = 'unknown'
+            const rpc = checkedRPC((request) => {
+              if (initial && request.operation === 'memory_bootstrap') {
+                initial = false
+                return Promise.resolve(bootstrap)
+              }
+              return client.call({ ...request, ...(trace ? { trace } : {}) }).then((response) => {
+                if (request.operation === 'finish' && response?.ok) result = 'completed'
+                if (request.operation === 'report_failure' && response?.ok) {
+                  result = 'failed'
+                  if (request.reason) root.attribute('baton.error.code', request.reason)
+                }
+                return response
+              })
+            })
+            yield* Effect.tryPromise(() =>
+              runMemory(rpc, budget.maxOutputTokens, cancel.signal, undefined, {
+                span: (name, attributes, task) =>
+                  Effect.runPromise(
+                    withTraceSpan(
+                      Effect.gen(function* () {
+                        const span = yield* Effect.currentSpan
+                        return yield* Effect.tryPromise(() =>
+                          task((updates) => {
+                            for (const [key, value] of Object.entries(updates)) span.attribute(key, value)
+                          }),
+                        )
+                      }),
+                      name,
+                      trace,
+                      { attributes },
+                    ).pipe(Effect.provideService(Tracer.Tracer, tracer)),
+                  ),
+              }),
+            ).pipe(
+              Effect.onError(() =>
+                Effect.sync(() => {
+                  result = cancel.signal.aborted ? 'stopped' : 'failed'
+                }),
+              ),
+              Effect.ensuring(
+                Effect.sync(() => root.attribute('baton.turn.result', cancel.signal.aborted ? 'stopped' : result)),
+              ),
+            )
+            if (cancel.signal.aborted) result = 'stopped'
+            root.attribute('baton.turn.result', result)
+            if (result === 'failed') return yield* Effect.fail(new ReportedRunFailure())
+          }),
+          'baton.project.run',
+          boot.trace,
+          {
+            attributes: {
+              'baton.project.run.id': process.env.BATON_PROJECT_RUN_ID ?? '',
+              ...(boot.project_id ? { 'baton.project.id': boot.project_id } : {}),
+              'baton.memory.job.id': boot.job_id,
+            },
+          },
+        ).pipe(
+          Effect.catch((error) => (error instanceof ReportedRunFailure ? Effect.void : Effect.fail(error))),
+          Effect.provide(telemetryLayer('baton-project-runtime', telemetryEnv)),
+        ),
       )
     } finally {
       process.off('SIGTERM', abort)
@@ -168,18 +241,84 @@ export async function runProjectRuntimeCLI(args: string[]): Promise<void> {
     }
     return
   }
-  const models = await runtimeModels()
+  const models = options?.models ?? (await runtimeModels())
   const { ProjectRuntime } = await import('./runtime.js')
   if (process.env.BATON_PROJECT_RUNTIME_TRANSPORT === 'stdio') {
     const client = new StdioClient(process.stdin, process.stdout)
-    await new ProjectRuntime(
-      checkedRPC((request) => client.call(request)),
-      models,
-      undefined,
-      undefined,
-      budget,
-    ).start()
-    process.stdin.destroy()
+    try {
+      const telemetryEnv = { ...process.env }
+      for (const name of Object.keys(process.env)) if (name.startsWith('OTEL_')) delete process.env[name]
+      const bootstrap = await client.call({ operation: 'bootstrap' })
+      const boot = await checkedRPC(async () => bootstrap).call({ operation: 'bootstrap' })
+      await Effect.runPromise(
+        withTraceSpan(
+          Effect.gen(function* () {
+            const trace = yield* captureTrace
+            const tracer = yield* Tracer.Tracer
+            const root = yield* Effect.currentSpan
+            let initial = true
+            let result = 'unknown'
+            const rpc = checkedRPC((request) => {
+              if (initial && request.operation === 'bootstrap') {
+                initial = false
+                return Promise.resolve(bootstrap)
+              }
+              return client.call({ ...request, ...(trace ? { trace } : {}) }).then((response) => {
+                if (request.operation === 'finish' && response?.ok) result = 'completed'
+                if (request.operation === 'report_failure' && response?.ok) {
+                  result = 'failed'
+                  if (request.reason) root.attribute('baton.error.code', request.reason)
+                }
+                return response
+              })
+            })
+            yield* Effect.tryPromise(() =>
+              new ProjectRuntime(rpc, models, undefined, undefined, budget, {
+                span: (name, attributes, task) =>
+                  Effect.runPromise(
+                    withTraceSpan(
+                      Effect.gen(function* () {
+                        const span = yield* Effect.currentSpan
+                        return yield* Effect.tryPromise(() =>
+                          task((updates) => {
+                            for (const [key, value] of Object.entries(updates)) span.attribute(key, value)
+                          }),
+                        )
+                      }),
+                      name,
+                      trace,
+                      { attributes },
+                    ).pipe(Effect.provideService(Tracer.Tracer, tracer)),
+                  ),
+              }).start(),
+            ).pipe(
+              Effect.onError(() =>
+                Effect.sync(() => {
+                  result = 'failed'
+                }),
+              ),
+              Effect.ensuring(Effect.sync(() => root.attribute('baton.turn.result', result))),
+            )
+            if (result === 'failed') return yield* Effect.fail(new ReportedRunFailure())
+          }),
+          'baton.project.run',
+          boot.trace,
+          {
+            attributes: {
+              'baton.project.run.id': process.env.BATON_PROJECT_RUN_ID ?? '',
+              ...(boot.project_id ? { 'baton.project.id': boot.project_id } : {}),
+              'baton.conversation.id': boot.project.conversation.id,
+              'gen_ai.request.model': boot.project.agent.model,
+            },
+          },
+        ).pipe(
+          Effect.catch((error) => (error instanceof ReportedRunFailure ? Effect.void : Effect.fail(error))),
+          Effect.provide(telemetryLayer('baton-project-runtime', telemetryEnv)),
+        ),
+      )
+    } finally {
+      process.stdin.destroy()
+    }
   } else await new ProjectRuntime(checkedRPC(ipc), models, undefined, undefined, budget).start()
 }
 

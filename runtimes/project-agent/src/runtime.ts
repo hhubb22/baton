@@ -27,6 +27,7 @@ import {
 } from './compaction.js'
 
 import { queryEmbedding } from './embeddings.js'
+import { providerUsage, type RuntimeTelemetry } from './usage.js'
 export { modelMessages } from './context.js'
 
 export const IDLE_MS = 180_000
@@ -71,11 +72,19 @@ export class ProjectRuntime {
     private timer: Clock = clock,
     compaction: Partial<CompactionSettings> = {},
     budget: Partial<ModelBudget> = {},
+    private telemetry?: RuntimeTelemetry,
   ) {
     this.compaction = compactionSettings(compaction)
     this.budget = { ...DEFAULT_MODEL_BUDGET, ...budget }
     for (const [name, value] of Object.entries(this.budget))
       if (!Number.isSafeInteger(value) || value < 1) throw new Error(`invalid_model_budget_${name}`)
+  }
+  private traced<T>(
+    name: string,
+    attributes: Record<string, unknown>,
+    task: (annotate: (attributes: Record<string, unknown>) => void) => Promise<T>,
+  ): Promise<T> {
+    return this.telemetry ? this.telemetry.span(name, attributes, task) : task(() => {})
   }
   private async prepareMemory(outputReserve: number, signal?: AbortSignal, suffix: Message[] = []): Promise<Message[]> {
     const settings = this.boot.memory_settings
@@ -163,6 +172,14 @@ export class ProjectRuntime {
       }
   }
   private async compact(ratio: number, signal?: AbortSignal, force = false, retentionScale = 1): Promise<boolean> {
+    return this.traced('baton.project.compaction', {}, () => this.compactTraced(ratio, signal, force, retentionScale))
+  }
+  private async compactTraced(
+    ratio: number,
+    signal?: AbortSignal,
+    force = false,
+    retentionScale = 1,
+  ): Promise<boolean> {
     // 序号冲突会丢弃旧摘要，从中心的新快照重新选取范围。
     let changed = false,
       conflicts = 0
@@ -247,17 +264,37 @@ export class ProjectRuntime {
           ),
           { role: 'user', content: COMPACTION_INSTRUCTION, timestamp: 0 } satisfies Message,
         ]
-        const stream = this.models.streamSimple(model, modelContext({ messages: summaryMessages }), {
-          maxTokens: Math.min(this.budget.maxOutputTokens, model.maxTokens, available),
-          maxRetries: 0,
-          sessionId: this.boot.project.conversation.id,
-          toolChoice: 'none',
-          ...(signal ? { signal } : {}),
-        })
-        for await (const _ of stream) {
-          /* 等待完整摘要，部分输出不能替换历史。 */
-        }
-        const response = batonMessage(await stream.result())
+        const response = await this.traced(
+          `chat ${model.id}`,
+          {
+            'gen_ai.provider.name': model.provider,
+            'gen_ai.request.model': model.id,
+            'baton.usage.reported': false,
+          },
+          async (annotate) => {
+            const stream = this.models.streamSimple(model, modelContext({ messages: summaryMessages }), {
+              maxTokens: Math.min(this.budget.maxOutputTokens, model.maxTokens, available),
+              maxRetries: 0,
+              sessionId: this.boot.project.conversation.id,
+              toolChoice: 'none',
+              onProviderStreamEvent: (event, providerModel) => {
+                const usage = providerUsage(providerModel.api, event)
+                if (Object.keys(usage).length)
+                  annotate({
+                    'baton.usage.reported': true,
+                    ...(usage.input === undefined ? {} : { 'gen_ai.usage.input_tokens': usage.input }),
+                    ...(usage.output === undefined ? {} : { 'gen_ai.usage.output_tokens': usage.output }),
+                    ...(usage.cached === undefined ? {} : { 'baton.usage.cached_input_tokens': usage.cached }),
+                  })
+              },
+              ...(signal ? { signal } : {}),
+            })
+            for await (const _ of stream) {
+              /* 等待完整摘要，部分输出不能替换历史。 */
+            }
+            return batonMessage(await stream.result())
+          },
+        )
         payload = {
           through_seq: through,
           summary: summaryText(response),
@@ -331,6 +368,13 @@ export class ProjectRuntime {
       }
   }
   private async execute(call: ToolCall): Promise<ToolResultMessage> {
+    return this.traced(
+      'baton.project.tool',
+      { 'baton.project.tool': toolDefinitions.some((tool) => tool.name === call.name) ? call.name : 'unknown' },
+      () => this.executeTraced(call),
+    )
+  }
+  private async executeTraced(call: ToolCall): Promise<ToolResultMessage> {
     const saved = this.results.get(call.id)
     if (saved) return saved
     // Coordinator 持久化工具调用；恢复时使用原调用 ID 获取已保存的 Thread 或结果。
@@ -471,44 +515,66 @@ export class ProjectRuntime {
             options?.signal,
             outputFeedback ? [{ role: 'user', content: outputFeedback, timestamp: 0 }] : [],
           )
-          const stream = this.models.streamSimple(
-            requestModel,
-            modelContext({ ...requestContext, messages: memoryMessages }),
+          message = await this.traced(
+            `chat ${requestModel.id}`,
             {
-              ...options,
-              maxTokens: outputTokens,
-              maxRetries: 0,
+              'gen_ai.provider.name': requestModel.provider,
+              'gen_ai.request.model': requestModel.id,
+              'baton.usage.reported': false,
+            },
+            async (annotate) => {
+              const stream = this.models.streamSimple(
+                requestModel,
+                modelContext({ ...requestContext, messages: memoryMessages }),
+                {
+                  ...options,
+                  onProviderStreamEvent: async (event, providerModel) => {
+                    const usage = providerUsage(providerModel.api, event)
+                    if (Object.keys(usage).length)
+                      annotate({
+                        'baton.usage.reported': true,
+                        ...(usage.input === undefined ? {} : { 'gen_ai.usage.input_tokens': usage.input }),
+                        ...(usage.output === undefined ? {} : { 'gen_ai.usage.output_tokens': usage.output }),
+                        ...(usage.cached === undefined ? {} : { 'baton.usage.cached_input_tokens': usage.cached }),
+                      })
+                    await options?.onProviderStreamEvent?.(event, providerModel)
+                  },
+                  maxTokens: outputTokens,
+                  maxRetries: 0,
+                },
+              )
+              let preview = ''
+              let lastPreview = -Infinity
+              const publishPreview = async (text: string) => {
+                // 预览通过现有 RPC 发送完整快照，正式保存与工具执行仍等待完整回复。
+                const bytes = Buffer.from(text)
+                const truncated = bytes.length > 32 * 1024
+                let end = Math.min(bytes.length, 32 * 1024)
+                while (end < bytes.length && (bytes[end] & 0xc0) === 0x80) end--
+                await this.rpc
+                  .call({
+                    operation: 'preview',
+                    last_seq: this.seq,
+                    payload: {
+                      text: bytes.subarray(0, end).toString('utf8'),
+                      truncated,
+                    },
+                  })
+                  .catch(() => {})
+              }
+              for await (const event of stream) {
+                if (event.type === 'text_delta') {
+                  if (Buffer.byteLength(preview) < 32 * 1024 + 4)
+                    preview = (preview + event.delta).slice(0, 32 * 1024 + 4)
+                  if (this.timer.now() - lastPreview >= 200) {
+                    lastPreview = this.timer.now()
+                    await publishPreview(preview)
+                  }
+                }
+              }
+              return batonMessage(await stream.result())
             },
           )
-          let preview = ''
-          let lastPreview = -Infinity
-          const publishPreview = async (text: string) => {
-            // 预览通过现有 RPC 发送完整快照，正式保存与工具执行仍等待完整回复。
-            const bytes = Buffer.from(text)
-            const truncated = bytes.length > 32 * 1024
-            let end = Math.min(bytes.length, 32 * 1024)
-            while (end < bytes.length && (bytes[end] & 0xc0) === 0x80) end--
-            await this.rpc
-              .call({
-                operation: 'preview',
-                last_seq: this.seq,
-                payload: {
-                  text: bytes.subarray(0, end).toString('utf8'),
-                  truncated,
-                },
-              })
-              .catch(() => {})
-          }
-          for await (const event of stream) {
-            if (event.type === 'text_delta') {
-              if (Buffer.byteLength(preview) < 32 * 1024 + 4) preview = (preview + event.delta).slice(0, 32 * 1024 + 4)
-              if (this.timer.now() - lastPreview >= 200) {
-                lastPreview = this.timer.now()
-                await publishPreview(preview)
-              }
-            }
-          }
-          message = batonMessage(await stream.result())
           if (message.stopReason === 'error' && isContextOverflow(message, requestModel.contextWindow)) {
             if (!this.canRecover()) throw new RuntimeError('context_overflow_budget_exhausted')
             const before = estimateMessages(modelMessages(this.boot, this.events))

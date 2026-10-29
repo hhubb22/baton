@@ -54,6 +54,7 @@ export type AgentEvent =
   | { readonly type: 'barrier'; readonly acknowledge: Effect.Effect<void> }
   | (AgentEventIdentity & { readonly type: 'question'; readonly question: ThreadQuestion })
   | (AgentEventIdentity & { readonly type: 'question.resolved'; readonly requestId: string })
+  | (AgentEventIdentity & { readonly type: 'model'; readonly model: string })
   | (AgentEventIdentity & {
       readonly type: 'reply'
       readonly id: string

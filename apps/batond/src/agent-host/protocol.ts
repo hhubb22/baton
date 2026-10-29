@@ -55,6 +55,7 @@ export const ExecutionEvent = Schema.Union([
   Schema.Struct({ ...identity, type: Schema.Literal('question'), question: ThreadQuestion }),
   Schema.Struct({ ...identity, type: Schema.Literal('question.resolved'), requestId: Schema.String }),
   Schema.Struct({ ...identity, type: Schema.Literal('reply'), id: Schema.String, text: Schema.String }),
+  Schema.Struct({ ...identity, type: Schema.Literal('model'), model: Schema.String }),
   Schema.Struct({ ...identity, type: Schema.Literal('item'), item: HostTurnItem }),
   Schema.Struct({
     ...identity,

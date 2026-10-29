@@ -3,6 +3,7 @@ import { FetchHttpClient, Headers, HttpClient, HttpClientError, HttpTraceContext
 import { OtlpLogger, OtlpMetrics, OtlpSerialization, OtlpTracer } from 'effect/observability'
 import { BUILD } from '@baton/protocol/release.mjs'
 import type { TraceData } from 'effect/observability/OtlpTracer'
+import type { KeyValue } from 'effect/observability/OtlpResource'
 import { TraceContext } from '@baton/protocol/trace'
 import * as Statement from 'effect/sql/Statement'
 
@@ -45,7 +46,11 @@ export const withTraceSpan = <A, E, R>(
 ): Effect.Effect<A, E, R> => {
   const trace = decodeTrace(input)
   const parent = traceParent(trace)
-  const traced = Effect.withSpan(effect, name, { ...options, ...(parent ? { parent } : {}), captureStackTrace: false })
+  const traced = Effect.withSpan(effect, name, {
+    ...options,
+    ...(!options.parent && parent ? { parent } : {}),
+    captureStackTrace: false,
+  })
   return trace?.tracestate ? Effect.provideService(traced, TraceState, trace.tracestate) : traced
 }
 
@@ -168,9 +173,14 @@ const metricNames = new Set([
 ])
 
 /** Keep native spans and timings; redact payload-derived attributes, events and error details at export. */
-const redact = (data: TraceData): TraceData => {
+const safeResource = (attributes: KeyValue[], nodeId?: string) =>
+  attributes.filter(
+    ({ key, value }) =>
+      safeAttributes.has(key) && (key !== 'baton.node.id' || (nodeId !== undefined && value.stringValue === nodeId)),
+  )
+const redact = (data: TraceData, nodeId?: string): TraceData => {
   for (const resource of data.resourceSpans) {
-    resource.resource.attributes = resource.resource.attributes.filter(({ key }) => safeAttributes.has(key))
+    resource.resource.attributes = safeResource(resource.resource.attributes, nodeId)
     for (const scope of resource.scopeSpans) {
       for (let index = 0; index < scope.spans.length; index++) {
         const span = scope.spans[index]!
@@ -207,67 +217,67 @@ const redact = (data: TraceData): TraceData => {
   return data
 }
 
-const privateSerialization = Layer.effect(
-  OtlpSerialization.OtlpSerialization,
-  Effect.gen(function* () {
-    const json = yield* OtlpSerialization.OtlpSerialization
-    return {
-      traces: (data: TraceData) => json.traces(redact(data)),
-      logs: (data: Parameters<typeof json.logs>[0]) => {
-        for (const resource of data.resourceLogs) {
-          if (resource.resource)
-            resource.resource.attributes = resource.resource.attributes.filter(({ key }) => safeAttributes.has(key))
-          for (const scope of resource.scopeLogs) {
-            if (scope.scope) scope.scope.attributes = []
-            if (scope.logRecords)
-              scope.logRecords = scope.logRecords
-                .filter(
-                  (record) =>
-                    record.body?.stringValue === 'baton.wait.start' || record.body?.stringValue === 'baton.wait.end',
-                )
-                .map((record) => ({
-                  ...record,
-                  attributes: record.attributes.filter(({ key }) => safeAttributes.has(key)),
-                }))
+const privateSerialization = (nodeId?: string) =>
+  Layer.effect(
+    OtlpSerialization.OtlpSerialization,
+    Effect.gen(function* () {
+      const json = yield* OtlpSerialization.OtlpSerialization
+      return {
+        traces: (data: TraceData) => json.traces(redact(data, nodeId)),
+        logs: (data: Parameters<typeof json.logs>[0]) => {
+          for (const resource of data.resourceLogs) {
+            if (resource.resource) resource.resource.attributes = safeResource(resource.resource.attributes, nodeId)
+            for (const scope of resource.scopeLogs) {
+              if (scope.scope) scope.scope.attributes = []
+              if (scope.logRecords)
+                scope.logRecords = scope.logRecords
+                  .filter(
+                    (record) =>
+                      record.body?.stringValue === 'baton.wait.start' || record.body?.stringValue === 'baton.wait.end',
+                  )
+                  .map((record) => ({
+                    ...record,
+                    attributes: record.attributes.filter(({ key }) => safeAttributes.has(key)),
+                  }))
+            }
           }
-        }
-        return json.logs(data)
-      },
-      metrics: (data: Parameters<typeof json.metrics>[0]) => {
-        for (const resource of data.resourceMetrics) {
-          resource.resource.attributes = resource.resource.attributes.filter(({ key }) => safeAttributes.has(key))
-          for (const scope of resource.scopeMetrics) {
-            scope.scope.attributes = []
-            scope.metrics = scope.metrics.filter((metric) => metricNames.has(metric.name))
-            for (const metric of scope.metrics) {
-              delete metric.description
-              for (const aggregation of [
-                metric.gauge,
-                metric.sum,
-                metric.histogram,
-                metric.exponentialHistogram,
-                metric.summary,
-              ]) {
-                if (!aggregation) continue
-                for (const point of aggregation.dataPoints) {
-                  point.attributes =
-                    point.attributes?.filter(
-                      ({ key, value }) =>
-                        safeAttributes.has(key) &&
-                        typeof value.stringValue === 'string' &&
-                        metricValues[key]?.has(value.stringValue),
-                    ) ?? []
-                  if ('exemplars' in point) point.exemplars = []
+          return json.logs(data)
+        },
+        metrics: (data: Parameters<typeof json.metrics>[0]) => {
+          for (const resource of data.resourceMetrics) {
+            resource.resource.attributes = safeResource(resource.resource.attributes, nodeId)
+            for (const scope of resource.scopeMetrics) {
+              scope.scope.attributes = []
+              scope.metrics = scope.metrics.filter((metric) => metricNames.has(metric.name))
+              for (const metric of scope.metrics) {
+                delete metric.description
+                for (const aggregation of [
+                  metric.gauge,
+                  metric.sum,
+                  metric.histogram,
+                  metric.exponentialHistogram,
+                  metric.summary,
+                ]) {
+                  if (!aggregation) continue
+                  for (const point of aggregation.dataPoints) {
+                    point.attributes =
+                      point.attributes?.filter(
+                        ({ key, value }) =>
+                          safeAttributes.has(key) &&
+                          typeof value.stringValue === 'string' &&
+                          metricValues[key]?.has(value.stringValue),
+                      ) ?? []
+                    if ('exemplars' in point) point.exemplars = []
+                  }
                 }
               }
             }
           }
-        }
-        return json.metrics(data)
-      },
-    }
-  }),
-).pipe(Layer.provide(OtlpSerialization.layerJson))
+          return json.metrics(data)
+        },
+      }
+    }),
+  ).pipe(Layer.provide(OtlpSerialization.layerJson))
 
 const exportClient = (timeouts: Record<string, number>) =>
   Layer.effect(
@@ -349,6 +359,12 @@ export const telemetryLayer = (serviceName: string, env: Record<string, string |
       OTEL_EXPORTER_OTLP_METRICS_TIMEOUT: String(timeoutFor('METRICS')),
     },
   })
+  const nodeId =
+    serviceName !== 'baton-server' &&
+    env.BATON_TELEMETRY_NODE_ID &&
+    /^[0-9a-f-]{36}$/i.test(env.BATON_TELEMETRY_NODE_ID)
+      ? env.BATON_TELEMETRY_NODE_ID
+      : undefined
   const resource = {
     serviceName,
     serviceVersion: BUILD.version,
@@ -358,6 +374,7 @@ export const telemetryLayer = (serviceName: string, env: Record<string, string |
       'process.pid': process.pid,
       'os.type': process.platform,
       'host.arch': process.arch,
+      ...(nodeId ? { 'baton.node.id': nodeId } : {}),
     },
   }
   const exporter = Layer.mergeAll(
@@ -365,7 +382,7 @@ export const telemetryLayer = (serviceName: string, env: Record<string, string |
     OtlpLogger.layerFromConfig({ resource }),
     OtlpMetrics.layerFromConfig({ resource }),
   ).pipe(
-    Layer.provide(privateSerialization),
+    Layer.provide(privateSerialization(nodeId)),
     Layer.provide(exportClient(timeouts)),
     Layer.provide(ConfigProvider.layer(provider)),
   )

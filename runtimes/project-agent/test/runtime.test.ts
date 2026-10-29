@@ -644,6 +644,41 @@ for (const crashPoint of ['wait_tool', 'poll_wake']) {
   })
 }
 
+test('SIGTERM stops the real Runtime while a local model is hanging', async () => {
+  const backend = new Backend()
+  const child = spawn(process.execPath, ['--import', 'tsx', 'test/hung-runtime-worker.ts'], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, BATON_PROJECT_RUNTIME_TRANSPORT: 'stdio' },
+  })
+  const exited = once(child, 'exit')
+  const modelStarted = new Promise<void>((resolve) => {
+    child.stderr.on('data', (chunk) => {
+      if (String(chunk).includes('model-waiting')) resolve()
+    })
+  })
+  const requests = (async () => {
+    for await (const raw of frames(child.stdout)) {
+      const frame = raw as { id: number; request: any }
+      const data = await backend.call(frame.request)
+      await writeFrame(child.stdin, { id: frame.id, result: { type: 'project_runtime.result', ok: true, data } })
+    }
+  })()
+  try {
+    await modelStarted
+    child.kill('SIGTERM')
+    const [code, signal] = await exited
+    assert.equal(code, null)
+    assert.equal(signal, 'SIGTERM')
+    await requests
+    assert.ok(!backend.calls.includes('append_event'))
+    assert.ok(!backend.calls.includes('call_tool'))
+    assert.ok(!backend.calls.includes('finish'))
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+    child.stdin.destroy()
+  }
+})
+
 test('faux 恢复结尾表的四种情况和部分工具结果', async () => {
   for (const ending of ['assistant', 'pending', 'input', 'tool_result', 'compaction', 'partial']) {
     const b = new Backend()

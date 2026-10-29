@@ -3,6 +3,7 @@ import type { Models } from '@earendil-works/pi-ai'
 import { runtimeModels } from './auth.js'
 import { embed, EmbeddingError } from './embeddings.js'
 import { RuntimeError, type RPC } from './protocol.js'
+import { providerUsage, type RuntimeTelemetry } from './usage.js'
 
 const Output = Schema.Struct({
   changes: Schema.Array(Schema.Record(Schema.String, Schema.Json)).check(Schema.isMaxLength(16)),
@@ -18,6 +19,7 @@ export async function runMemory(
   maxOutputTokens = 32000,
   parent?: AbortSignal,
   providedModels?: Models,
+  telemetry?: RuntimeTelemetry,
 ): Promise<void> {
   const boot = await rpc.call({ operation: 'memory_bootstrap' })
   const signal = AbortSignal.any([AbortSignal.timeout(boot.max_duration_ms), ...(parent ? [parent] : [])])
@@ -30,20 +32,47 @@ export async function runMemory(
     const model = models.getModel(boot.provider, boot.model)
     if (!model) throw new RuntimeError('model_not_found')
     calls++
-    const stream = models.streamSimple(
-      model,
-      {
-        messages: [
-          { role: 'system', content: instruction, timestamp: 0 },
-          { role: 'user', content: JSON.stringify(content), timestamp: 0 },
-        ],
-      },
-      { maxTokens: Math.min(maxOutputTokens, model.maxTokens), maxRetries: 0, signal },
-    )
-    for await (const _event of stream) {
-      /* 完整回复通过中心校验后才提交。 */
+    const produce = async (annotate: (attributes: Record<string, unknown>) => void) => {
+      const stream = models.streamSimple(
+        model,
+        {
+          messages: [
+            { role: 'system', content: instruction, timestamp: 0 },
+            { role: 'user', content: JSON.stringify(content), timestamp: 0 },
+          ],
+        },
+        {
+          maxTokens: Math.min(maxOutputTokens, model.maxTokens),
+          maxRetries: 0,
+          signal,
+          onProviderStreamEvent: (event, providerModel) => {
+            const usage = providerUsage(providerModel.api, event)
+            if (Object.keys(usage).length)
+              annotate({
+                'baton.usage.reported': true,
+                ...(usage.input === undefined ? {} : { 'gen_ai.usage.input_tokens': usage.input }),
+                ...(usage.output === undefined ? {} : { 'gen_ai.usage.output_tokens': usage.output }),
+                ...(usage.cached === undefined ? {} : { 'baton.usage.cached_input_tokens': usage.cached }),
+              })
+          },
+        },
+      )
+      for await (const _event of stream) {
+        /* 完整回复通过中心校验后才提交。 */
+      }
+      return stream.result()
     }
-    const response = await stream.result()
+    const response = telemetry
+      ? await telemetry.span(
+          `chat ${model.id}`,
+          {
+            'gen_ai.provider.name': model.provider,
+            'gen_ai.request.model': model.id,
+            'baton.usage.reported': false,
+          },
+          produce,
+        )
+      : await produce(() => {})
     if (response.stopReason === 'error' || response.stopReason === 'aborted')
       throw new RuntimeError('model_request_failed')
     usages.push(response.usage ?? null)

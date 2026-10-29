@@ -7,6 +7,7 @@ import type * as Scope from 'effect/Scope'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { NodeHttpServer } from '@effect/platform-node'
 import * as P from '@baton/protocol'
+import { withTraceSpan } from '@baton/telemetry'
 import * as Auth from './auth.ts'
 import * as Nodes from './nodes.ts'
 import * as Threads from './threads/index.ts'
@@ -165,7 +166,14 @@ export const startServer = (
                     try {
                       const data = await run(
                         'project_request',
-                        Projects.runtimeRequest(source, body, (event) => gateway.notify(source.employee_id, event)),
+                        withTraceSpan(
+                          Projects.runtimeRequest(source, body, (event) => gateway.notify(source.employee_id, event)),
+                          'baton.project.request',
+                          body.trace,
+                          {
+                            attributes: { 'baton.project.run.id': body.run_id, 'baton.node.id': source.node_id },
+                          },
+                        ),
                       )
                       return Schema.decodeUnknownSync(P.ProjectRuntimeResult)({
                         type: 'project_runtime.result',
@@ -196,12 +204,17 @@ export const startServer = (
                   case 'thread.report': {
                     const ack = await run(
                       'report',
-                      Threads.processReport(source, body).pipe(
-                        Effect.tap(() =>
-                          notifyThreadChanged(source.employee_id, body.thread_id, (event) =>
-                            gateway.notify(source.employee_id, event),
+                      withTraceSpan(
+                        Threads.processReport(source, body).pipe(
+                          Effect.tap(() =>
+                            notifyThreadChanged(source.employee_id, body.thread_id, (event) =>
+                              gateway.notify(source.employee_id, event),
+                            ),
                           ),
                         ),
+                        'baton.report.receive',
+                        body.trace_context,
+                        { attributes: { 'baton.thread.id': body.thread_id, 'baton.node.id': source.node_id } },
                       ),
                     )
                     return { ...ack }

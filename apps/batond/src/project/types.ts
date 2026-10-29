@@ -15,6 +15,7 @@ export interface ProjectClock {
 }
 export interface ProjectManagerOptions {
   dataDir: string
+  nodeId?: string
   runtimeCommand?: ProcessCommand
   watchdogCommand?: ProcessCommand
   clock?: ProjectClock

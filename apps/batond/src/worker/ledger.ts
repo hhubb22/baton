@@ -33,6 +33,7 @@ export interface Command {
   messageId?: string
 }
 export interface Message {
+  receivedAtMs?: number
   trace_context?: TraceContext
   input: AgentMessage
   digest: string

@@ -113,8 +113,9 @@ it('exports to a local OTLP capture endpoint on scope release and redacts automa
           telemetryLayer('test-worker', {
             OTEL_EXPORTER_OTLP_ENDPOINT: `http://127.0.0.1:${address.port}`,
             OTEL_RESOURCE_ATTRIBUTES:
-              'deployment.environment.name=test,secret=secret-resource,service.version=spoof,vcs.ref.head.revision=spoof',
+              'deployment.environment.name=test,secret=secret-resource,service.version=spoof,vcs.ref.head.revision=spoof,baton.node.id=spoof',
             OTEL_SERVICE_VERSION: 'spoof',
+            BATON_TELEMETRY_NODE_ID: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
             OTEL_BLRP_SCHEDULE_DELAY: '30',
             OTEL_METRIC_EXPORT_INTERVAL: '30',
           }),
@@ -138,6 +139,10 @@ it('exports to a local OTLP capture endpoint on scope release and redacts automa
     ])
     const resource = payload.resourceSpans[0]
     for (const signalResource of [resource, logs.resourceLogs[0], metrics.resourceMetrics[0]]) {
+      expect(signalResource.resource.attributes).toContainEqual({
+        key: 'baton.node.id',
+        value: { stringValue: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' },
+      })
       expect(signalResource.resource.attributes).toContainEqual({
         key: 'service.version',
         value: { stringValue: BUILD.version },

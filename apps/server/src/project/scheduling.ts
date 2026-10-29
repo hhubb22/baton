@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import type { ProjectRunCommand, RuntimeReport } from '@baton/protocol'
+import { captureTrace, decodeTrace } from '@baton/telemetry'
 import { dbError } from '../database.ts'
 import { nodeAllowsNewExecutionSQL } from '../nodes.ts'
 import { releaseMemoryAttempt, yieldMemoryToForeground } from './memory-jobs.ts'
@@ -54,6 +55,7 @@ export const listProjectRunCandidates = Effect.fn('listProjectRunCandidates')(fu
   return rows.map((row) => row.id)
 })
 export const scheduleProjectRun = Effect.fn('scheduleProjectRun')(function* (agentId: string) {
+  const placementTrace = yield* captureTrace
   yield* yieldMemoryToForeground(agentId)
   yield* projectTransaction(
     Effect.gen(function* () {
@@ -157,7 +159,7 @@ export const scheduleProjectRun = Effect.fn('scheduleProjectRun')(function* (age
       const runId = randomUUID(),
         epoch = Number(a.lease_epoch) + 1
       yield* sql`UPDATE project_agents SET lease_epoch=${epoch},lease_run_id=${runId},lease_until=clock_timestamp()+interval '60 seconds' WHERE id=${agentId}`
-      yield* sql`INSERT INTO agent_runs(id,employee_id,agent_id,node_id,lease_epoch,state,provider,model,placement_reason) VALUES(${runId},${a.employee_id},${agentId},${chosen},${epoch},'starting',${a.provider},${a.model},${reason})`
+      yield* sql`INSERT INTO agent_runs(id,employee_id,agent_id,node_id,lease_epoch,state,provider,model,placement_reason,trace_context) VALUES(${runId},${a.employee_id},${agentId},${chosen},${epoch},'starting',${a.provider},${a.model},${reason},COALESCE((SELECT trace_context FROM project_agent_input_queue WHERE agent_id=${agentId} AND delivered_seq IS NULL AND trace_context IS NOT NULL ORDER BY id LIMIT 1),(SELECT trace_context FROM agent_runs WHERE agent_id=${agentId} AND state='lost' AND trace_context IS NOT NULL ORDER BY lease_epoch DESC LIMIT 1),${placementTrace ? JSON.stringify(placementTrace) : null}::jsonb))`
       yield* sql`UPDATE project_agent_input_queue SET wake_required=true,wake_next_at=clock_timestamp(),wake_attempts=0 WHERE agent_id=${agentId} AND delivered_seq IS NULL AND source_type IN ${activeInputSQL(sql)}`
     }),
   )
@@ -181,9 +183,10 @@ type CommandRow = {
   command_attempts: number
   memory_kind: 'consolidation' | 'embedding' | null
   agent_id: string
+  trace_context: unknown
 }
 const columns = (sql: SqlClient.SqlClient) =>
-  sql`r.employee_id,r.id AS run_id,r.node_id,p.conn_id,r.lease_epoch,r.provider,r.model,a.project_id,c.id AS conversation_id,r.command_attempts,a.id AS agent_id,(SELECT kind FROM project_memory_jobs WHERE id=r.memory_job_id) AS memory_kind`
+  sql`r.employee_id,r.id AS run_id,r.node_id,p.conn_id,r.lease_epoch,r.provider,r.model,a.project_id,c.id AS conversation_id,r.command_attempts,a.id AS agent_id,r.trace_context,(SELECT kind FROM project_memory_jobs WHERE id=r.memory_job_id) AS memory_kind`
 const command = (kind: ProjectRunCommand['type'], row: CommandRow): ProjectCommandDelivery => ({
   employee_id: row.employee_id,
   node_id: row.node_id,
@@ -196,6 +199,7 @@ const command = (kind: ProjectRunCommand['type'], row: CommandRow): ProjectComma
     model: row.model,
     project_id: row.project_id,
     conversation_id: row.conversation_id,
+    ...(decodeTrace(row.trace_context) ? { trace: decodeTrace(row.trace_context)! } : {}),
     ...(row.memory_kind ? { memory_kind: row.memory_kind } : {}),
   },
 })

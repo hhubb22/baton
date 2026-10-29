@@ -251,10 +251,12 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
         if (!agentType || !values.cwd || !values.state)
           throw new Error('Agent host needs an Agent type, --cwd and --state')
         const { runAgentHostCommand } = await import('./cli/agent-host.ts')
+        const telemetryEnv = { ...process.env }
+        for (const name of Object.keys(process.env)) if (name.startsWith('OTEL_')) delete process.env[name]
         await Effect.runPromise(
           Effect.scoped(
             runAgentHostCommand(agentType, { workingDirectory: values.cwd, privateDirectory: values.state }),
-          ),
+          ).pipe(Effect.provide(telemetryLayer('baton-agent-host', telemetryEnv))),
           { signal: controller.signal },
         )
       }

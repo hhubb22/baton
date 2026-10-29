@@ -10,8 +10,23 @@ import {
   type WorkerOpenConfig,
 } from '@baton/protocol'
 import { CommitUnknown } from '@baton/sqlite'
+import { HttpTraceContext } from 'effect/http'
 import { captureTrace, traceParent, withTraceSpan } from '@baton/telemetry'
-import { Cause, Deferred, Effect, Exit, Fiber, Queue, Schema, Scope, Stream } from 'effect'
+import {
+  Cause,
+  Clock,
+  Context,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Option,
+  Queue,
+  Schema,
+  Scope,
+  Stream,
+  Tracer,
+} from 'effect'
 import type { ProcessRecord } from '../platform/process-types.ts'
 import { agentCatalog } from '../agents/catalog.ts'
 import {
@@ -141,6 +156,18 @@ const commandAction = (type: string): WorkerCommandAction | undefined => {
 export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOptions) {
   const parentScope = yield* Effect.scope
   const scope = yield* Scope.make()
+  const clock = yield* Clock.Clock
+  const tracer = yield* Tracer.Tracer
+  const turns = new Map<string, { span: Tracer.Span; started: number; output: boolean; usage: boolean }>()
+  yield* Effect.addFinalizer(() =>
+    Effect.sync(() => {
+      for (const { span } of turns.values()) {
+        span.attribute('baton.turn.result', 'lost')
+        span.end(clock.currentTimeNanosUnsafe(), Exit.void)
+      }
+      turns.clear()
+    }),
+  )
   const ledger = yield* openWorkerLedger({
     dbPath: options.dbPath,
     ...(options.dataDirectory === undefined ? {} : { dataDirectory: options.dataDirectory }),
@@ -186,12 +213,25 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
   ) {
     const config = draft.config
     if (!config) return
+    const messageId =
+      fields.client_message_id ??
+      (fields.command_id ? draft.commands[fields.command_id]?.messageId : undefined) ??
+      draft.activeMessage
+    const message = messageId ? draft.messages[messageId] : undefined
+    const turn = messageId ? turns.get(messageId) : undefined
+    const trace = turn
+      ? {
+          traceparent: HttpTraceContext.toHeaders(turn.span).traceparent!,
+          ...(message?.trace_context?.tracestate ? { tracestate: message.trace_context.tracestate } : {}),
+        }
+      : message?.trace_context
     draft.outbox.push({
       acked: false,
       ...(replyEvidence ? { replyEvidence } : {}),
       ...(kind === 'turn.item' && fields.item ? { itemId: fields.item.id } : {}),
       report: {
         type: 'thread.report',
+        ...(trace ? { trace_context: trace } : {}),
         thread_id: config.thread_id,
         storage_generation: config.storage_generation,
         event_id: randomUUID(),
@@ -345,6 +385,68 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       })
       yield* ledger.save(draft).pipe(Effect.catch((cause) => freeze(cause).pipe(Effect.andThen(Effect.fail(frozen!)))))
       state = draft
+      for (const message of Object.values(state.messages)) {
+        if (message.input.mode !== 'queue') continue
+        let turn = turns.get(message.input.id)
+        if (
+          !turn &&
+          message.turn !== undefined &&
+          !message.ended &&
+          (message.state === 'intent' || message.state === 'sent')
+        ) {
+          const parent = traceParent(message.trace_context)
+          const command = Object.values(state.commands).find((entry) => entry.messageId === message.input.id)
+          const started = message.receivedAtMs ?? message.startedAtMs ?? clock.currentTimeMillisUnsafe()
+          const span = tracer.span({
+            name: 'baton.turn',
+            parent: parent ? Option.some(parent) : Option.none(),
+            annotations: Context.empty(),
+            links: [],
+            kind: 'internal',
+            root: !parent,
+            sampled: parent?.sampled ?? true,
+            startTime: BigInt(Math.floor(started)) * 1_000_000n,
+          })
+          const attributes = {
+            'baton.thread.id': state.config?.thread_id ?? '',
+            'baton.agent': state.config?.agent_type ?? '',
+            'baton.node.id': state.config?.node_id ?? '',
+            'baton.command.action': 'message',
+            'baton.turn.seq': message.turn,
+            ...(command ? { 'baton.command.id': command.receipt.command_id } : {}),
+            ...(message.input.model ? { 'gen_ai.request.model': message.input.model } : {}),
+          }
+          for (const [key, value] of Object.entries(attributes)) span.attribute(key, value)
+          turn = {
+            span,
+            started,
+            output: false,
+            usage: false,
+          }
+          turns.set(message.input.id, turn)
+        }
+        if (!turn) continue
+        if (message.turn !== undefined) turn.span.attribute('baton.turn.seq', message.turn)
+        if (message.ended) {
+          const last = state.outbox.findLast(
+            (entry) => entry.report.kind === 'turn.ended' && entry.report.client_message_id === message.input.id,
+          )
+          const reason = last?.report.reason
+          const result =
+            reason === 'completed'
+              ? 'completed'
+              : reason === 'failed'
+                ? 'failed'
+                : reason === 'stopped'
+                  ? 'stopped'
+                  : 'unknown'
+          turn.span.attribute('baton.turn.result', result)
+          if (result === 'failed') turn.span.attribute('baton.error.code', 'turn_failed')
+          turn.span.attribute('baton.usage.reported', turn.usage)
+          turn.span.end(clock.currentTimeNanosUnsafe(), result === 'failed' ? Exit.fail('turn_failed') : Exit.void)
+          turns.delete(message.input.id)
+        }
+      }
       const active = state.activeMessage ? state.messages[state.activeMessage] : undefined
       const turn = active && !active.ended ? `${active.input.id}:${active.turn}` : undefined
       if (turn !== outputTurn) {
@@ -388,6 +490,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
           const result = yield* Effect.exit(
             withTraceSpan(task, `baton.worker.${op.kind}`, durableTrace, {
               kind: 'internal',
+              ...(op.messageId && turns.get(op.messageId) ? { parent: turns.get(op.messageId)!.span } : {}),
               attributes: { 'baton.thread.id': state.config?.thread_id ?? '', 'baton.recovery': op.kind === 'recover' },
             }),
           )
@@ -433,6 +536,11 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
     )
       return
     outputExecution = event.executionId
+    const turn = turns.get(message.input.id)
+    if (turn && !turn.output && event.text) {
+      turn.output = true
+      turn.span.attribute('baton.turn.first_output_ms', Math.max(0, clock.currentTimeMillisUnsafe() - turn.started))
+    }
     const replyId = event.replyId === undefined ? undefined : safeReplyId(event.replyId)
     if (replyId !== outputReplyId) {
       output.reset()
@@ -666,6 +774,33 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         yield* uncertain('Agent execution identity mismatch')
         return
       }
+      if (event.type === 'model') {
+        turns.get(event.messageId)?.span.attribute('gen_ai.request.model', event.model)
+        return
+      }
+      if (event.type === 'item' || event.type === 'reply') {
+        const turn = turns.get(event.messageId)
+        if (turn && !turn.output) {
+          turn.output = true
+          turn.span.attribute('baton.turn.first_output_ms', Math.max(0, clock.currentTimeMillisUnsafe() - turn.started))
+        }
+      }
+      if (event.type === 'end' && event.tokenUsage !== undefined) {
+        const turn = turns.get(event.messageId)
+        if (turn && event.tokenUsage && typeof event.tokenUsage === 'object' && !Array.isArray(event.tokenUsage)) {
+          for (const [source, target] of [
+            ['inputTokens', 'gen_ai.usage.input_tokens'],
+            ['outputTokens', 'gen_ai.usage.output_tokens'],
+            ['cachedInputTokens', 'baton.usage.cached_input_tokens'],
+          ] as const) {
+            const value: unknown = Reflect.get(event.tokenUsage, source)
+            if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+              turn.usage = true
+              turn.span.attribute(target, value)
+            }
+          }
+        }
+      }
       if (event.type === 'end' && state.phase === 'unknown') {
         if (event.tokenUsage !== undefined)
           yield* commit((draft) => {
@@ -764,6 +899,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         } else {
           cancelQuestions(draft, 'Current reply ended')
           current.ended = true
+          if (event.tokenUsage !== undefined) current.tokenUsage = event.tokenUsage
           report(draft, 'turn.ended', {
             worker_turn_seq: current.turn!,
             client_message_id: event.messageId,
@@ -1431,6 +1567,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
             configurable: true,
             value: {
               state: 'queued',
+              receivedAtMs: clock.currentTimeMillisUnsafe(),
               ...(request.trace_context ? { trace_context: request.trace_context } : {}),
               digest: messageDigest,
               input: {

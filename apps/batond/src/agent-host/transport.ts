@@ -118,7 +118,13 @@ export const connectAgentHost = (
         {
           ...options.command,
           args: [...(options.command.args ?? []), ...agentHostArguments(options.agentType, options.paths)],
-          env: agentEnvironment(options.agentType),
+          env: {
+            ...agentEnvironment(options.agentType),
+            ...Object.fromEntries(Object.entries(process.env).filter(([name]) => name.startsWith('OTEL_'))),
+            ...(process.env.BATON_TELEMETRY_NODE_ID
+              ? { BATON_TELEMETRY_NODE_ID: process.env.BATON_TELEMETRY_NODE_ID }
+              : {}),
+          },
           cwd: options.paths.workingDirectory,
         },
         {

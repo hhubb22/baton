@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@baton/protocol": "workspace:*",
+    "@baton/telemetry": "workspace:*",
     "@earendil-works/pi-agent-core": "1.3.0",
     "@earendil-works/pi-ai": "1.3.0",
     "proper-lockfile": "4.1.2",

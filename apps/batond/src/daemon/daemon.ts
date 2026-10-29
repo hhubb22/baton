@@ -4,7 +4,9 @@ import { unlink, chmod, lstat } from 'node:fs/promises'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { Cause, Context, Effect, Exit, Schema, Tracer } from 'effect'
+import { Cause, Context, Effect, Exit, Option, Schema, Tracer } from 'effect'
+import { HttpTraceContext } from 'effect/http'
+import { traceParent } from '@baton/telemetry'
 import type * as Scope from 'effect/Scope'
 import {
   ControlToNodeBody,
@@ -123,6 +125,7 @@ async function connected(options: {
   connection: DaemonConnection
   signal: AbortSignal
   identity: NodeIdentity
+  tracer: Tracer.Tracer
   incarnation: string
   heartbeatMs: number
   controlTimeoutMs: number
@@ -151,7 +154,7 @@ async function connected(options: {
   let reportAcked = ''
   let upgradePending: { id: string; state: NodeUpgradeState; hash: string; sent: number } | undefined
   let upgradeAcked = ''
-  const sentReports = new Map<string, { report: ThreadReport; sentAt: number }>()
+  const sentReports = new Map<string, { report: ThreadReport; sentAt: number; span: Tracer.Span }>()
   const reportAttempts: number[] = []
   const reportRetryMs = Math.max(1000, options.heartbeatMs)
   let reportEpoch = 0
@@ -201,9 +204,30 @@ async function connected(options: {
     while (reportAttempts.length && reportAttempts[0]! <= now - 1000) reportAttempts.shift()
     if (reportAttempts.length >= 32 || (!sentReports.has(report.event_id) && sentReports.size >= 8)) return false
     // Reserve the window before writing so a fast ACK can release the matching entry.
-    sentReports.set(report.event_id, { report, sentAt: now })
+    const parent = traceParent(report.trace_context)
+    const span =
+      sentReports.get(report.event_id)?.span ??
+      options.tracer.span({
+        name: 'baton.report',
+        parent: parent ? Option.some(parent) : Option.none(),
+        annotations: Context.empty(),
+        links: [],
+        startTime: BigInt(Date.now()) * 1_000_000n,
+        kind: 'internal',
+        root: !parent,
+        sampled: parent?.sampled ?? true,
+      })
+    span.attribute('baton.thread.id', report.thread_id)
+    span.attribute('baton.node.id', identity.node_id)
+    sentReports.set(report.event_id, { report, sentAt: now, span })
     reportAttempts.push(now)
-    await envelope(report)
+    await envelope({
+      ...report,
+      trace_context: {
+        traceparent: HttpTraceContext.toHeaders(span).traceparent!,
+        ...(report.trace_context?.tracestate ? { tracestate: report.trace_context.tracestate } : {}),
+      },
+    })
     // Keep the window conservative when encoding or transport delays the actual write.
     reportAttempts[reportAttempts.length - 1] = performance.now()
     return true
@@ -354,13 +378,17 @@ async function connected(options: {
         await ledgerPromise(ledger.acknowledge(body))
         if (body.ok) {
           const sent = sentReports.get(body.event_id)
-          if (sent?.report.thread_id === body.thread_id && sent.report.worker_seq === body.worker_seq)
+          if (sent?.report.thread_id === body.thread_id && sent.report.worker_seq === body.worker_seq) {
+            sent.span.end(BigInt(Date.now()) * 1_000_000n, Exit.void)
             sentReports.delete(body.event_id)
+          }
         } else if (body.expected_worker_seq !== undefined) {
           reportEpoch++
           for (const [id, sent] of sentReports)
-            if (sent.report.thread_id === body.thread_id && sent.report.worker_seq >= body.expected_worker_seq)
+            if (sent.report.thread_id === body.thread_id && sent.report.worker_seq >= body.expected_worker_seq) {
+              sent.span.end(BigInt(Date.now()) * 1_000_000n, Exit.fail('report_rejected'))
               sentReports.delete(id)
+            }
         }
         continue
       }
@@ -448,6 +476,7 @@ async function connected(options: {
     if (failure) throw failure
     if (!signal.aborted) throw new Error('节点连接已断开')
   } finally {
+    for (const sent of sentReports.values()) sent.span.end(BigInt(Date.now()) * 1_000_000n, Exit.fail('disconnected'))
     abort()
     projectRPC.close()
     projects?.onDisconnect()
@@ -516,6 +545,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
     )
     yield* attempt(() => writeDaemonStatus(options.dataDirectory, 'connecting'))
     const identity = options.identity ?? (yield* attempt(() => loadIdentity(options.dataDirectory)))
+    const tracer = yield* Tracer.Tracer
     let address = options.relayURL
     if (!address) {
       if (!identity.coordinator_url) return yield* Effect.fail(new Error('身份缺少中心地址，需要 --relay'))
@@ -600,6 +630,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
                 connection,
                 signal,
                 identity,
+                tracer,
                 incarnation,
                 heartbeatMs,
                 controlTimeoutMs: controlTimeoutSeconds * 1000,
@@ -708,6 +739,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
             makeProjectManager({
               ...options.project,
               dataDir: options.dataDirectory,
+              nodeId: identity.node_id,
               onReportChanged: () => {
                 devicesDirty = true
                 options.project?.onReportChanged?.()

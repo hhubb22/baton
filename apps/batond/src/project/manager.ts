@@ -243,7 +243,8 @@ class Manager implements ProjectManager {
     if (upgradeOffline(await readUpgradeState(this.options.dataDir)))
       throw new IPCError('node_upgrading', '设备已准备升级')
     const queued = this.serial.then(async () => {
-      const id = createHash('sha256').update(JSON.stringify(command)).digest('hex')
+      const { trace: _trace, ...content } = command
+      const id = createHash('sha256').update(JSON.stringify(content)).digest('hex')
       await safePromise(this.ledger.enqueue(id, command))
       if (
         (await upgradePaused(this.options.dataDir)) &&
@@ -405,6 +406,7 @@ class Manager implements ProjectManager {
           BATON_PROJECT_RUNTIME_TRANSPORT: 'stdio',
           BATON_PROJECT_RUN_ID: run.command.run_id,
           BATON_PROJECT_LEASE_EPOCH: String(run.command.lease_epoch),
+          ...(this.options.nodeId ? { BATON_TELEMETRY_NODE_ID: this.options.nodeId } : {}),
         },
         (child) => {
           stdio = serveRuntime(
@@ -551,12 +553,17 @@ class Manager implements ProjectManager {
       let result = await this.call(request, run.cancel.signal, 30000)
       result = run.waits.finish(call, request, result, started)
       this.lease(run)
-      if (result.ok && request.operation === 'bootstrap') {
+      if (result.ok && (request.operation === 'bootstrap' || request.operation === 'memory_bootstrap')) {
         const data = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Json))(result.data)
         if (data._tag === 'None') return failure('unavailable')
         result = Schema.decodeUnknownSync(ProjectRuntimeResult)({
           ...result,
-          data: { ...data.value, local_wait_protocol: 1 },
+          data: {
+            ...data.value,
+            ...(request.operation === 'bootstrap' ? { local_wait_protocol: 1 } : {}),
+            ...(run.command.project_id ? { project_id: run.command.project_id } : {}),
+            ...(run.command.trace ? { trace: run.command.trace } : {}),
+          },
         })
       }
       if (

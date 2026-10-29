@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vite-plus/test'
+import { withTraceSpan } from '@baton/telemetry'
 import type { Project, RuntimeProvider, RuntimeReport } from '@baton/protocol'
 import { seedNode, withTestDatabase } from '../testing/database.ts'
 import * as projects from './projects.ts'
@@ -17,6 +18,27 @@ const report = (status: RuntimeProvider['status'], capacity = 4): RuntimeReport 
 
 const statuses: RuntimeProvider['status'][] = ['unknown', 'login_required']
 describe('Project provider admission and capacity', () => {
+  it('keeps the incoming message trace in the durable run command', async () => {
+    await withTestDatabase(async ({ run }) => {
+      const node = await seedNode(run, { report: report('available') })
+      const project = await run(
+        projects.createProject(node.employeeId, { title: 'Tracing', provider: 'openai-codex', model: 'gpt-5' }),
+      )
+      await run(
+        withTraceSpan(
+          projects.acceptProjectMessage(node.employeeId, project.id, {
+            client_message_id: randomUUID(),
+            content: 'start',
+          }),
+          'test.message',
+          { traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01` },
+        ),
+      )
+      await run(projects.scheduleProjectRun(project.agent.id))
+      const [delivery] = await run(projects.claimProjectCommands('project_run_start'))
+      expect(delivery?.command.trace?.traceparent.split('-')[1]).toBe('a'.repeat(32))
+    })
+  })
   it('binds an API connection to its owning device and rejects another employee’s device', async () => {
     await withTestDatabase(async ({ run }) => {
       const provider = `api-${randomUUID()}`

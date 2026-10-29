@@ -12,7 +12,7 @@ import {
   type WorkerOpenConfig,
   type WorkerRequest,
 } from '@baton/protocol'
-import { Deferred, Effect, Fiber, Logger, Option, Queue, Schema, Stream, Tracer } from 'effect'
+import { Clock, Deferred, Effect, Exit, Fiber, Logger, Option, Queue, Schema, Stream, Tracer } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { vi } from 'vite-plus/test'
 import { TestClock } from 'effect/testing'
@@ -215,6 +215,101 @@ const readyWorker = Effect.fnUntraced(function* (dbPath: string) {
 })
 
 describe('reliable Worker', () => {
+  it.effect('keeps the Turn span open through output and ends it with reported usage', () =>
+    fixture((dbPath) => {
+      const spans: Tracer.NativeSpan[] = []
+      const tracer = Tracer.make({
+        span(options) {
+          const span = new Tracer.NativeSpan(options)
+          spans.push(span)
+          return span
+        },
+      })
+      return Effect.gen(function* () {
+        const { cfg, f, worker } = yield* readyWorker(dbPath)
+        const input = message(cfg)
+        yield* worker.handle(input)
+        yield* completed(worker, input.command_id!)
+        const turn = spans.find((span) => span.name === 'baton.turn')!
+        expect(turn.status._tag).toBe('Started')
+        yield* Queue.offer(f.events, event(input.client_message_id!, 'reply'))
+        yield* Queue.offer(f.events, {
+          ...delta(input.client_message_id!, ''),
+          type: 'end',
+          outcome: 'completed',
+          tokenUsage: { inputTokens: 0, outputTokens: 3 },
+        })
+        yield* until(reports(worker), (items) => items.some((item) => item.kind === 'turn.ended'))
+        expect(turn.status._tag).toBe('Ended')
+        expect(turn.attributes.get('baton.turn.seq')).toBe(1)
+        expect(turn.attributes.get('baton.turn.result')).toBe('completed')
+        expect(turn.attributes.get('baton.turn.first_output_ms')).toEqual(expect.any(Number))
+        expect(turn.attributes.get('baton.usage.reported')).toBe(true)
+        expect(turn.attributes.get('gen_ai.usage.input_tokens')).toBe(0)
+      }).pipe(Effect.provideService(Tracer.Tracer, tracer))
+    }),
+  )
+
+  it.effect('marks a failed Turn without exporting the provider error text', () =>
+    fixture((dbPath) => {
+      const spans: Tracer.NativeSpan[] = []
+      const tracer = Tracer.make({
+        span(options) {
+          const span = new Tracer.NativeSpan(options)
+          spans.push(span)
+          return span
+        },
+      })
+      return Effect.gen(function* () {
+        const { cfg, f, worker } = yield* readyWorker(dbPath)
+        const input = message(cfg)
+        yield* worker.handle(input)
+        yield* completed(worker, input.command_id!)
+        yield* Queue.offer(f.events, {
+          ...delta(input.client_message_id!, ''),
+          type: 'end',
+          outcome: 'failed',
+          reason: 'private provider error',
+        })
+        yield* until(reports(worker), (items) => items.some((item) => item.kind === 'turn.ended'))
+        const turn = spans.find((span) => span.name === 'baton.turn')!
+        expect(turn.attributes.get('baton.turn.result')).toBe('failed')
+        expect(turn.attributes.get('baton.error.code')).toBe('turn_failed')
+        expect(turn.attributes.get('baton.usage.reported')).toBe(false)
+        expect(turn.status._tag === 'Ended' && Exit.isFailure(turn.status.exit)).toBe(true)
+        expect(JSON.stringify([...turn.attributes])).not.toContain('private provider error')
+      }).pipe(Effect.provideService(Tracer.Tracer, tracer))
+    }),
+  )
+
+  it.effect('starts the Turn timing at message receipt after a queued wait', () =>
+    fixture((dbPath) => {
+      const spans: Tracer.NativeSpan[] = []
+      const tracer = Tracer.make({
+        span(options) {
+          const span = new Tracer.NativeSpan(options)
+          spans.push(span)
+          return span
+        },
+      })
+      return Effect.gen(function* () {
+        const { cfg, f, worker } = yield* readyWorker(dbPath)
+        const release = yield* Deferred.make<void>()
+        f.prepareTask = Deferred.await(release)
+        const clock = yield* Clock.Clock
+        const before = clock.currentTimeMillisUnsafe()
+        const input = message(cfg)
+        yield* worker.handle(input)
+        yield* called(f, `prepare:${input.client_message_id}`)
+        expect(spans.some((span) => span.name === 'baton.turn')).toBe(false)
+        yield* TestClock.adjust('5 seconds')
+        yield* Deferred.succeed(release, undefined)
+        yield* completed(worker, input.command_id!)
+        const turn = spans.find((span) => span.name === 'baton.turn')!
+        expect(turn.status.startTime).toBe(BigInt(before) * 1_000_000n)
+      }).pipe(Effect.provideService(Tracer.Tracer, tracer))
+    }),
+  )
   it.effect('returns the current execution identity only while a freshly queried turn is active', () =>
     fixture((dbPath) =>
       Effect.gen(function* () {
@@ -1335,7 +1430,9 @@ describe('reliable Worker', () => {
           )
           const sent = spans.find((span) => span.name === 'baton.worker.send')
           expect(sent?.traceId).toBe('a'.repeat(32))
-          expect(sent && Option.getOrUndefined(sent.parent)?.spanId).toBe(durableSpan)
+          const turn = spans.find((span) => span.name === 'baton.turn')
+          expect(turn && Option.getOrUndefined(turn.parent)?.spanId).toBe(durableSpan)
+          expect(sent && Option.getOrUndefined(sent.parent)?.spanId).toBe(turn?.spanId)
           const retried = spans.find((span) => span.name === 'baton.worker.receive' && span.traceId === 'c'.repeat(32))
           expect(retried?.links[0]?.span.spanId).toBe(durableSpan)
         }),

@@ -1,6 +1,6 @@
 import { readFile, realpath } from 'node:fs/promises'
 import { resolve, relative, extname, isAbsolute, sep } from 'node:path'
-import { Cause, Effect, Layer } from 'effect'
+import { Cause, Effect, Exit, Layer } from 'effect'
 import { NodeHttpPlatform } from '@effect/platform-node'
 import { HttpRouter, HttpServer } from 'effect/http'
 import * as Request from 'effect/http/HttpServerRequest'
@@ -9,7 +9,7 @@ import * as SqlClient from 'effect/sql/SqlClient'
 import { HttpApiBuilder } from 'effect/http-api'
 import { BatonHttpApi, httpOpenApi } from '@baton/protocol/http-api'
 import { Schema } from 'effect'
-import { traceFromHeaders, withTraceSpan } from '@baton/telemetry'
+import { captureTrace, traceFromHeaders, withTraceSpan } from '@baton/telemetry'
 import { UUID } from '@baton/protocol'
 import { createDownloads } from '../downloads.ts'
 import * as Nodes from '../nodes.ts'
@@ -201,15 +201,39 @@ export const httpApplication = (options: HTTPOptions) =>
           Effect.map((response) => Response.setHeader(response, 'cache-control', 'no-store')),
         )
       })
-      return yield* withTraceSpan(operation, 'baton.http.request', traceFromHeaders(request.headers), {
-        kind: 'server',
-        attributes: { 'http.request.method': request.method, 'http.route': httpRouteTemplate(request.method, path) },
-      }).pipe(
+      let responseTrace: string | undefined
+      return yield* withTraceSpan(
+        Effect.gen(function* () {
+          responseTrace = (yield* captureTrace)?.traceparent
+          const result = yield* Effect.exit(operation)
+          if (Exit.isFailure(result)) {
+            if (!Cause.hasInterrupts(result.cause)) {
+              const failure = httpFailure(Cause.squash(result.cause), requestId)
+              yield* Effect.annotateCurrentSpan({
+                'http.response.status_code': failure.status,
+                'baton.error.code': failure.code,
+              })
+            }
+            return yield* Effect.failCause(result.cause)
+          }
+          yield* Effect.annotateCurrentSpan({ 'http.response.status_code': result.value.status })
+          return result.value
+        }),
+        'baton.http.request',
+        traceFromHeaders(request.headers),
+        {
+          kind: 'server',
+          attributes: { 'http.request.method': request.method, 'http.route': httpRouteTemplate(request.method, path) },
+        },
+      ).pipe(
         Effect.catchCause((cause) => {
           if (Cause.hasInterrupts(cause)) return Effect.failCause(cause)
           const { status, ...body } = httpFailure(Cause.squash(cause), requestId)
           return Effect.succeed(json(body, status))
         }),
+        Effect.map((response) =>
+          responseTrace ? Response.setHeader(response, 'traceresponse', responseTrace) : response,
+        ),
         Effect.provideService(HttpRequestId, requestId),
       )
     })

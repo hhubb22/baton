@@ -219,6 +219,11 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
         }
         if (closed) return
         switch (event.type) {
+          case 'provider_session.updated': {
+            if (active && !active.ended && event.providerSession.model)
+              yield* emit({ ...identity(active), type: 'model', model: event.providerSession.model })
+            return
+          }
           case 'turn_item.updated': {
             const item = event.turnItem
             if (!active || active.ended || item.runId !== active.runId) return

@@ -17,6 +17,7 @@ import { IPCError, requestWorker } from './ipc.ts'
 import { readUpgradeState, upgradeOffline } from './upgrade.ts'
 import { workerPaths } from './paths.ts'
 import { FullOutputStore } from '../worker/full-output.ts'
+import { loadIdentity } from './identity.ts'
 
 export interface DaemonWorkerHost {
   ensureWorker(threadId: string): Promise<void>
@@ -147,7 +148,15 @@ export class LocalWorkerHost implements DaemonWorkerHost {
             const child = spawn(
               this.command.executable,
               [...this.command.args, 'worker', '--data-dir', paths.root, '--thread-id', threadId],
-              { detached: true, stdio: ['ignore', log.fd, log.fd], windowsHide: true },
+              {
+                detached: true,
+                stdio: ['ignore', log.fd, log.fd],
+                windowsHide: true,
+                env: {
+                  ...process.env,
+                  BATON_TELEMETRY_NODE_ID: (await loadIdentity(this.dataDirectory).catch(() => undefined))?.node_id,
+                },
+              },
             )
             child.on('error', () => undefined)
             child.unref()

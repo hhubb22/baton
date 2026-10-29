@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { Effect } from 'effect'
+import { captureTrace } from '@baton/telemetry'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
 import { dbError } from '../database.ts'
@@ -193,6 +194,7 @@ export const acceptProjectMessage = Effect.fn('acceptProjectMessage')(function* 
   project: string,
   input: P.ProjectMessageInput,
 ) {
+  const trace = yield* captureTrace
   if (Buffer.byteLength(input.content) > 64 * 1024) return yield* Effect.fail(projectError('too_large', 413))
   const value = yield* projectDecode(P.ProjectMessageInput, input)
   const p = yield* getProject(employee, project)
@@ -204,8 +206,8 @@ export const acceptProjectMessage = Effect.fn('acceptProjectMessage')(function* 
         key = 'user:' + value.client_message_id
       yield* checkPayloadSize(payload, 72 * 1024)
       const inserted =
-        yield* sql`INSERT INTO project_agent_input_queue(employee_id,agent_id,source_type,source_key,payload,payload_hash,wake_required)
- VALUES(${employee},${p.agent.id},'user_message',${key},${JSON.stringify(payload)}::jsonb,${createHash('sha256').update(canonical(payload)).digest()},true) ON CONFLICT(agent_id,source_key) DO NOTHING RETURNING id`
+        yield* sql`INSERT INTO project_agent_input_queue(employee_id,agent_id,source_type,source_key,payload,payload_hash,wake_required,trace_context)
+ VALUES(${employee},${p.agent.id},'user_message',${key},${JSON.stringify(payload)}::jsonb,${createHash('sha256').update(canonical(payload)).digest()},true,${trace ? JSON.stringify(trace) : null}::jsonb) ON CONFLICT(agent_id,source_key) DO NOTHING RETURNING id`
       if (inserted.length)
         yield* sql`UPDATE conversations SET next_attempt_at=NULL WHERE agent_id=${p.agent.id} AND state='active'`
       const [row] = yield* sql<{

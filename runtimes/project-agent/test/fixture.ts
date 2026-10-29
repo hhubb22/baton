@@ -221,6 +221,7 @@ export function setup(
     compaction?: Partial<CompactionSettings>
     budget?: Partial<ModelBudget>
     maxTokens?: number
+    telemetry?: ConstructorParameters<typeof ProjectRuntime>[5]
   } = {},
 ) {
   const faux = fauxProvider({
@@ -254,7 +255,14 @@ export function setup(
     }),
   )
   return {
-    runtime: new ProjectRuntime(backend, models, backend.timer(), options.compaction, options.budget),
+    runtime: new ProjectRuntime(
+      backend,
+      models,
+      backend.timer(),
+      options.compaction,
+      options.budget,
+      options.telemetry,
+    ),
     faux,
     requests,
   }

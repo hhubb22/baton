@@ -39,6 +39,17 @@ const request = (path: string, method = 'GET', body?: unknown, headers: Record<s
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     }),
   )
+it('returns the request trace context on both successful and failed HTTP responses', async () => {
+  const traceparent = `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`
+  for (const [path, status] of [
+    ['/api/v1/downloads', 200],
+    ['/api/v1/route-does-not-exist', 401],
+  ] as const) {
+    const response = await request(path, 'GET', undefined, { traceparent })
+    expect(response.status).toBe(status)
+    expect(response.headers.get('traceresponse')?.split('-')[1]).toBe('a'.repeat(32))
+  }
+})
 async function login(passwordValue: string, username = 'httpalice') {
   const response = await request('/api/v1/login', 'POST', { username, password: passwordValue })
   expect(response.status).toBe(200)

@@ -270,7 +270,10 @@ it('syncing 补报持久结果后重发 completed，收到完成回执才落盘�
   } satisfies DaemonWorkerHost
   const probe = vi.fn(async () => [])
   const daemon = start({ host, probe })
-  await vi.waitFor(() => expect(reports.map(({ body }) => body)).toEqual([opened, queued]))
+  await vi.waitFor(() =>
+    expect(reports.map(({ body: { trace_context: _trace, ...body } }) => body)).toEqual([opened, queued]),
+  )
+  expect(reports.every(({ body }) => body.trace_context?.traceparent)).toBe(true)
   await delay(150)
   expect(completed).toEqual([])
   expect(await upgradePaused(path)).toBe(true)

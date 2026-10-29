@@ -973,6 +973,14 @@ it('commits ordered turns and replies once, rolls back invalid reports, and requ
     expect((await run(threads.view({ employeeId: f.employee }, t.id))).last_worker_seq).toBe(4)
     const ack = await run(threads.processReport(f.source, reply))
     expect(await run(threads.processReport(f.source, reply))).toEqual(ack)
+    expect(
+      await run(
+        threads.processReport(f.source, {
+          ...reply,
+          trace_context: { traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01` },
+        }),
+      ),
+    ).toEqual(ack)
     await expect(run(threads.processReport(f.source, { ...reply, content: 'conflict' }))).rejects.toMatchObject({
       status: 409,
     })

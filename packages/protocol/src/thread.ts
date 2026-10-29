@@ -279,6 +279,7 @@ export type ThreadTurnItem = typeof ThreadTurnItem.Type
 
 export const ThreadReport = Schema.Struct({
   type: Schema.Literal('thread.report'),
+  trace_context: Schema.optionalKey(TraceContext),
   thread_id: UUID,
   event_id: UUID,
   worker_seq: PositiveInteger,

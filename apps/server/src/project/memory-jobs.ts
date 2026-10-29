@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { Effect, Result, Schema } from 'effect'
+import { captureTrace } from '@baton/telemetry'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
 import { AppError, type NodeSource } from '../errors.ts'
@@ -70,6 +71,7 @@ export const yieldMemoryToForeground = Effect.fnUntraced(function* (agentId: str
 })
 
 export const scheduleMemoryJobs = Effect.fn('scheduleMemoryJobs')(function* () {
+  const trace = yield* captureTrace
   yield* projectTransaction(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -161,7 +163,7 @@ export const scheduleMemoryJobs = Effect.fn('scheduleMemoryJobs')(function* () {
           claim_epoch: number
         }>`UPDATE project_memory_jobs SET state='claimed',attempt_id=${attempt},claim_epoch=claim_epoch+1,waiting_reason='',updated_at=clock_timestamp() WHERE id=${job.id} AND state='pending' RETURNING claim_epoch::float8 AS claim_epoch`
         if (!claimed) continue
-        yield* sql`INSERT INTO agent_runs(id,employee_id,agent_id,node_id,lease_epoch,state,provider,model,placement_reason,memory_job_id,memory_claim_until) SELECT ${attempt},${job.employee_id},id,${chosen},${claimed.claim_epoch},'starting',${j.provider},${j.model},'memory_idle',${job.id},clock_timestamp()+interval '60 seconds' FROM project_agents WHERE project_id=${job.project_id}`
+        yield* sql`INSERT INTO agent_runs(id,employee_id,agent_id,node_id,lease_epoch,state,provider,model,placement_reason,memory_job_id,memory_claim_until,trace_context) SELECT ${attempt},${job.employee_id},id,${chosen},${claimed.claim_epoch},'starting',${j.provider},${j.model},'memory_idle',${job.id},clock_timestamp()+interval '60 seconds',${trace ? JSON.stringify(trace) : null}::jsonb FROM project_agents WHERE project_id=${job.project_id}`
       }
     }),
   )
