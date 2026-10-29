@@ -8,6 +8,8 @@
 
 中心构建生成 bundle、相邻的网页和 SQL 迁移，输出布局见 [工具说明](../../tools/README.md#本地开发)。环境要求、账号、HTTPS、设备接入和通用配置见 [根文档](../../README.md)。
 
+中心可通过 `OTEL_EXPORTER_OTLP_ENDPOINT` 导出遥测。设置 `BATON_DEVICE_OTLP_ENDPOINT` 和可选 `BATON_DEVICE_OTLP_HEADERS` 可在设备同步时下发导出配置；设置 `BATON_WEB_OTLP_ENDPOINT`、`BATON_WEB_OTLP_KEY` 可向已登录网页提供采集地址和写入 key，`BATON_WEB_SESSION_REPLAY=masked` 才启用遮挡回放。配置、敏感字段和本地 ClickStack 示例见[可观测性设计](../../specs/observability/TECH.md)与[遥测包](../../packages/telemetry/README.md)。
+
 `node server.cjs --version` 无需数据库配置即可输出构建版本、提交、平台、协议与格式版本；默认身份为 `development`。公开只读的 `GET /api/v1/release` 返回相同发布元数据，无需登录，不访问或续期设备凭据；已登录诊断的 `release` 字段与其一致。构建参数见工具说明，节点身份验证后、登记连接和同步前按支持清单及协议版本核对；不兼容返回 `node_version_incompatible` 并关闭连接，不改写业务、outbox 或设备凭据。development 联调允许版本号不同，协议仍须一致。
 
 数据库迁移按文件版本记录，在事务 advisory lock 内串行执行；`serve`、`migrate` 和账号管理都会先执行并核对迁移。时间配置接受整数加 `ms`、`s`、`m`、`h`。
@@ -91,19 +93,11 @@ Project 工具 `threads.trace` 使用相同查询，参数为 `thread_id`、`wor
 
 `src/http/` 提供路由 handler、安全校验与静态文件服务，依赖 Gateway 的请求、通知、断线及诊断操作。`packages/protocol/src/http-api.ts` 使用 Effect `HttpApi` 定义登录、账号、设备、Thread、Project、记忆和诊断接口的路径、入参、响应与错误。服务端通过同一声明构建路由并验证请求和返回值。已登录且完成改密的员工可读取 `GET /api/v1/openapi.json`；文档由契约生成，写请求继续要求允许的 Origin 和会话 CSRF token。
 
-中心、节点和 Worker 使用 Effect 原生 tracing，默认服务名分别为 `baton-server`、`batond`、`baton-worker`。设置 `OTEL_EXPORTER_OTLP_ENDPOINT` 后，通过 OTLP/HTTP JSON 导出到其 `/v1/traces`；也可用 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` 指定完整地址。未配置地址时不发起导出请求。`OTEL_TRACES_EXPORTER=none` 可显式关闭，`OTEL_RESOURCE_ATTRIBUTES` 可附加部署属性。
+中心、节点、Worker、agent-host 和 Project Runtime 使用 Effect 原生 OTLP/HTTP 追踪、日志和指标。未配置地址时不发起导出请求；信号地址、关闭开关和资源属性见[遥测包](../../packages/telemetry/README.md)。
 
 HTTP 接受标准 `traceparent` 和可选 `tracestate`。命令的追踪上下文独立保存在中心 outbox、节点账本及 Worker 命令和消息记录中，经 WSS 和认证 IPC 传递；重连、重复派发和 Worker 恢复继续关联持久来源。追踪元数据不参与业务内容摘要或幂等判断。数据库查询耗时、事务事件和连接等待随 Effect span 导出，查询文本、绑定参数、消息正文、凭据及原始错误详情不导出。
 
-本地可用 Jaeger 查看追踪：
-
-```sh
-docker run --rm --name baton-tracing \
-  -p 127.0.0.1:16686:16686 -p 127.0.0.1:4318:4318 \
-  cr.jaegertracing.io/jaegertracing/jaeger:2.22.0
-```
-
-在中心和节点各自的终端设置 `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` 后启动进程，浏览器访问 `http://127.0.0.1:16686`。独立 Worker 继承导出配置。每个进程最多同时执行两个导出请求，等待响应头与读取响应体都受超时约束，最长三秒。导出超时或达到并发上限时丢弃当前批次，由 exporter 暂停导出六十秒后恢复；业务执行结果保持原样，关闭等待同样有界。
+本地 ClickStack 单容器、ingestion key 与 MCP 排障示例见 [AGENTS.md](../../AGENTS.md#遥测排障)。每个进程共享两个导出请求名额，等待响应头和读取响应体最长三秒；超时、失败或达到并发上限时丢弃当前批次并暂停六十秒，业务执行结果保持原样。
 
 ## 当前能力范围
 

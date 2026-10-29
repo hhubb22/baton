@@ -3,7 +3,7 @@
 Status: draft
 Basis: [行为规格](PRODUCT.md) R-01～R-25。Project Agent 见 [Project Agent TECH](../project-agent/TECH.md)。
 
-Thread 上游执行模式与首版遥测为待实施设计；其他章节记录现行架构。设备凭据按有效业务滑动计算 30 天闲置期限，原设备通过一次性凭据重新认证。后端与设备的发布基线、升级和恢复设计见 [release TECH](../release/TECH.md)。
+Thread 上游执行模式为待实施设计；其他章节记录现行架构。设备凭据按有效业务滑动计算 30 天闲置期限，原设备通过一次性凭据重新认证。后端与设备的发布基线、升级和恢复设计见 [release TECH](../release/TECH.md)。
 
 ## 全景
 
@@ -38,7 +38,7 @@ Worker 由 batond 用同一可执行文件的内部子命令启动，与 batond 
 | Project Runtime | Node.js、`@earendil-works/pi-agent-core` 与 `pi-ai`；stdio 连接节点宿主 |
 | 中心存储 | PostgreSQL 16+、`@effect/sql-pg`、参数化 SQL、版本化 SQL 迁移 |
 | 设备账本 | `node:sqlite`、WAL、FULL 同步；`@baton/sqlite` 提供串行事务与独立提交核查 |
-| 追踪 | Effect 原生 OTLP/HTTP，持久 trace context 关联 HTTP、outbox、WSS、IPC 与 Worker；默认不导出，过滤 SQL 文本、参数和错误详情 |
+| 可观测性 | Effect 原生 OTLP/HTTP，持久 trace context 关联 HTTP、outbox、WSS、IPC 与 Worker；默认不导出，过滤 SQL 文本、参数和错误详情。agent-host、Project Runtime、网页、日志与指标的设计见 [可观测性 TECH](../observability/TECH.md) |
 | Web | React、TypeScript、StyleX、Vite，从中心 bundle 旁的 `web/` 提供静态文件 |
 | 设备与中心通信 | `ws`、TLS WebSocket、版本化 JSON 信封 |
 | 构建与检查 | esbuild 生成 Node bundle，batond 使用 SEA；Vite+ 提供 Vitest、Oxlint、Oxfmt 与 TypeScript Go 检查，各包保留编译器检查 |
@@ -515,11 +515,11 @@ TypeScript 的 `GET /nodes/{id}/files` 通过 `root_id`、`path` 浏览目录和
 
 ### 首版遥测
 
-R-23 的待实施部分复用 `packages/telemetry/src/index.ts` 的 Effect OTLP/HTTP 导出、并发与超时限制。发布版本与提交写入构建元数据，由中心、daemon、Worker、agent-host 和 Runtime 各自报告；恢复或升级时读取实际运行程序元数据，不能把新 daemon 版本套在仍存活的旧 Worker 上。
+R-23 的首版遥测按 [可观测性 TECH](../observability/TECH.md) 实现，`packages/telemetry` 提供 OTLP/HTTP 追踪、日志和指标导出及有界并发。中心、daemon、Worker、agent-host 和 Runtime 各自报告构建元数据里的发布版本与提交。恢复或升级时读取实际运行程序的元数据，仍存活的旧 Worker 报告自己的旧版本。
 
-资源属性包含 `service.version`、源码提交、OS 与架构；业务 span 使用有界的节点、Project、运行、命令和 Thread 标识，以及 Agent/provider/model、固定错误码、等待原因、重试次数、停止/恢复结果、耗时与可选 token 用量。沿既有 trace context 关联，不以原始错误文本充当错误码。模型未报告 token 时字段缺省并标注未知，不写成零。
+trace 从网页贯穿到 agent-host 和 Project Runtime。每个 Turn 和每次 Project Run 有一个根 span，带有界的标识、Agent/provider/model、固定错误码、等待原因、重试次数、停止与恢复结果、耗时和 token 用量。模型未报告 token 时不写该字段，另用 `baton.usage.reported` 标明。等待状态的进出写成日志，积压和占用作为周期指标上报。traces、logs 和 metrics 共用一份属性白名单，查询、路径、消息、记忆、证据和工具正文不进导出。记忆的工作积压、召回降级与成本字段按 [memory TECH](../project-memory/TECH.md#可见性与实施边界)维护。
 
-现有导出白名单尚未覆盖这些业务属性，实施时在 `packages/telemetry` 统一增加明确字段，并限制资源属性、事件和错误详情的内容。查询、路径、消息、记忆、证据和工具正文不进导出。记忆的工作积压、召回降级与成本字段按 [memory TECH](../project-memory/TECH.md#可见性与实施边界)维护。未配置 OTLP 时保持现有本地诊断，不连接采集端；内部部署可显式启用，导出阻塞与失败继续有界丢弃，不阻塞业务。发布与升级的版本关联验收见 RL-A09。
+未配置 OTLP 时保持现有本地诊断，不连接采集端。中心可以把设备的导出配置随 `node.sync_result` 下发，也在运行时把网页的导出配置交给已登录员工。导出阻塞与失败继续有界丢弃，不阻塞业务。发布与升级的版本关联验收见 RL-A09。
 
 ## 部署
 
@@ -560,14 +560,14 @@ R-23 的待实施部分复用 `packages/telemetry/src/index.ts` 的 Effect OTLP/
 
 ### 凭据与发布验收
 
-凭据行为使用本地 PostgreSQL、协议替身与 HTTP 入口验证；发布基线、版本准入、升级准备、离线迁移、完成同步与中心恢复后处理已有离线测试，跨 app 升级主链路使用候选包和当前基线。R-23 遥测仍未实现，增量格式迁移、自动安装入口切换、进程强制中断与非 macOS 平台的本轮升级验收仍未完成。
+凭据行为使用本地 PostgreSQL、协议替身与 HTTP 入口验证；发布基线、版本准入、升级准备、离线迁移、完成同步与中心恢复后处理已有离线测试，跨 app 升级主链路使用候选包和当前基线。R-23 的跨进程追踪、导出过滤与回放有离线测试，双版本进程同时运行的完整遥测验收尚未执行。增量格式迁移、自动安装入口切换、进程强制中断与非 macOS 平台的本轮升级验收仍未完成。
 
 | 需求 | 设置与观察 | 失败条件 | 位置 |
 |---|---|---|---|
 | R-02 | 将数据库闲置期限设置在当前时刻前后；心跳、重复报告、后台整理与新业务交错，持锁跨越期限 | 无业务仍续期、过期后先续期再授权、旧执行状态永久保活 | PostgreSQL 集成 |
 | R-02、R-04 | 真实 Worker 替身有长回合，再让 status 陈旧或设备离线；前台与后台续租分别检查 | 无有效执行证据仍续期；后台续租延长；有效前台或 Thread 核查未保持活跃 | 包内协议替身与中心集成 |
 | R-01、R-02、R-13 | 重新认证响应丢失、本地身份保存前退出、重复提交、enrollment 在提交前后到期、并发吊销 | 新设备产生、凭据多次替换、越权重取、吊销复活、旧输入重发 | 节点本地替身与 HTTP 集成 |
-| R-22、R-23 | 不同实际版本产生诊断；向 span、resource、事件和错误注入敏感标记；导出超时 | 实际版本不符，正文泄漏，token 缺失被记作零，业务受导出阻塞 | telemetry 单测与发布验证，planned |
+| R-22、R-23 | 不同实际版本产生诊断；向 span、resource、事件、日志、指标和错误注入敏感标记；导出超时；一条消息和一次 Project Run 走完整链路 | 实际版本不符，正文泄漏，token 缺失被记作零，链路断成多条 trace，业务受导出阻塞 | 见 [可观测性 TECH 验证](../observability/TECH.md#10-验证)；双版本进程完整场景待验证 |
 | R-25 | 当前基线的版本准入、准备、离线迁移、补报与完成同步、恢复后处理 | 迁移、兼容与恢复结果不符合 RL-A02～08 | release 包内测试与 `e2e/src/upgrade.integration.test.ts` 已覆盖基线主链路；增量格式迁移未实现，强制中断与非 macOS 平台升级未测 |
 
 自动化验收使用离线转录与本地替身；进程回收、私有文件、SQLite 和安装包检查在对应系统本地运行。交叉构建不代替原生验证，未测项如实记录。真实订阅和模型调用仅用于显式手动冒烟。

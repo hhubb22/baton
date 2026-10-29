@@ -181,4 +181,5 @@ node apps/batond/dist/batond.cjs project-runtime connection-key <连接 ID> < ke
 - 术语与代码命名：[GLOSSARY](GLOSSARY.md)
 - 目录与验证入口：[AGENTS](AGENTS.md)
 - 打包、发布与升级：[PRODUCT](specs/release/PRODUCT.md)、[TECH](specs/release/TECH.md)
+- 追踪、日志、指标与排障：[TECH](specs/observability/TECH.md)
 - 工具参数：[tools/README](tools/README.md)

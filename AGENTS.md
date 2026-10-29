@@ -12,7 +12,7 @@ Baton 是跨设备 AI Agent 协同系统，由 TypeScript 中心服务（`apps/s
 | `apps/batond/src/worker` | Thread 消息队列、命令回执、intent、Turn、回复、outbox 与恢复 |
 | `apps/batond/src/agent-host`、`src/agents` | t3code provider 宿主、事件映射与受限 shell；四个 Agent 在程序或 SDK 已安装且认证未明确缺失时开放新建与恢复，版本和系统不设白名单 |
 | `e2e` | 中心、节点、独立 Worker 与 Runtime 的跨 app 集成测试，显式依赖两个 app；见 `e2e/README.md` |
-| `packages/telemetry` | Effect 原生 OTLP/HTTP 追踪、标准上下文传播与导出字段过滤，默认不连接采集端 |
+| `packages/telemetry` | Effect 原生 OTLP/HTTP 追踪、日志、指标与标准上下文传播，统一导出字段过滤，默认不连接采集端 |
 | `packages/{protocol,sqlite}` | Effect 协议 Schema 与 TypeScript 类型，WAL/FULL SQLite 客户端和提交结果核查 |
 | `upstream/t3code` | Baton 的 t3code fork submodule，固定提交；workspace 收录所需 `@t3tools/*` 包、`effect-acp` 和 `effect-codex-app-server` |
 | `runtimes/project-agent` | Project Agent 的模型、工具、压缩与恢复，通过 stdio JSON-RPC 与 batond 通信 |
@@ -98,6 +98,26 @@ node tools/package-desktop.mjs --batond bin --out apps/desktop/dist/installers
 ## 文档入口
 
 构建与部署、账号、设备接入和配置参考见 [README.md](README.md)。领域术语与代码命名见 [GLOSSARY.md](GLOSSARY.md)，系统架构见 [Baton TECH](specs/baton/TECH.md)，安装包布局与平台验证见 [发布设计](specs/release/TECH.md)。脚本参数见 [工具说明](tools/README.md)。
+
+## 遥测排障
+
+本地 ClickStack 单容器示例将界面映射到 8088，避免占用 Baton 中心的 8080；容器也监听 OTLP HTTP 4318 和 gRPC 4317：
+
+```sh
+docker run --rm --name baton-clickstack -p 127.0.0.1:8088:8080 -p 127.0.0.1:4318:4318 -p 127.0.0.1:4317:4317 clickhouse/clickstack-all-in-one:latest
+```
+
+此示例移除容器时不保留数据；长期部署的持久化和网络配置按官方文档设置。
+
+在 ClickStack Team Settings → API Keys 取得 ingestion key，将 `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` 和 `OTEL_EXPORTER_OTLP_HEADERS=authorization=<ingestion-key>` 配给需要导出的进程。中心可用 `BATON_DEVICE_OTLP_ENDPOINT` / `BATON_DEVICE_OTLP_HEADERS` 下发给节点；网页通过 `BATON_WEB_OTLP_ENDPOINT` / `BATON_WEB_OTLP_KEY` 配置，collector 必须允许网页来源的跨域请求。远程节点不能使用中心的 `127.0.0.1`，应使用节点可访问的地址。参数与权限见[部署文档](https://clickhouse.com/docs/clickstack/deployment/all-in-one)和[collector 文档](https://clickhouse.com/docs/clickstack/ingesting-data/collector)。
+
+ClickStack MCP 的 Personal API Access Key 与 ingestion key 分开。在当前 shell 中提供 `CLICKSTACK_PERSONAL_API_KEY` 后，可配置 Codex：
+
+```sh
+codex mcp add clickstack --url http://127.0.0.1:8088/api/mcp --bearer-token-env-var CLICKSTACK_PERSONAL_API_KEY
+```
+
+该端点使用 Streamable HTTP 和 Bearer 认证，见 [ClickStack MCP](https://clickhouse.com/docs/clickstack/mcp)。先查 source 与列结构；默认 Map 表结构可用 `TraceId = '<trace id>'` 找完整链路，或用 `SpanAttributes['baton.thread.id'] = '<thread id>'` 找 Thread，再按 `baton.error.code`、版本和等待原因检查相关记录。JSON 列结构按实际 source 调整表达式。复制诊断信息只包含标识、错误码和版本，不能替代业务权限检查。未结束 span 和硬终止进程不会导出；等待日志、队列和账本指标可辅助排查。查询与仪表盘见[可观测性设计](specs/observability/TECH.md)和 [ClickStack 模板](tools/observability/README.md)。
 
 ## 开发与演进约束（防熵增守则）
 

@@ -6,6 +6,8 @@
 
 Runtime 编入 batond 的 SEA，通过 `project-runtime` 子命令运行；进程与 stdio 契约见 [Runtime 子命令约定](../README.md)。部署、设备接入与登录命令统一见 [根 README](../../README.md)，开发与验证入口见 [AGENTS.md](../../AGENTS.md#常用构建与验证命令)。
 
+Runtime 接收中心放置时保存的 trace context，记录 Run、模型调用、工具与压缩 span；每个进程报告自己的构建版本。provider 取成功解析的模型信息，未报告时省略；模型 ID 原样保留。只有上游明确报告有效用量时才写 token 计数。硬 SIGTERM 保留原有进程终止语义，未结束的 span 不导出。配置和排障见[可观测性设计](../../specs/observability/TECH.md)。
+
 Runtime 使用同一份 provider 注册表生成执行实例、模型目录、认证探测和登录入口，当前注册 `openai-codex`（ChatGPT）、`xai`（xAI）和 `anthropic`（Claude）。ChatGPT 使用 OAuth，xAI 与 Claude 支持 OAuth 或 API key。登录可选择已实现的交互方式，取消会结束登录进程。API key 从设备本地标准输入接受非空单行文本，最多 16 KiB，允许末尾换行；每个 provider 保存一份凭据，API key 会替换同 provider 的 OAuth 登录。Runtime 只读取自己的凭据目录，实际模型请求确认授权有效性。
 
 设备设置 API 可发起在线设备的非交互登录，支持 ChatGPT 和 xAI 的设备码流程；Claude 的 OAuth 使用终端交互。设备报告的 `login_methods` 来自已注册 provider 的认证实现和设备码能力，网页据此显示设备码登录或本地配置命令。API key 始终从设备本地输入，不经过网页和中心。Runtime 的 `login-device <provider>` 自动选择设备码方式，stdout 首行返回 `{type:"device_code",provider,verification_uri,user_code,expires_in_seconds}`，随后继续轮询直到凭据保存完成；未提供有效期时使用 900 秒。SIGINT、SIGTERM 或标准输入关闭取消登录，其他交互输入返回错误。batond 取得设备码后让进程在后台继续等待，结束时立即刷新订阅报告。

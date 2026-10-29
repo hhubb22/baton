@@ -1,0 +1,46 @@
+[
+  {
+    "name": "Baton 等待时间过长",
+    "source": "inline",
+    "threshold": 3600,
+    "interval": "5m",
+    "thresholdType": "above",
+    "channel": { "type": "webhook", "webhookId": "__WEBHOOK_ID__" },
+    "chartConfig": {
+      "displayType": "number",
+      "sourceId": "__METRIC_SOURCE_ID__",
+      "select": [
+        { "aggFn": "max", "valueExpression": "Value", "metricType": "gauge", "metricName": "baton.wait.oldest_age_s" }
+      ]
+    }
+  },
+  {
+    "name": "Baton 账本接近参考预算",
+    "source": "inline",
+    "threshold": 0.8,
+    "interval": "5m",
+    "thresholdType": "above",
+    "channel": { "type": "webhook", "webhookId": "__WEBHOOK_ID__" },
+    "chartConfig": {
+      "displayType": "number",
+      "sourceId": "__METRIC_SOURCE_ID__",
+      "select": [
+        { "aggFn": "max", "valueExpression": "Value", "metricType": "gauge", "metricName": "baton.ledger.budget_ratio" }
+      ]
+    }
+  },
+  {
+    "name": "Baton Turn 完成率相比前日下降",
+    "source": "inline",
+    "threshold": 0.8,
+    "interval": "1h",
+    "thresholdType": "below",
+    "channel": { "type": "webhook", "webhookId": "__WEBHOOK_ID__" },
+    "chartConfig": {
+      "displayType": "line",
+      "configType": "sql",
+      "connectionId": "__CONNECTION_ID__",
+      "sqlTemplate": "SELECT $__timeInterval(now()) AS ts, if(previous_rate = 0, NULL, current_rate / previous_rate) AS value FROM (SELECT countIf($__timeFilter(Timestamp) AND SpanAttributes['baton.turn.result'] = 'completed') / nullIf(countIf($__timeFilter(Timestamp)), 0) AS current_rate, countIf($__timeFilter(Timestamp + INTERVAL 1 DAY) AND SpanAttributes['baton.turn.result'] = 'completed') / nullIf(countIf($__timeFilter(Timestamp + INTERVAL 1 DAY)), 0) AS previous_rate FROM otel_traces WHERE SpanName = 'baton.turn' AND ($__timeFilter(Timestamp) OR $__timeFilter(Timestamp + INTERVAL 1 DAY)))"
+    }
+  }
+]

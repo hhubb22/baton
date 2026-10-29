@@ -92,7 +92,7 @@ Cursor store 子进程禁用 fetch 和 HTTP(S) 请求。上述加载检查不调
 | `apps/batond/src/{daemon,worker,project}/ledger.ts`、`src/storage-format.ts` | 各自声明基线 SQL；在业务解码与写连接打开前核对格式类型、版本和迁移摘要，仅为空库初始化基线 |
 | `apps/batond/src/daemon` 与 `src/project` | 持久升级准备状态，协调节点命令、所有 Worker 与前后台 Runtime，不以 daemon 退出代替回收确认 |
 | `packages/sqlite` | 保留 WAL/FULL、提交 token 核验、独占迁移与备份所需能力；不解释各账本业务 JSON |
-| `packages/telemetry` | 已有 Effect OTLP/HTTP 导出、过滤与时限；Baton R-23 的版本、原因、结果与成本关联尚未实现 |
+| `packages/telemetry` | Effect OTLP/HTTP 追踪、日志、指标导出、过滤与时限；版本、原因、结果与可用成本字段见 [可观测性 TECH](../observability/TECH.md) |
 
 ### 发布元数据与连接
 
@@ -257,7 +257,7 @@ prepare 之前升级未支持该能力的 daemon 时，由发布说明要求停�
 | RL-04、09、13 | 候选包基线升级保留活动 Thread、队列、Project 与记忆；补报后确认完成 | 原输入重发、结果重复、数据缺失、同步前执行 | `e2e/src/upgrade.integration.test.ts`，RL-A02；未 ACK 报告跨升级补报见 batond `upgrade-report.test.ts` |
 | RL-12、14、16 | 基线逐库失败后复用原备份重跑，迁移与 syncing 期间启动 daemon、独立 Worker | 未核实回收即就绪、暂停期间执行、重跑覆盖备份或丢失队列 | batond `upgrade-migrate.test.ts`；Windows 安装切换、强制中断与实际增量格式回切未测 |
 | RL-15、16 | PostgreSQL 回退旧授权与派发进度，运行恢复后处理、重新授权并补报原结果；重复运行与缺失密钥 | 恢复旧权限、自动重发可能已执行输入、历史或记忆丢失、伪造完成结果或新签名密钥 | `apps/server/src/restore.integration.test.ts`，RL-A08；设备单独恢复的凭据拒绝沿用 R-02/R-04 验证 |
-| RL-17 | 实际版本与诊断关联，敏感属性及导出失败 | 正文泄漏、缺失成本虚报为零、导出阻塞业务 | 已有 telemetry 包内测试；R-23 关联尚未实现，RL-A09 未测 |
+| RL-17 | 实际版本与诊断关联，敏感属性及导出失败 | 正文泄漏、缺失成本虚报为零、导出阻塞业务 | telemetry 包内及跨 app 测试已覆盖；双版本进程完整 RL-A09 未测 |
 
 ## 测量结果
 

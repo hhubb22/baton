@@ -48,6 +48,8 @@ Thread 页面独立于 Project 查询。后端未提供这些接口时，远程 
 
 网页打开或刷新时，通过 `GET /api/v1/me` 和会话 Cookie 恢复登录状态，并取得 CSRF token。需要 CSRF 校验的写请求携带 `X-CSRF-Token`；尚未取得 token 时先读取 `/me`，收到 `csrf_rejected` 时重新读取 `/me` 并重试原请求一次。会话失效后返回登录页，保留可恢复的站内位置。首次登录或管理员重置口令后，`must_change_password` 要求用户先在 `/password` 修改口令；保存成功后重新登录，再进入工作区。
 
+已登录会话提供遥测配置时，网页才加载 RUM 导出器。同源 `/api/` 请求传播 trace context，通知 WebSocket 单独追踪；console、网络头和正文不采集。回放默认关闭，启用时遮挡文字与输入，只保留受限布局和交互。请求失败及页面错误可复制不含正文的诊断信息。退出停止采集，已排队的回放批次仍可能发送。配置和字段见[可观测性设计](../specs/observability/TECH.md)。
+
 已登录且有页面订阅时，客户端连接 `/api/v1/events` WebSocket。`thread.changed` 携带 UUID `thread_id` 和 `change: "detail"` 时，读取该 Thread 的详情并更新已加载列表中的对应项，同时刷新它的消息、过程、实时输出查询与操作状态；其他 Thread 的列表项与详情保持不变。`project.changed` 携带 UUID `project_id` 和相同的 `change` 时，读取该项目及其状态并更新已加载列表中的对应项，同时刷新它的主对话、记忆、记忆来源、记忆状态。列表缓存加入新对象，保留归档对象，页面自行筛选；对象不存在时移除对应项。单对象读取失败时重新读取该类列表。缺少 ID、ID 无效或 `change` 未识别时，按事件对应的主题全量刷新。
 
 `nodes.changed { node_id }` 表示设备同步完成或连接状态变化，收到后重新读取设备报告，并刷新项目、Thread、消息 和操作状态。收到带有 `node_id`、非负整数 `report_version` 的 `devices.changed` 后重新读取设备报告，能力以查询结果为准；这两类事件都保持文件和目录只在用户操作时读取。同时每 2 秒通知刷新设备、项目、Thread、消息 和操作状态，补充尚无服务器事件覆盖的变化；连接断开后，轮询继续执行并尝试重连。

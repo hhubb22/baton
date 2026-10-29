@@ -6,6 +6,8 @@
 
 ## 开发入口
 
+节点同步成功后立即采用中心下发的 OTLP 配置，后续 Worker、agent-host 和 Project Runtime 继承该配置；节点本地 `OTEL_*` 优先。下发 headers 只保存在内存并经环境变量传给子进程，不写账本或命令行。等待事件和周期指标来自现有状态与账本；账本预算比率目前只用于观察，不阻止新 Thread。旧开发账本可以自行重建，程序不会自动删除本地数据。详见[可观测性设计](../../specs/observability/TECH.md)。
+
 环境要求、安装和构建命令见 [AGENTS.md](../../AGENTS.md#常用构建与验证命令)，参数见 [工具说明](../../tools/README.md#本地开发)。统一入口为 `src/index.ts`，调用 `src/cli.ts` 导出的 `runBatondCLI(args)`；开发 bundle 的 Project Runtime 与 watchdog 使用同一 bundle 的子命令，直接源码运行使用 Runtime 包解析的 tsx loader。
 
 显式设置 `CURSOR_API_KEY` 后运行 probe。它在独立 host 中核查 SDK 与辅助程序，调用公开的认证、模型查询接口，不建立执行会话、不发送 prompt、不打开登录浏览器。SDK 安装完整且认证未明确缺失时报告 `available`，版本和系统不限制新建；平台资产不完整、辅助程序不可执行或 sandbox 检查明确失败时报告不可用原因。只有 `available` 且 `capabilities.create` 为 true 时，CLI 才允许新建。凭据只经子进程环境传递，不写入配置、命令、报告或日志。
