@@ -423,6 +423,7 @@ export const NodeSyncResult = Schema.Struct({
   type: Schema.Literal('node.sync_result'),
   ok: Schema.Boolean,
   code: Schema.optionalKey(Text),
+  telemetry: Schema.optionalKey(Schema.Struct({ endpoint: Schema.String, headers: Schema.optionalKey(Schema.String) })),
 })
 export type NodeSyncResult = typeof NodeSyncResult.Type
 

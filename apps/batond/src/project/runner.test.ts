@@ -41,12 +41,17 @@ const open = async (mode = 'idle', real = false) => {
   cleanups.push(() => Effect.runPromise(Scope.close(scope, Exit.void)))
   return manager
 }
-const quickRunner = async (program: string, credentialsDirectory?: string) => {
+const quickRunner = async (
+  program: string,
+  credentialsDirectory?: string,
+  telemetry?: import('@baton/telemetry').DynamicTelemetry,
+) => {
   const dataDir = await makePrivateTempDirectory('baton-early-output-')
   cleanups.push(() => rm(dataDir, { recursive: true, force: true }))
   const runner = new RuntimeRunner(
     {
       dataDir,
+      ...(telemetry ? { telemetry } : {}),
       runtimeCommand: {
         file: process.execPath,
         args: ['-e', program],
@@ -74,6 +79,40 @@ const quickRunner = async (program: string, credentialsDirectory?: string) => {
   cleanups.push(() => runner.close())
   return { runner, dataDir }
 }
+it('passes current telemetry headers to Runtime through its environment', async () => {
+  const telemetry: import('@baton/telemetry').DynamicTelemetry = {
+    current: { endpoint: 'http://collector.invalid', headers: 'authorization=remote-key' },
+  }
+  const { runner } = await quickRunner(
+    'console.log(JSON.stringify({headers:process.env.OTEL_EXPORTER_OTLP_HEADERS,argv:process.argv}))',
+    undefined,
+    telemetry,
+  )
+  const old = process.env.OTEL_EXPORTER_OTLP_HEADERS
+  delete process.env.OTEL_EXPORTER_OTLP_HEADERS
+  try {
+    let output = ''
+    const owned = await runner.spawn(
+      ['run'],
+      new AbortController().signal,
+      undefined,
+      undefined,
+      undefined,
+      (child) => {
+        child.stdout.on('data', (chunk) => {
+          output += String(chunk)
+        })
+      },
+    )
+    await runner.reap(owned)
+    const result = JSON.parse(output) as { headers: string; argv: string[] }
+    expect(result.headers).toBe('authorization=remote-key')
+    expect(result.argv.join(' ')).not.toContain('remote-key')
+  } finally {
+    if (old === undefined) delete process.env.OTEL_EXPORTER_OTLP_HEADERS
+    else process.env.OTEL_EXPORTER_OTLP_HEADERS = old
+  }
+})
 it('uses file URLs for source Runtime and watchdog import loaders', () => {
   for (const command of [defaultRuntimeCommand(), defaultWatchdogCommand()]) {
     expect(command.args?.[0]).toBe('--import')

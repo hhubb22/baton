@@ -302,6 +302,36 @@ it('preserves login, password, origin and CSRF gates before decoding endpoint re
   await login('http-replacement-password-456')
 })
 
+it('returns browser telemetry only to an authenticated session when configured', async () => {
+  await login(readyPassword, 'httpready')
+  const previous = {
+    endpoint: process.env.BATON_WEB_OTLP_ENDPOINT,
+    key: process.env.BATON_WEB_OTLP_KEY,
+    replay: process.env.BATON_WEB_SESSION_REPLAY,
+  }
+  try {
+    delete process.env.BATON_WEB_OTLP_ENDPOINT
+    delete process.env.BATON_WEB_OTLP_KEY
+    expect(await (await request('/api/v1/me')).json()).not.toHaveProperty('telemetry')
+    process.env.BATON_WEB_OTLP_ENDPOINT = 'https://collector.example'
+    process.env.BATON_WEB_OTLP_KEY = 'ingestion-key'
+    process.env.BATON_WEB_SESSION_REPLAY = 'masked'
+    expect(await (await request('/api/v1/me')).json()).toMatchObject({
+      telemetry: { endpoint: 'https://collector.example', key: 'ingestion-key', session_replay: 'masked' },
+    })
+    expect((await request('/api/v1/me', 'GET', undefined, { cookie: '' })).status).toBe(401)
+  } finally {
+    for (const [key, value] of Object.entries({
+      BATON_WEB_OTLP_ENDPOINT: previous.endpoint,
+      BATON_WEB_OTLP_KEY: previous.key,
+      BATON_WEB_SESSION_REPLAY: previous.replay,
+    })) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+})
+
 it('validates payloads, queries, paths, response shapes and available feature routes', async () => {
   await login(readyPassword, 'httpready')
   const extra = await request('/api/v1/node-enrollments', 'POST', { extra: true })

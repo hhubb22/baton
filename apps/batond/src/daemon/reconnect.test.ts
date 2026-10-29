@@ -1,5 +1,6 @@
 import { BUILD } from '@baton/protocol/release'
 import { randomUUID } from 'node:crypto'
+import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -71,6 +72,51 @@ function control(socket: WebSocket, body: unknown, correlation?: string, id: str
   )
 }
 const bodyOf = (frame: Frame) => (frame.envelope as unknown as Envelope)?.body as Record<string, unknown> | undefined
+
+it('keeps synchronized telemetry configuration in memory', async () => {
+  const { path, wss, start } = await setup()
+  const telemetry: import('@baton/telemetry').DynamicTelemetry = {}
+  const received: string[] = []
+  const collector = createServer((request, response) => {
+    request.resume()
+    received.push(request.url!)
+    response.writeHead(200).end('{}')
+  })
+  await new Promise<void>((resolve) => collector.listen(0, '127.0.0.1', resolve))
+  cleanup.push(() => new Promise<void>((resolve) => collector.close(() => resolve())))
+  const address = collector.address() as { port: number }
+  const endpoint = `http://127.0.0.1:${address.port}`
+  wss.on('connection', (socket) => {
+    socket.on('message', (raw) => {
+      const frame = JSON.parse(webSocketText(raw)) as Frame
+      if (frame.kind === 'auth') {
+        socket.send(JSON.stringify({ kind: 'auth_result', ok: true }))
+      } else if (bodyOf(frame)?.type === 'node.sync') {
+        const envelope = frame.envelope as unknown as Envelope
+        control(
+          socket,
+          {
+            type: 'node.sync_result',
+            ok: true,
+            telemetry: { endpoint, headers: 'authorization=private-key' },
+          },
+          envelope.message_id,
+        )
+      }
+    })
+  })
+  const daemon = start({ dynamicTelemetry: telemetry })
+  await vi.waitFor(() => expect(telemetry.current).toEqual({ endpoint, headers: 'authorization=private-key' }))
+  await vi.waitFor(() => expect(new Set(received)).toEqual(new Set(['/v1/traces', '/v1/logs', '/v1/metrics'])), {
+    timeout: 5000,
+  })
+  for (const name of ['node.db', 'node.db-wal']) {
+    const bytes = await readFile(join(path, name)).catch(() => Buffer.alloc(0))
+    expect(bytes.includes(Buffer.from('private-key'))).toBe(false)
+  }
+  await daemon.stop()
+  expect((await readFile(join(path, 'node.db'))).includes(Buffer.from('private-key'))).toBe(false)
+})
 
 it('reconnects with the same incarnation, retains reports before Worker ACK, and redelivers without executing twice after restart', async () => {
   const { path, id, wss, start } = await setup()

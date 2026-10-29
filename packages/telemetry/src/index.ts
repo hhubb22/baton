@@ -1,5 +1,13 @@
 import { Cause, Clock, ConfigProvider, Context, Effect, Exit, Layer, Option, Schema, Semaphore, Tracer } from 'effect'
-import { FetchHttpClient, Headers, HttpClient, HttpClientError, HttpTraceContext } from 'effect/http'
+import {
+  FetchHttpClient,
+  Headers,
+  HttpClient,
+  HttpClientError,
+  HttpClientRequest,
+  HttpClientResponse,
+  HttpTraceContext,
+} from 'effect/http'
 import { OtlpLogger, OtlpMetrics, OtlpSerialization, OtlpTracer } from 'effect/observability'
 import { BUILD } from '@baton/protocol/release.mjs'
 import type { TraceData } from 'effect/observability/OtlpTracer'
@@ -298,7 +306,24 @@ const privateSerialization = (nodeId?: string) =>
     }),
   ).pipe(Layer.provide(OtlpSerialization.layerJson))
 
-const exportClient = (timeouts: Record<string, number>) =>
+export interface DynamicTelemetry {
+  current?: { endpoint: string; headers?: string } | undefined
+}
+
+export const telemetryEnvironment = (dynamic?: DynamicTelemetry): Record<string, string | undefined> => ({
+  ...(process.env.OTEL_EXPORTER_OTLP_ENDPOINT === undefined && dynamic?.current?.endpoint
+    ? { OTEL_EXPORTER_OTLP_ENDPOINT: dynamic.current.endpoint }
+    : {}),
+  ...(process.env.OTEL_EXPORTER_OTLP_HEADERS === undefined && dynamic?.current?.headers
+    ? { OTEL_EXPORTER_OTLP_HEADERS: dynamic.current.headers }
+    : {}),
+})
+
+const exportClient = (
+  timeouts: Record<string, number>,
+  dynamic?: DynamicTelemetry,
+  env: Record<string, string | undefined> = {},
+) =>
   Layer.effect(
     HttpClient.HttpClient,
     Effect.gen(function* () {
@@ -312,8 +337,41 @@ const exportClient = (timeouts: Record<string, number>) =>
           Effect.suspend(() =>
             clock.currentTimeMillisUnsafe() < suspendedUntil
               ? Effect.die(new Error('OTLP export paused'))
-              : Effect.flatMap(request, (resolved) =>
-                  Effect.scoped(
+              : Effect.flatMap(request, (original) => {
+                  let resolved = original
+                  const dynamicSignal = /^http:\/\/baton-telemetry\.invalid\/v1\/(traces|logs|metrics)$/.exec(
+                    original.url,
+                  )?.[1]
+                  if (dynamicSignal) {
+                    const signal = dynamicSignal.toUpperCase()
+                    const specific = env[`OTEL_EXPORTER_OTLP_${signal}_ENDPOINT`]
+                    const endpoint = specific ?? env.OTEL_EXPORTER_OTLP_ENDPOINT ?? dynamic?.current?.endpoint
+                    if (!endpoint)
+                      return Effect.succeed(HttpClientResponse.fromWeb(original, new Response(null, { status: 200 })))
+                    try {
+                      const url = new URL(endpoint)
+                      if (!specific) url.pathname += `${url.pathname.endsWith('/') ? '' : '/'}v1/${dynamicSignal}`
+                      resolved = HttpClientRequest.setUrl(resolved, url.toString())
+                      if (
+                        env[`OTEL_EXPORTER_OTLP_${signal}_HEADERS`] === undefined &&
+                        env.OTEL_EXPORTER_OTLP_HEADERS === undefined &&
+                        dynamic?.current?.headers
+                      ) {
+                        const headers: Record<string, string> = {}
+                        for (const entry of dynamic.current.headers.split(',')) {
+                          const separator = entry.indexOf('=')
+                          if (separator > 0)
+                            headers[entry.slice(0, separator).trim()] = decodeURIComponent(
+                              entry.slice(separator + 1).trim(),
+                            )
+                        }
+                        resolved = HttpClientRequest.setHeaders(resolved, headers)
+                      }
+                    } catch {
+                      return Effect.die(new Error('Invalid OTLP configuration'))
+                    }
+                  }
+                  return Effect.scoped(
                     scoped.postprocess(Effect.succeed(resolved)).pipe(
                       Effect.tap((result) => result.arrayBuffer),
                       Effect.flatMap((result) =>
@@ -324,7 +382,7 @@ const exportClient = (timeouts: Record<string, number>) =>
                       Effect.catch(() => Effect.die(new Error('OTLP export failed'))),
                     ),
                   ).pipe(
-                    Effect.timeout(timeouts[resolved.url] ?? 3000),
+                    Effect.timeout(timeouts[original.url] ?? 3000),
                     // The exporter catches defects and backs off; stalled or excess batches are not queued for retry.
                     Effect.catchTag('TimeoutError', () => Effect.die(new Error('OTLP export request timed out'))),
                     permits.withPermitsIfAvailable(1),
@@ -338,8 +396,8 @@ const exportClient = (timeouts: Record<string, number>) =>
                         suspendedUntil = clock.currentTimeMillisUnsafe() + 60_000
                       }),
                     ),
-                  ),
-                ),
+                  )
+                }),
           ),
         client.preprocess,
       )
@@ -347,18 +405,26 @@ const exportClient = (timeouts: Record<string, number>) =>
   ).pipe(Layer.provide(FetchHttpClient.layer))
 
 /** OTLP/HTTP JSON is opt-in; requests and shutdown are capped at three seconds. */
-export const telemetryLayer = (serviceName: string, env: Record<string, string | undefined> = process.env) => {
+export const telemetryLayer = (
+  serviceName: string,
+  env: Record<string, string | undefined> = process.env,
+  dynamic?: DynamicTelemetry,
+) => {
+  const exporterEnv = { ...env }
+  if (dynamic)
+    for (const signal of ['TRACES', 'LOGS', 'METRICS'])
+      exporterEnv[`OTEL_EXPORTER_OTLP_${signal}_ENDPOINT`] = `http://baton-telemetry.invalid/v1/${signal.toLowerCase()}`
   const timeoutFor = (signal: string) => {
     const value = Number(env[`OTEL_EXPORTER_OTLP_${signal}_TIMEOUT`] ?? env.OTEL_EXPORTER_OTLP_TIMEOUT ?? 3000)
     return Number.isFinite(value) && value > 0 ? Math.min(value, 3000) : 3000
   }
   const timeouts: Record<string, number> = {}
   for (const signal of ['TRACES', 'LOGS', 'METRICS']) {
-    const endpoint = env[`OTEL_EXPORTER_OTLP_${signal}_ENDPOINT`] ?? env.OTEL_EXPORTER_OTLP_ENDPOINT
+    const endpoint = exporterEnv[`OTEL_EXPORTER_OTLP_${signal}_ENDPOINT`] ?? exporterEnv.OTEL_EXPORTER_OTLP_ENDPOINT
     if (!endpoint) continue
     try {
       const url = new URL(endpoint)
-      if (!env[`OTEL_EXPORTER_OTLP_${signal}_ENDPOINT`])
+      if (!exporterEnv[`OTEL_EXPORTER_OTLP_${signal}_ENDPOINT`])
         url.pathname += `${url.pathname.endsWith('/') ? '' : '/'}v1/${signal.toLowerCase()}`
       const normalized = url.toString()
       timeouts[normalized] = Math.min(timeouts[normalized] ?? 3000, timeoutFor(signal))
@@ -368,7 +434,7 @@ export const telemetryLayer = (serviceName: string, env: Record<string, string |
   }
   const provider = ConfigProvider.fromEnv({
     env: {
-      ...env,
+      ...exporterEnv,
       OTEL_SERVICE_NAME: env.OTEL_SERVICE_NAME || serviceName,
       OTEL_TRACES_EXPORTER: env.OTEL_TRACES_EXPORTER ?? 'otlp',
       OTEL_LOGS_EXPORTER: env.OTEL_LOGS_EXPORTER ?? 'otlp',
@@ -403,7 +469,7 @@ export const telemetryLayer = (serviceName: string, env: Record<string, string |
     OtlpMetrics.layerFromConfig({ resource }),
   ).pipe(
     Layer.provide(privateSerialization(nodeId)),
-    Layer.provide(exportClient(timeouts)),
+    Layer.provide(exportClient(timeouts, dynamic, env)),
     Layer.provide(ConfigProvider.layer(provider)),
   )
   return Layer.merge(exporter, Layer.succeed(Statement.SpanPropagationEnabled, true))

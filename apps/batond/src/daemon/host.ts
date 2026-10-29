@@ -18,6 +18,7 @@ import { readUpgradeState, upgradeOffline } from './upgrade.ts'
 import { workerPaths } from './paths.ts'
 import { FullOutputStore } from '../worker/full-output.ts'
 import { loadIdentity } from './identity.ts'
+import { telemetryEnvironment, type DynamicTelemetry } from '@baton/telemetry'
 
 export interface DaemonWorkerHost {
   ensureWorker(threadId: string): Promise<void>
@@ -65,6 +66,7 @@ export class LocalWorkerHost implements DaemonWorkerHost {
   constructor(
     readonly dataDirectory: string,
     readonly command: BatondCommand = currentBatondCommand(),
+    readonly telemetry?: DynamicTelemetry,
   ) {}
 
   async request(
@@ -154,6 +156,7 @@ export class LocalWorkerHost implements DaemonWorkerHost {
                 windowsHide: true,
                 env: {
                   ...process.env,
+                  ...telemetryEnvironment(this.telemetry),
                   BATON_TELEMETRY_NODE_ID: (await loadIdentity(this.dataDirectory).catch(() => undefined))?.node_id,
                 },
               },

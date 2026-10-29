@@ -144,7 +144,20 @@ export const startServer = (
                       }),
                     )
                     gateway.notify(source.employee_id, { type: 'nodes.changed', node_id: source.node_id })
-                    return { type: 'node.sync_result', ok: true }
+                    return {
+                      type: 'node.sync_result',
+                      ok: true,
+                      ...(process.env.BATON_DEVICE_OTLP_ENDPOINT
+                        ? {
+                            telemetry: {
+                              endpoint: process.env.BATON_DEVICE_OTLP_ENDPOINT,
+                              ...(process.env.BATON_DEVICE_OTLP_HEADERS
+                                ? { headers: process.env.BATON_DEVICE_OTLP_HEADERS }
+                                : {}),
+                            },
+                          }
+                        : {}),
+                    }
                   case 'node.upgrade_state': {
                     try {
                       return { ...(await run('runtime_report', Nodes.saveNodeUpgradeState(source, body))) }

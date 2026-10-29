@@ -79,7 +79,24 @@ export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
     ),
     HttpApiBuilder.group(BatonHttpApi, 'account', (handlers) =>
       handlers
-        .handle('me', () => CurrentBrowserSession)
+        .handle('me', () =>
+          CurrentBrowserSession.pipe(
+            Effect.map((session) => ({
+              ...session,
+              ...(process.env.BATON_WEB_OTLP_ENDPOINT && process.env.BATON_WEB_OTLP_KEY
+                ? {
+                    telemetry: {
+                      endpoint: process.env.BATON_WEB_OTLP_ENDPOINT,
+                      key: process.env.BATON_WEB_OTLP_KEY,
+                      ...(process.env.BATON_WEB_SESSION_REPLAY === 'masked'
+                        ? { session_replay: 'masked' as const }
+                        : {}),
+                    },
+                  }
+                : {}),
+            })),
+          ),
+        )
         .handle('replayNotifications', ({ query }) =>
           httpBusiness(
             Effect.gen(function* () {

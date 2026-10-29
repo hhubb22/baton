@@ -7,6 +7,7 @@ import {
   captureTrace,
   decodeTrace,
   telemetryLayer,
+  telemetryEnvironment,
   traceFromHeaders,
   tracePromise,
   withTraceSpan,
@@ -293,6 +294,120 @@ it('drops failed exports without retrying or changing the application result', a
   } finally {
     server.closeAllConnections()
     await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+})
+
+it('applies runtime configuration to existing trace, log and metric exporters', async () => {
+  const requests: Array<{ path: string; authorization?: string }> = []
+  const server = createServer((request, response) => {
+    request.resume()
+    requests.push({
+      path: request.url!,
+      ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}),
+    })
+    response.writeHead(200).end('{}')
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address() as { port: number }
+  const dynamic: import('../src/index.ts').DynamicTelemetry = {}
+  try {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* withTraceSpan(Effect.void, 'baton.before.sync')
+        yield* Effect.sleep('100 millis')
+        expect(requests).toEqual([])
+        dynamic.current = { endpoint: `http://127.0.0.1:${address.port}`, headers: 'authorization=ingestion-key' }
+        yield* withTraceSpan(Effect.void, 'baton.after.sync')
+        yield* Effect.promise(() =>
+          vi.waitFor(() => expect(requests.some((request) => request.path === '/v1/traces')).toBe(true)),
+        )
+        yield* Effect.log('baton.wait.start')
+        yield* Effect.promise(() =>
+          vi.waitFor(() => expect(requests.some((request) => request.path === '/v1/logs')).toBe(true)),
+        )
+        yield* Metric.update(Metric.gauge('baton.nodes.online'), 1)
+        yield* Effect.promise(() =>
+          vi.waitFor(() => expect(new Set(requests.map((request) => request.path)).size).toBe(3)),
+        )
+      }).pipe(
+        Effect.provide(
+          telemetryLayer(
+            'batond',
+            {
+              OTEL_BSP_MAX_EXPORT_BATCH_SIZE: '1',
+              OTEL_BLRP_MAX_EXPORT_BATCH_SIZE: '1',
+              OTEL_METRIC_EXPORT_INTERVAL: '300',
+              OTEL_BSP_SCHEDULE_DELAY: '30',
+              OTEL_BLRP_SCHEDULE_DELAY: '30',
+            },
+            dynamic,
+          ),
+        ),
+      ),
+    )
+    expect(requests.every((request) => request.authorization === 'ingestion-key')).toBe(true)
+  } finally {
+    server.closeAllConnections()
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+})
+
+it('keeps local endpoint and headers ahead of runtime configuration', async () => {
+  const requests: Array<{ authorization?: string }> = []
+  const server = createServer((request, response) => {
+    request.resume()
+    requests.push(request.headers.authorization ? { authorization: request.headers.authorization } : {})
+    response.writeHead(200).end('{}')
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address() as { port: number }
+  try {
+    await Effect.runPromise(
+      withTraceSpan(Effect.void, 'baton.local').pipe(
+        Effect.provide(
+          telemetryLayer(
+            'batond',
+            {
+              OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `http://127.0.0.1:${address.port}/v1/traces`,
+              OTEL_EXPORTER_OTLP_TRACES_HEADERS: 'authorization=local-key',
+            },
+            { current: { endpoint: 'http://127.0.0.1:1', headers: 'authorization=remote-key' } },
+          ),
+        ),
+      ),
+    )
+    expect(requests).toEqual([{ authorization: 'local-key' }])
+  } finally {
+    server.closeAllConnections()
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+})
+
+it('builds child environments from current configuration and preserves local values', () => {
+  const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT
+  const headers = process.env.OTEL_EXPORTER_OTLP_HEADERS
+  const dynamic: import('../src/index.ts').DynamicTelemetry = {
+    current: { endpoint: 'http://collector.invalid', headers: 'authorization=remote' },
+  }
+  try {
+    delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT
+    delete process.env.OTEL_EXPORTER_OTLP_HEADERS
+    expect(telemetryEnvironment(dynamic)).toEqual({
+      OTEL_EXPORTER_OTLP_ENDPOINT: 'http://collector.invalid',
+      OTEL_EXPORTER_OTLP_HEADERS: 'authorization=remote',
+    })
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://local.invalid'
+    process.env.OTEL_EXPORTER_OTLP_HEADERS = 'authorization=local'
+    expect(telemetryEnvironment(dynamic)).toEqual({})
+    delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT
+    delete process.env.OTEL_EXPORTER_OTLP_HEADERS
+    dynamic.current = undefined
+    expect(telemetryEnvironment(dynamic)).toEqual({})
+  } finally {
+    if (endpoint === undefined) delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT
+    else process.env.OTEL_EXPORTER_OTLP_ENDPOINT = endpoint
+    if (headers === undefined) delete process.env.OTEL_EXPORTER_OTLP_HEADERS
+    else process.env.OTEL_EXPORTER_OTLP_HEADERS = headers
   }
 })
 

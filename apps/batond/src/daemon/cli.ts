@@ -117,16 +117,22 @@ export async function runDaemonCLI(
       )
     }
     if (action === 'register') return
+    const dynamicTelemetry = {}
     await Effect.runPromise(
       Effect.scoped(
         runDaemon({
           dataDirectory,
           identity,
+          dynamicTelemetry,
           controlTimeoutSeconds,
           ...(values.relay ? { relayURL: values.relay } : {}),
           ...(values['ca-file'] ? { caFile: values['ca-file'] } : {}),
         }),
-      ).pipe(Effect.provide(telemetryLayer('batond', { ...process.env, BATON_TELEMETRY_NODE_ID: identity.node_id }))),
+      ).pipe(
+        Effect.provide(
+          telemetryLayer('batond', { ...process.env, BATON_TELEMETRY_NODE_ID: identity.node_id }, dynamicTelemetry),
+        ),
+      ),
       { signal: controller.signal },
     )
   } catch (error) {

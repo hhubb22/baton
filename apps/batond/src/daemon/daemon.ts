@@ -59,6 +59,7 @@ export class NeedsReauthentication extends Error {
 }
 export interface RunDaemonOptions {
   readonly dataDirectory: string
+  readonly dynamicTelemetry?: import('@baton/telemetry').DynamicTelemetry
   readonly identity?: NodeIdentity
   readonly relayURL?: string
   readonly caFile?: string
@@ -128,6 +129,7 @@ async function connected(options: {
   identity: NodeIdentity
   tracer: Tracer.Tracer
   connectivity: (online: boolean) => void
+  dynamicTelemetry?: import('@baton/telemetry').DynamicTelemetry
   incarnation: string
   heartbeatMs: number
   controlTimeoutMs: number
@@ -343,6 +345,7 @@ async function connected(options: {
       if (body.type === 'node.sync_result') {
         if (env.correlation_id === syncId) {
           if (body.ok) {
+            if (options.dynamicTelemetry) options.dynamicTelemetry.current = body.telemetry
             synced = true
             options.connectivity(true)
             projects?.setTransport(projectRPC.request)
@@ -661,6 +664,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
                 identity,
                 tracer,
                 connectivity,
+                ...(options.dynamicTelemetry ? { dynamicTelemetry: options.dynamicTelemetry } : {}),
                 incarnation,
                 heartbeatMs,
                 controlTimeoutMs: controlTimeoutSeconds * 1000,
@@ -770,6 +774,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
               ...options.project,
               dataDir: options.dataDirectory,
               nodeId: identity.node_id,
+              ...(options.dynamicTelemetry ? { telemetry: options.dynamicTelemetry } : {}),
               onReportChanged: () => {
                 devicesDirty = true
                 options.project?.onReportChanged?.()
@@ -935,7 +940,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
   })
   return program.pipe(
     Effect.provideService(DaemonServices, {
-      host: options.host ?? new LocalWorkerHost(options.dataDirectory),
+      host: options.host ?? new LocalWorkerHost(options.dataDirectory, undefined, options.dynamicTelemetry),
       transport: options.transport ?? connectWebSocket,
       probe:
         options.probe ??

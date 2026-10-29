@@ -3,6 +3,7 @@ import { rm } from 'node:fs/promises'
 import { Effect } from 'effect'
 import { WebSocketServer } from 'ws'
 import type { NodeIdentity, RuntimeAgent } from '@baton/protocol'
+import { telemetryLayer } from '@baton/telemetry'
 import { initializeBrowseRoots } from '../devices/roots.ts'
 import { runDaemon, type RunDaemonOptions } from '../daemon/daemon.ts'
 import { connectWebSocket } from '../daemon/transport.ts'
@@ -53,18 +54,33 @@ export async function setupDaemon(cleanup: Array<() => Promise<unknown>>) {
   const start = (options: Partial<RunDaemonOptions> = {}) => {
     const controller = new AbortController()
     let failure: unknown
+    const program = Effect.scoped(
+      runDaemon({
+        dataDirectory: path,
+        identity: id,
+        transport,
+        heartbeatMs: 100,
+        pollIntervalMs: 20,
+        probe: async () => capability,
+        ...options,
+      }),
+    )
     const running = Effect.runPromise(
-      Effect.scoped(
-        runDaemon({
-          dataDirectory: path,
-          identity: id,
-          transport,
-          heartbeatMs: 100,
-          pollIntervalMs: 20,
-          probe: async () => capability,
-          ...options,
-        }),
-      ),
+      options.dynamicTelemetry
+        ? program.pipe(
+            Effect.provide(
+              telemetryLayer(
+                'batond',
+                {
+                  OTEL_BSP_SCHEDULE_DELAY: '30',
+                  OTEL_BLRP_SCHEDULE_DELAY: '30',
+                  OTEL_METRIC_EXPORT_INTERVAL: '300',
+                },
+                options.dynamicTelemetry,
+              ),
+            ),
+          )
+        : program,
       { signal: controller.signal },
     ).catch((error: unknown) => {
       if (!controller.signal.aborted) failure = error

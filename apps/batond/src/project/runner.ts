@@ -3,6 +3,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { randomUUID } from 'node:crypto'
+import { telemetryEnvironment } from '@baton/telemetry'
 import { isSea } from 'node:sea'
 import { Schema } from 'effect'
 import { ProjectRuntime, ModelConnection, normalizeProjectProvider } from '@baton/protocol'
@@ -83,7 +84,7 @@ export class RuntimeRunner {
         ...command,
         args: [...(command.args ?? []), ...args],
         ...((cwd ?? command.cwd) ? { cwd: cwd ?? command.cwd! } : {}),
-        env: { ...process.env, ...command.env, ...env },
+        env: { ...process.env, ...telemetryEnvironment(this.options.telemetry), ...command.env, ...env },
       },
       {
         watchdog: this.watchdog,
