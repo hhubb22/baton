@@ -37,6 +37,7 @@ import { workerPaths } from './paths.ts'
 import { readPrivateFile } from '../platform/private.ts'
 import { listenWorker, IPCError } from './ipc.ts'
 import { nodeMetricsLoop } from './telemetry.ts'
+import type { TelemetryRelay } from './telemetry-relay.ts'
 import {
   readUpgradeState,
   prepareUpgradeRequest,
@@ -59,7 +60,7 @@ export class NeedsReauthentication extends Error {
 }
 export interface RunDaemonOptions {
   readonly dataDirectory: string
-  readonly dynamicTelemetry?: import('@baton/telemetry').DynamicTelemetry
+  readonly telemetryRelay?: TelemetryRelay
   readonly identity?: NodeIdentity
   readonly relayURL?: string
   readonly caFile?: string
@@ -129,7 +130,7 @@ async function connected(options: {
   identity: NodeIdentity
   tracer: Tracer.Tracer
   connectivity: (online: boolean) => void
-  dynamicTelemetry?: import('@baton/telemetry').DynamicTelemetry
+  telemetryRelay?: TelemetryRelay
   incarnation: string
   heartbeatMs: number
   controlTimeoutMs: number
@@ -345,7 +346,22 @@ async function connected(options: {
       if (body.type === 'node.sync_result') {
         if (env.correlation_id === syncId) {
           if (body.ok) {
-            if (options.dynamicTelemetry) options.dynamicTelemetry.current = undefined
+            if (body.telemetry?.forward && options.telemetryRelay) {
+              const relay = options.telemetryRelay
+              relay.send = (signal, payload) => {
+                if (!synced) return
+                connection.tryTelemetry?.({
+                  kind: 'envelope',
+                  envelope: {
+                    version: 1,
+                    message_id: randomUUID(),
+                    route: { to: 'control' },
+                    priority: '',
+                    body: { type: 'telemetry.export', signal, payload },
+                  },
+                })
+              }
+            }
             synced = true
             options.connectivity(true)
             projects?.setTransport(projectRPC.request)
@@ -482,6 +498,7 @@ async function connected(options: {
     if (failure) throw failure
     if (!signal.aborted) throw new Error('节点连接已断开')
   } finally {
+    if (options.telemetryRelay) options.telemetryRelay.send = undefined
     options.connectivity(false)
     for (const sent of sentReports.values()) sent.span.end(BigInt(Date.now()) * 1_000_000n, Exit.fail('disconnected'))
     abort()
@@ -664,7 +681,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
                 identity,
                 tracer,
                 connectivity,
-                ...(options.dynamicTelemetry ? { dynamicTelemetry: options.dynamicTelemetry } : {}),
+                ...(options.telemetryRelay ? { telemetryRelay: options.telemetryRelay } : {}),
                 incarnation,
                 heartbeatMs,
                 controlTimeoutMs: controlTimeoutSeconds * 1000,
@@ -774,7 +791,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
               ...options.project,
               dataDir: options.dataDirectory,
               nodeId: identity.node_id,
-              ...(options.dynamicTelemetry ? { telemetry: options.dynamicTelemetry } : {}),
+              ...(options.telemetryRelay ? { telemetry: options.telemetryRelay } : {}),
               onReportChanged: () => {
                 devicesDirty = true
                 options.project?.onReportChanged?.()
@@ -940,7 +957,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
   })
   return program.pipe(
     Effect.provideService(DaemonServices, {
-      host: options.host ?? new LocalWorkerHost(options.dataDirectory, undefined, options.dynamicTelemetry),
+      host: options.host ?? new LocalWorkerHost(options.dataDirectory, undefined, options.telemetryRelay),
       transport: options.transport ?? connectWebSocket,
       probe:
         options.probe ??

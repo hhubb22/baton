@@ -7,7 +7,7 @@ import type {
   ProjectRuntimeResult,
 } from '@baton/protocol'
 import type { ProcessCommand } from '../platform/process.ts'
-import type { DynamicTelemetry } from '@baton/telemetry'
+import type { LocalTelemetry } from '@baton/telemetry'
 
 export type ProjectTransport = (request: ProjectRuntimeRequest, signal: AbortSignal) => Promise<ProjectRuntimeResult>
 export interface ProjectClock {
@@ -17,7 +17,7 @@ export interface ProjectClock {
 export interface ProjectManagerOptions {
   dataDir: string
   nodeId?: string
-  telemetry?: DynamicTelemetry
+  telemetry?: LocalTelemetry
   runtimeCommand?: ProcessCommand
   watchdogCommand?: ProcessCommand
   clock?: ProjectClock

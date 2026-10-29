@@ -131,7 +131,11 @@ const replayRecords = (input: unknown, identity: ForwardIdentity) => {
   })
 }
 
-export function filterForward(signal: ForwardSignal, payload: unknown, identity: ForwardIdentity): unknown | undefined {
+export function filterForward(
+  signal: ForwardSignal,
+  payload: unknown,
+  identity: ForwardIdentity,
+): Record<string, unknown> | undefined {
   if (!isRecord(payload)) return undefined
   const root = signal === 'traces' ? 'resourceSpans' : signal === 'logs' ? 'resourceLogs' : 'resourceMetrics'
   const groups = records(payload[root])

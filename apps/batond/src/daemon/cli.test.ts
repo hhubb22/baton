@@ -92,6 +92,30 @@ it.each(['up', 'run'])('passes the default control budget through %s', async (ac
   expect(runDaemon).toHaveBeenCalledWith(expect.objectContaining({ controlTimeoutSeconds: 370 }))
 })
 
+it('uses a local OTLP endpoint without starting a forwarding receiver', async () => {
+  const previous = process.env.OTEL_EXPORTER_OTLP_ENDPOINT
+  process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://127.0.0.1:1'
+  try {
+    await runDaemonCLI('run', [])
+    expect(vi.mocked(runDaemon).mock.calls.at(-1)?.[0].telemetryRelay).toBeUndefined()
+  } finally {
+    if (previous === undefined) delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT
+    else process.env.OTEL_EXPORTER_OTLP_ENDPOINT = previous
+  }
+})
+
+it('does not send a local signal-specific header to the loopback receiver', async () => {
+  const previous = process.env.OTEL_EXPORTER_OTLP_TRACES_HEADERS
+  process.env.OTEL_EXPORTER_OTLP_TRACES_HEADERS = 'authorization=local-header'
+  try {
+    await runDaemonCLI('run', [])
+    expect(vi.mocked(runDaemon).mock.calls.at(-1)?.[0].telemetryRelay).toBeUndefined()
+  } finally {
+    if (previous === undefined) delete process.env.OTEL_EXPORTER_OTLP_TRACES_HEADERS
+    else process.env.OTEL_EXPORTER_OTLP_TRACES_HEADERS = previous
+  }
+})
+
 it.each(['1', '3600'])('passes an explicit %s-second control budget to the daemon', async (value) => {
   await runDaemonCLI('run', ['--control-timeout-seconds', value])
   expect(runDaemon).toHaveBeenCalledWith(expect.objectContaining({ controlTimeoutSeconds: Number(value) }))

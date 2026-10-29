@@ -19,6 +19,7 @@ import { reportBatondError } from '../cli.ts'
 import { acquireProcessLock } from '../platform/lock.ts'
 import { DeploymentInvalid } from './deployment.ts'
 import { NeedsReauthentication } from './daemon.ts'
+import { startTelemetryRelay } from './telemetry-relay.ts'
 
 vi.mock('../project/index.ts', () => ({
   makeProjectManager: () => {
@@ -71,6 +72,91 @@ function control(socket: WebSocket, body: unknown, correlation?: string, id: str
   )
 }
 const bodyOf = (frame: Frame) => (frame.envelope as unknown as Envelope)?.body as Record<string, unknown> | undefined
+
+it('forwards daemon telemetry only while synchronized and connected', async () => {
+  const { path, wss, start } = await setup()
+  const relay = await startTelemetryRelay()
+  cleanup.push(relay.close)
+  const signals = new Set<string>()
+  const forwarded: unknown[] = []
+  let socket: WebSocket | undefined
+  wss.on('connection', (current) => {
+    socket = current
+    current.on('message', (raw) => {
+      const frame = JSON.parse(webSocketText(raw)) as Frame
+      if (frame.kind === 'auth') current.send(JSON.stringify({ kind: 'auth_result', ok: true }))
+      const body = bodyOf(frame)
+      if (body?.type === 'node.sync')
+        control(
+          current,
+          { type: 'node.sync_result', ok: true, telemetry: { forward: true } },
+          (frame.envelope as unknown as Envelope).message_id,
+        )
+      if (body?.type === 'telemetry.export' && typeof body.signal === 'string') {
+        signals.add(body.signal)
+        forwarded.push(body.payload)
+      }
+    })
+  })
+  const daemon = start({ telemetryRelay: relay })
+  await vi.waitFor(() => expect(signals.has('traces')).toBe(true), { timeout: 5000 })
+  await vi.waitFor(() => expect(signals.has('logs')).toBe(true), { timeout: 5000 })
+  await vi.waitFor(() => expect(signals.has('metrics')).toBe(true), { timeout: 5000 })
+  socket?.terminate()
+  await vi.waitFor(() => expect(relay.send).toBeUndefined())
+  const marker = randomUUID()
+  const authorization = decodeURIComponent(relay.headers.slice('authorization='.length))
+  const post = (value: string) =>
+    fetch(`${relay.endpoint}/v1/traces`, {
+      method: 'POST',
+      headers: { authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ value }),
+    })
+  await post(marker)
+  await vi.waitFor(() => expect(relay.send).toBeDefined(), { timeout: 5000 })
+  const current = randomUUID()
+  await post(current)
+  await vi.waitFor(() => expect(JSON.stringify(forwarded)).toContain(current))
+  expect(JSON.stringify(forwarded)).not.toContain(marker)
+  for (const name of ['node.db', 'node.db-wal']) {
+    const bytes = await readFile(join(path, name)).catch(() => Buffer.alloc(0))
+    expect(bytes.includes(Buffer.from(authorization))).toBe(false)
+    expect(bytes.includes(Buffer.from(authorization.slice('Bearer '.length)))).toBe(false)
+  }
+  await daemon.stop()
+})
+
+it('drops local batches when the center does not enable forwarding', async () => {
+  const { wss, start } = await setup()
+  const relay = await startTelemetryRelay()
+  cleanup.push(relay.close)
+  let synced = false
+  const forwarded: unknown[] = []
+  wss.on('connection', (socket) =>
+    socket.on('message', (raw) => {
+      const frame = JSON.parse(webSocketText(raw)) as Frame
+      if (frame.kind === 'auth') socket.send(JSON.stringify({ kind: 'auth_result', ok: true }))
+      const body = bodyOf(frame)
+      if (body?.type === 'node.sync') {
+        control(socket, { type: 'node.sync_result', ok: true }, (frame.envelope as unknown as Envelope).message_id)
+        synced = true
+      }
+      if (body?.type === 'telemetry.export') forwarded.push(body)
+    }),
+  )
+  const daemon = start({ telemetryRelay: relay })
+  await vi.waitFor(() => expect(synced).toBe(true))
+  const authorization = decodeURIComponent(relay.headers.slice('authorization='.length))
+  const response = await fetch(`${relay.endpoint}/v1/traces`, {
+    method: 'POST',
+    headers: { authorization, 'content-type': 'application/json' },
+    body: '{}',
+  })
+  expect(response.status).toBe(200)
+  expect(relay.send).toBeUndefined()
+  expect(forwarded).toEqual([])
+  await daemon.stop()
+})
 
 it('reconnects with the same incarnation, retains reports before Worker ACK, and redelivers without executing twice after restart', async () => {
   const { path, id, wss, start } = await setup()

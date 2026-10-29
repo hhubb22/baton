@@ -121,6 +121,9 @@ export const connectAgentHost = (
           env: {
             ...agentEnvironment(options.agentType),
             ...Object.fromEntries(Object.entries(process.env).filter(([name]) => name.startsWith('OTEL_'))),
+            ...(process.env.BATON_TELEMETRY_LOCAL_RELAY
+              ? { BATON_TELEMETRY_LOCAL_RELAY: process.env.BATON_TELEMETRY_LOCAL_RELAY }
+              : {}),
             ...(process.env.BATON_TELEMETRY_NODE_ID
               ? { BATON_TELEMETRY_NODE_ID: process.env.BATON_TELEMETRY_NODE_ID }
               : {}),

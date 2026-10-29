@@ -44,7 +44,7 @@ const open = async (mode = 'idle', real = false) => {
 const quickRunner = async (
   program: string,
   credentialsDirectory?: string,
-  telemetry?: import('@baton/telemetry').DynamicTelemetry,
+  telemetry?: import('@baton/telemetry').LocalTelemetry,
 ) => {
   const dataDir = await makePrivateTempDirectory('baton-early-output-')
   cleanups.push(() => rm(dataDir, { recursive: true, force: true }))
@@ -80,8 +80,9 @@ const quickRunner = async (
   return { runner, dataDir }
 }
 it('passes current telemetry headers to Runtime through its environment', async () => {
-  const telemetry: import('@baton/telemetry').DynamicTelemetry = {
-    current: { endpoint: 'http://collector.invalid', headers: 'authorization=remote-key' },
+  const telemetry: import('@baton/telemetry').LocalTelemetry = {
+    endpoint: 'http://127.0.0.1:1',
+    headers: 'authorization=local-key',
   }
   const { runner } = await quickRunner(
     'console.log(JSON.stringify({headers:process.env.OTEL_EXPORTER_OTLP_HEADERS,argv:process.argv}))',
@@ -109,8 +110,8 @@ it('passes current telemetry headers to Runtime through its environment', async 
     await outputEnded
     await runner.reap(owned)
     const result = JSON.parse(output) as { headers: string; argv: string[] }
-    expect(result.headers).toBe('authorization=remote-key')
-    expect(result.argv.join(' ')).not.toContain('remote-key')
+    expect(result.headers).toBe('authorization=local-key')
+    expect(result.argv.join(' ')).not.toContain('local-key')
   } finally {
     if (old === undefined) delete process.env.OTEL_EXPORTER_OTLP_HEADERS
     else process.env.OTEL_EXPORTER_OTLP_HEADERS = old
