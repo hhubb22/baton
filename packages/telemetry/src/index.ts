@@ -9,7 +9,7 @@ import {
 } from 'effect/http'
 import { OtlpLogger, OtlpMetrics, OtlpSerialization, OtlpTracer } from 'effect/observability'
 import { BUILD } from '@baton/protocol/release.mjs'
-import { MaxMessageBytes } from '@baton/protocol'
+import { MaxMessageBytes } from '@baton/protocol/constants'
 import type { TraceData } from 'effect/observability/OtlpTracer'
 import type { KeyValue } from 'effect/observability/OtlpResource'
 import { TraceContext } from '@baton/protocol/trace'
