@@ -1,7 +1,8 @@
 import { createServer } from 'node:http'
-import { Effect, Exit, Option, Tracer } from 'effect'
+import { Effect, Exit, Metric, Option, Tracer } from 'effect'
 import { expect, it, vi } from 'vite-plus/test'
 import * as Statement from 'effect/sql/Statement'
+import { BUILD } from '@baton/protocol/release.mjs'
 import {
   captureTrace,
   decodeTrace,
@@ -63,6 +64,7 @@ it('exports to a local OTLP capture endpoint on scope release and redacts automa
               Effect.gen(function* () {
                 const span = yield* Effect.currentSpan
                 span.event('effect.sql.transaction.commit', BigInt(Date.now()) * 1_000_000n, { token: 'secret' })
+                span.event('effect.sql.transaction.secret', BigInt(Date.now()) * 1_000_000n)
                 span.event('exception', BigInt(Date.now()) * 1_000_000n, { message: 'secret' })
                 expect(yield* Statement.SpanPropagationEnabled).toBe(true)
                 yield* withTraceSpan(Effect.void, 'sql.connection.wait', undefined, {
@@ -77,6 +79,31 @@ it('exports to a local OTLP capture endpoint on scope release and redacts automa
               'db.query.text': 'secret SQL parameter',
               'baton.command.id': 'command',
             })
+            yield* withTraceSpan(Effect.void, 'baton.usage.missing', undefined, {
+              attributes: {
+                'baton.usage.reported': false,
+                'gen_ai.usage.input_tokens': 0,
+                'gen_ai.request.model': 'custom-invalid-model',
+              },
+            })
+            yield* withTraceSpan(Effect.void, 'baton.usage.zero', undefined, {
+              attributes: {
+                'baton.usage.reported': true,
+                'gen_ai.usage.input_tokens': 0,
+              },
+            })
+            yield* Effect.log('secret body /private/path')
+            yield* Effect.log('baton.wait.start').pipe(
+              Effect.annotateLogs({ 'baton.wait.reason': 'queue', secret: 'secret annotation' }),
+            )
+            yield* Metric.update(
+              Metric.gauge('baton.workers.active', {
+                description: 'secret description',
+                attributes: { 'baton.agent': 'codex', 'baton.thread.id': 'secret thread', secret: 'secret label' },
+              }),
+              1,
+            )
+            yield* Effect.sleep('200 millis')
             return yield* Effect.fail(error)
           }),
           'baton.failure',
@@ -85,25 +112,55 @@ it('exports to a local OTLP capture endpoint on scope release and redacts automa
         Effect.provide(
           telemetryLayer('test-worker', {
             OTEL_EXPORTER_OTLP_ENDPOINT: `http://127.0.0.1:${address.port}`,
-            OTEL_RESOURCE_ATTRIBUTES: 'deployment.environment.name=test',
+            OTEL_RESOURCE_ATTRIBUTES:
+              'deployment.environment.name=test,secret=secret-resource,service.version=spoof,vcs.ref.head.revision=spoof',
+            OTEL_SERVICE_VERSION: 'spoof',
+            OTEL_BLRP_SCHEDULE_DELAY: '30',
+            OTEL_METRIC_EXPORT_INTERVAL: '30',
           }),
         ),
       ),
     )
     expect(Exit.isFailure(result)).toBe(true)
     if (Exit.isFailure(result)) expect(result.cause.reasons[0]).toMatchObject({ error })
-    expect(payloads).toHaveLength(1)
     const raw = payloads.join('')
     expect(raw).not.toContain('secret')
     expect(raw).not.toContain('db.query.text')
-    const payload = JSON.parse(payloads[0]!)
+    const payload = payloads.map((body) => JSON.parse(body)).find((body) => body.resourceSpans)
+    expect(payload).toBeDefined()
+    const logs = payloads.map((body) => JSON.parse(body)).find((body) => body.resourceLogs)
+    expect(logs.resourceLogs[0].scopeLogs[0].logRecords.map((record: { body: unknown }) => record.body)).toEqual([
+      { stringValue: 'baton.wait.start' },
+    ])
+    const metrics = payloads.map((body) => JSON.parse(body)).find((body) => body.resourceMetrics)
+    expect(metrics.resourceMetrics[0].scopeMetrics[0].metrics[0].gauge.dataPoints[0].attributes).toEqual([
+      { key: 'baton.agent', value: { stringValue: 'codex' } },
+    ])
     const resource = payload.resourceSpans[0]
+    for (const signalResource of [resource, logs.resourceLogs[0], metrics.resourceMetrics[0]]) {
+      expect(signalResource.resource.attributes).toContainEqual({
+        key: 'service.version',
+        value: { stringValue: BUILD.version },
+      })
+      expect(signalResource.resource.attributes).toContainEqual({
+        key: 'vcs.ref.head.revision',
+        value: { stringValue: BUILD.commit },
+      })
+    }
     expect(resource.resource.attributes).toContainEqual({ key: 'service.name', value: { stringValue: 'test-worker' } })
     expect(resource.resource.attributes).toContainEqual({
       key: 'deployment.environment.name',
       value: { stringValue: 'test' },
     })
     const spans = resource.scopeSpans[0].spans
+    const missing = spans.find((span: { name: string }) => span.name === 'baton.usage.missing')
+    expect(missing.attributes).not.toContainEqual({ key: 'gen_ai.usage.input_tokens', value: { intValue: 0 } })
+    expect(missing.attributes).toContainEqual({
+      key: 'gen_ai.request.model',
+      value: { stringValue: 'custom-invalid-model' },
+    })
+    const zero = spans.find((span: { name: string }) => span.name === 'baton.usage.zero')
+    expect(zero.attributes).toContainEqual({ key: 'gen_ai.usage.input_tokens', value: { intValue: 0 } })
     const wait = spans.find((span: { name: string }) => span.name === 'sql.connection.wait')
     expect(wait.attributes).toEqual([{ key: 'db.client.connection.wait_time_ms', value: { doubleValue: 12.5 } }])
     const sql = spans.find((span: { name: string }) => span.name === 'sql.execute')
@@ -205,4 +262,83 @@ it('preserves thrown values across the Promise boundary', async () => {
       throw failure
     }),
   ).rejects.toBe(failure)
+})
+
+it('drops failed exports without retrying or changing the application result', async () => {
+  let requests = 0
+  const server = createServer((request, response) => {
+    request.resume()
+    requests++
+    response.writeHead(503).end()
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address() as { port: number }
+  try {
+    const result = await Effect.runPromise(
+      withTraceSpan(Effect.succeed('ok'), 'baton.test').pipe(
+        Effect.provide(
+          telemetryLayer('test', {
+            OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `http://127.0.0.1:${address.port}/v1/traces`,
+          }),
+        ),
+      ),
+    )
+    expect(result).toBe('ok')
+    expect(requests).toBe(1)
+  } finally {
+    server.closeAllConnections()
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+})
+
+it('shares export capacity and resumes after the pause across signals', async () => {
+  let now = Date.now()
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+  const paths: string[] = []
+  const pending: Array<import('node:http').ServerResponse> = []
+  const server = createServer((request, response) => {
+    request.resume()
+    paths.push(request.url!)
+    if (paths.length <= 2) pending.push(response)
+    else response.writeHead(200).end('{}')
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address() as { port: number }
+  try {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* withTraceSpan(Effect.void, 'baton.first')
+        yield* Effect.log('baton.wait.start')
+        yield* Effect.promise(() => vi.waitFor(() => expect(paths).toHaveLength(2)))
+        yield* Metric.update(Metric.gauge('baton.nodes.online'), 1)
+        yield* Effect.sleep('100 millis')
+        expect(paths).toHaveLength(2)
+        for (const response of pending) response.writeHead(200).end('{}')
+        yield* withTraceSpan(Effect.void, 'baton.during.pause')
+        yield* Effect.sleep('100 millis')
+        expect(paths).toHaveLength(2)
+        now += 61_000
+        yield* Effect.sleep('100 millis')
+        yield* withTraceSpan(Effect.void, 'baton.after.pause')
+        yield* Effect.promise(() => vi.waitFor(() => expect(paths.length).toBeGreaterThan(2)))
+      }).pipe(
+        Effect.provide(
+          telemetryLayer('test', {
+            OTEL_EXPORTER_OTLP_ENDPOINT: `http://127.0.0.1:${address.port}`,
+            OTEL_BSP_MAX_EXPORT_BATCH_SIZE: '1',
+            OTEL_BLRP_MAX_EXPORT_BATCH_SIZE: '1',
+            OTEL_METRIC_EXPORT_INTERVAL: '30',
+            OTEL_BSP_SCHEDULE_DELAY: '30',
+            OTEL_BLRP_SCHEDULE_DELAY: '30',
+          }),
+        ),
+      ),
+    )
+    expect(paths).toContain('/v1/traces')
+    expect(paths).toContain('/v1/logs')
+  } finally {
+    clock.mockRestore()
+    server.closeAllConnections()
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
 })
