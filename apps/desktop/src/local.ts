@@ -18,7 +18,7 @@ export interface LocalIdentity {
   coordinator_url: string
 }
 export function localAccount(saved: PublicIdentity, origin: string | undefined, employeeId: string): LocalIdentity {
-  if (!origin || !saved.registered || !saved.employee_id) throw new Error('Connect this computer first.')
+  if (!origin || !saved.registered || !saved.employee_id) throw new Error('请先连接此电脑。')
   if (saved.coordinator_url !== origin || saved.employee_id !== employeeId)
     throw new Error('Sign in to this computer’s account to use local actions.')
   return { node_id: saved.node_id, employee_id: saved.employee_id, coordinator_url: saved.coordinator_url }
@@ -49,7 +49,7 @@ function parse<A>(schema: Schema.ConstraintDecoder<A, never>, input: unknown): A
   try {
     return Schema.decodeUnknownSync(schema, { onExcessProperty: 'error' })(input)
   } catch {
-    throw new Error('Invalid local action.')
+    throw new Error('本机操作无效。')
   }
 }
 
@@ -59,15 +59,14 @@ export class LocalActions {
   private async device(input: unknown) {
     const { nodeId } = parse(LocalDeviceInput, input)
     const identity = await this.dependencies.identity()
-    if (nodeId !== identity.node_id) throw new Error('This device is not this computer.')
+    if (nodeId !== identity.node_id) throw new Error('此设备不是当前电脑。')
     return identity
   }
 
   async openLocal(input: unknown) {
     const { threadId, action } = parse(OpenLocalInput, input)
     const identity = await this.dependencies.identity()
-    if ((await this.dependencies.threadNode(threadId)) !== identity.node_id)
-      throw new Error('This thread is not on this computer.')
+    if ((await this.dependencies.threadNode(threadId)) !== identity.node_id) throw new Error('此对话不在当前电脑上。')
     const saved = await this.dependencies.directory(threadId)
     if (
       saved.node_id !== identity.node_id ||
@@ -75,23 +74,23 @@ export class LocalActions {
       saved.coordinator_url !== identity.coordinator_url ||
       !isAbsolute(saved.working_directory)
     )
-      throw new Error('This thread is not on this computer.')
+      throw new Error('此对话不在当前电脑上。')
     let path: string
     try {
       path = await realpath(saved.working_directory)
-      if (!(await stat(path)).isDirectory()) throw new Error('Not a directory')
+      if (!(await stat(path)).isDirectory()) throw new Error('不是文件夹')
     } catch {
-      throw new Error('This folder no longer exists.')
+      throw new Error('此文件夹已不存在。')
     }
     // batond 返回已按登记范围解析的目录；打开前再核查路径未被替换成符号链接。
-    if (path !== saved.working_directory) throw new Error('The folder changed. Try again.')
+    if (path !== saved.working_directory) throw new Error('文件夹已更改，请重试。')
     const current = await this.dependencies.identity()
     if (
       current.node_id !== identity.node_id ||
       current.employee_id !== identity.employee_id ||
       current.coordinator_url !== identity.coordinator_url
     )
-      throw new Error('The local account changed. Try again.')
+      throw new Error('本机账号已更改，请重试。')
     await this.dependencies.openDirectory(path, action === 'editor')
   }
 
@@ -111,7 +110,7 @@ export class LocalActions {
   async restartDaemon(input: unknown) {
     await this.device(input)
     if (!(await this.dependencies.diagnostics()).canRestart)
-      throw new Error('The device service cannot be restarted during an update or by another service manager.')
+      throw new Error('更新期间或由其他服务管理器管理时，无法重启设备服务。')
     await this.dependencies.restart()
   }
 
@@ -128,7 +127,7 @@ export class LocalActions {
   async setModelConnectionKey(input: unknown) {
     const value = parse(ModelConnectionKeyInput, input)
     await this.device({ nodeId: value.nodeId })
-    if (!this.dependencies.setModelConnectionKey) throw new Error('Local model configuration is unavailable.')
+    if (!this.dependencies.setModelConnectionKey) throw new Error('本机模型配置不可用。')
     await this.dependencies.setModelConnectionKey(value.connectionId, value.key)
   }
 }

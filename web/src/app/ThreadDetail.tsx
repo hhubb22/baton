@@ -53,6 +53,7 @@ import { copySelection, SelectionArea } from './SelectionMenu'
 import { ThreadQuestionForm } from './ThreadQuestionForm'
 import { ThreadQuestionAnswerStatus } from './ThreadQuestionAnswerStatus'
 import { ThreadModelMenu } from './ThreadModelMenu'
+import { modelThinking, ThinkingMenu } from './ThinkingMenu'
 import { useNow } from './useNow'
 import { useWorkspace } from './workspace'
 
@@ -218,21 +219,17 @@ export function statusTextStyle(tone: Tone) {
 }
 
 const actionLabels: Record<ThreadAction, string> = {
-  resume: 'Resume thread',
-  newChat: 'New thread in this folder',
-  chooseFolder: 'Choose folder',
-  viewDevices: 'View devices',
-  viewActivity: 'View activity',
+  resume: '恢复对话',
+  newChat: '在此文件夹新建对话',
+  chooseFolder: '选择文件夹',
+  viewDevices: '查看设备',
+  viewActivity: '查看执行过程',
 }
 
 export type RecoverAction = 'newChat' | 'chooseFolder'
 
 function waitingCount(messages: Message[]) {
   return messages.filter((item) => item.delivery === 'queued' || item.delivery === 'waitingDevice').length
-}
-
-function plural(count: number, word: string) {
-  return `${count} ${word}${count === 1 ? '' : 's'}`
 }
 
 function errorText(cause: unknown, fallback: string) {
@@ -301,7 +298,7 @@ function MessageItem({
       >
         <ActivityTrace message={message} device={device} command={command} />
         <div data-reply={reply}>
-          {outputGap && <span {...stylex.props(text.caption, styles.muted)}>Earlier output not kept</span>}
+          {outputGap && <span {...stylex.props(text.caption, styles.muted)}>较早的输出未保留</span>}
           <MessageBody body={message.body} onOpenPath={onOpenPath} streaming={message.streaming} />
         </div>
         {message.fullOutput && <FullOutput threadId={message.threadId} reference={message.fullOutput} />}
@@ -314,32 +311,32 @@ function MessageItem({
     <>
       {' · '}
       <button type="button" onClick={() => onCancel(message)} {...stylex.props(styles.link, focusRing.ring)}>
-        Cancel
+        取消
       </button>
     </>
   )
   let note: ReactNode = null
   switch (message.delivery) {
     case 'submitted':
-      note = 'Sending…'
+      note = '正在发送…'
       break
     case 'saved':
-      note = 'Saved'
+      note = '已保存'
       break
     case 'queued':
-      note = <>Sending next{cancel}</>
+      note = <>下一条发送{cancel}</>
       break
     case 'waitingDevice':
-      note = <>Sends when online{cancel}</>
+      note = <>设备上线后发送{cancel}</>
       break
     case 'withdrawn':
-      note = 'Not sent'
+      note = '未发送'
       break
   }
   return (
     <article id={`message-${message.id}`} {...stylex.props(styles.userItem)}>
       <div {...stylex.props(styles.userLine)}>
-        {message.sender === 'projectAgent' && <AgentMark label="From project assistant" />}
+        {message.sender === 'projectAgent' && <AgentMark label="来自项目助手" />}
         <div {...stylex.props(text.body, styles.user, message.delivery === 'withdrawn' && styles.withdrawn)}>
           <MessageBody body={message.body} onOpenPath={onOpenPath} />
         </div>
@@ -347,8 +344,8 @@ function MessageItem({
       {message.delivery === 'unknown' ? (
         <span
           role="img"
-          aria-label="Delivery unknown"
-          title="Delivery unknown"
+          aria-label="发送状态未知"
+          title="发送状态未知"
           {...stylex.props(text.caption, styles.note, styles.noteUnknown)}
         >
           <Icon name="alert" size={12} />
@@ -413,15 +410,15 @@ function ModelMenu({
   agent: DeviceAgent | undefined
   onSelect: (model: string) => void
 }) {
-  const name = thread.agent ? agentNames[thread.agent] : 'Command'
+  const name = thread.agent ? agentNames[thread.agent] : '命令'
   return (
     <ThreadModelMenu
       side="top"
       mode="switch"
       agents={agent ? [agent] : []}
       choice={thread.agent ? { agent: thread.agent, model: thread.model } : null}
-      label={thread.model || 'Default model'}
-      lockedReason={agent?.abilities.switchModel ? undefined : `${name} can't switch models in this thread.`}
+      label={thread.model || '默认模型'}
+      lockedReason={agent?.abilities.switchModel ? undefined : `${name} 无法在此对话中切换模型。`}
       onSelect={(choice) => onSelect(choice.model)}
     />
   )
@@ -465,6 +462,10 @@ export function ThreadDetail({
   const resume = useResumeThread()
   const [draft, setDraft] = useState('')
   const [mode, setMode] = useState<SendMode>('next')
+  const [thinkingChoice, setThinkingChoice] = useState<{
+    key: string
+    value: import('@baton/protocol').ThinkingSelection | null
+  } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<Confirm>(null)
   const [resumeId, setResumeId] = useState<string | null>(null)
@@ -484,6 +485,15 @@ export function ThreadDetail({
   const canAsk = !!thread?.projectId && projects.isSuccess && !projectArchived
   const device = devices.data?.find((item) => item.id === thread?.deviceId)
   const agent = device?.agents.find((item) => item.kind === thread?.agent)
+  const thinking = modelThinking(agent, thread?.model || agent?.defaultModel || '')
+  const thinkingKey = JSON.stringify([threadId, thread?.model])
+  const selectedThinking = thinkingChoice?.key === thinkingKey ? thinkingChoice.value : thread?.thinking
+  const validThinking =
+    thinking &&
+    selectedThinking?.id === thinking.id &&
+    thinking.options.some((option) => option.id === selectedThinking.value)
+      ? selectedThinking
+      : undefined
   const list = messages.data ?? []
   const currentOutput = liveOutput.data
   if (
@@ -582,21 +592,21 @@ export function ThreadDetail({
 
   if (threadQuery.error instanceof ClientError && threadQuery.error.code === 'notFound') {
     return (
-      <Shell layout={layout} title="Thread not found" onClose={onClose}>
-        <p {...stylex.props(text.body, styles.empty)}>This thread was deleted or you no longer have access.</p>
+      <Shell layout={layout} title="未找到对话" onClose={onClose}>
+        <p {...stylex.props(text.body, styles.empty)}>对话已删除，或你已无权访问。</p>
       </Shell>
     )
   }
   if (threadQuery.isError) {
     return (
-      <Shell layout={layout} title="Thread" onClose={onClose}>
+      <Shell layout={layout} title="对话" onClose={onClose}>
         <div {...stylex.props(styles.empty)}>
           <Banner
             icon="alert"
-            title="Couldn't load this thread"
+            title="无法加载对话"
             action={
               <Button small onClick={() => void threadQuery.refetch()}>
-                Retry
+                重试
               </Button>
             }
           />
@@ -606,8 +616,8 @@ export function ThreadDetail({
   }
   if (!thread || !view) return null
 
-  const name = device?.name ?? 'the device'
-  const agentName = thread.agent ? agentNames[thread.agent] : 'Command'
+  const name = device?.name ?? '设备'
+  const agentName = thread.agent ? agentNames[thread.agent] : '命令'
   const running = thread.status === 'running' && thread.pending === null && !thread.starting && !thread.resumePending
   const waiting = waitingCount(list)
   const resuming =
@@ -647,10 +657,16 @@ export function ThreadDetail({
     if (!body || send.isPending) return
     setError(null)
     send.mutate(
-      { threadId, body, clientId: newClientId(), mode: running ? mode : 'next' },
+      {
+        threadId,
+        body,
+        clientId: newClientId(),
+        mode: running ? mode : 'next',
+        ...(validThinking && !(running && mode === 'now') ? { thinking: validThinking } : {}),
+      },
       {
         onSuccess: () => setDraft(''),
-        onError: (cause) => setError(errorText(cause, "Couldn't send. Try again.")),
+        onError: (cause) => setError(errorText(cause, '无法发送，请重试。')),
       },
     )
   }
@@ -661,21 +677,18 @@ export function ThreadDetail({
       setError(null)
       return
     }
-    setError(`${agentName} can't read messages during a reply. Messages send after it finishes.`)
+    setError(`${agentName} 回复时无法读取新消息，消息将在回复结束后发送。`)
   }
 
   const onModel = (model: string) => {
     setError(null)
-    setModel.mutate(
-      { threadId, model },
-      { onError: (cause) => setError(errorText(cause, "Couldn't change the model. Try again.")) },
-    )
+    setModel.mutate({ threadId, model }, { onError: (cause) => setError(errorText(cause, '无法更换模型，请重试。')) })
   }
 
   const onCancel = (message: Message) => {
     setError(null)
     cancelMessage.mutate(message.id, {
-      onError: (cause) => setError(errorText(cause, "Couldn't cancel. Try again.")),
+      onError: (cause) => setError(errorText(cause, '无法取消，请重试。')),
     })
   }
 
@@ -684,7 +697,7 @@ export function ThreadDetail({
       onSuccess: () => setConfirm(null),
       onError: (cause) => {
         setConfirm(null)
-        setError(errorText(cause, "Couldn't stop. Try again."))
+        setError(errorText(cause, '无法停止，请重试。'))
       },
     })
   }
@@ -694,7 +707,7 @@ export function ThreadDetail({
       onSuccess: () => setConfirm(null),
       onError: (cause) => {
         setConfirm(null)
-        setError(errorText(cause, "Couldn't archive. Try again."))
+        setError(errorText(cause, '无法归档，请重试。'))
       },
     })
   }
@@ -706,7 +719,7 @@ export function ThreadDetail({
         if (resuming || resume.isPending) return
         resume.mutate(threadId, {
           onSuccess: (operation) => setResumeId(operation.id),
-          onError: (cause) => setError(errorText(cause, "Couldn't resume. Try again.")),
+          onError: (cause) => setError(errorText(cause, '无法恢复，请重试。')),
         })
         return
       case 'newChat':
@@ -730,9 +743,9 @@ export function ThreadDetail({
   let status: ReactNode = null
   if (error) status = error
   else if (resumeFailed) status = resumeFailed
-  else if (resuming || resume.isPending) status = 'Resuming…'
-  else if (thread.pending === 'stop' && view.live) status = 'Stopping…'
-  else if (running) status = mode === 'now' ? 'Sends during the current reply' : 'Sends after current reply'
+  else if (resuming || resume.isPending) status = '正在恢复…'
+  else if (thread.pending === 'stop' && view.live) status = '正在停止…'
+  else if (running) status = mode === 'now' ? '在当前回复期间发送' : '当前回复结束后发送'
 
   function onTimelineScroll(event: UIEvent<HTMLDivElement>) {
     const timeline = event.currentTarget
@@ -742,17 +755,17 @@ export function ThreadDetail({
   const menuItems = [
     (running || thread.starting || thread.resumePending) && !thread.pending && (
       <MenuOption key="stop" onSelect={() => setConfirm('stop')}>
-        Stop current reply
+        停止当前回复
       </MenuOption>
     ),
     thread.status !== 'archived' && thread.pending !== 'archive' && (
       <MenuOption key="archive" onSelect={() => setConfirm('archive')}>
-        Archive thread
+        归档对话
       </MenuOption>
     ),
   ].filter(Boolean)
   const more = menuItems.length > 0 && (
-    <Menu align="end" narrow trigger={<IconButton icon="dots" label="Thread actions" />}>
+    <Menu align="end" narrow trigger={<IconButton icon="dots" label="对话操作" />}>
       {menuItems}
     </Menu>
   )
@@ -770,26 +783,26 @@ export function ThreadDetail({
         <div
           ref={timelineRef}
           tabIndex={-1}
-          aria-label="Messages"
+          aria-label="消息记录"
           role="region"
           onScroll={onTimelineScroll}
           {...stylex.props(styles.timeline)}
         >
           <SelectionArea
-            label={canAsk ? 'Ask project assistant' : 'Copy selection'}
+            label={canAsk ? '询问项目助手' : '复制所选内容'}
             icon={canAsk ? 'reply' : 'copy'}
             describe={describeSelection}
             style={[styles.messages, layout === 'panel' && styles.messagesPanel]}
           >
             <InboxFeedback />
-            {messages.isPending && <p {...stylex.props(text.caption, styles.muted)}>Loading messages…</p>}
+            {messages.isPending && <p {...stylex.props(text.caption, styles.muted)}>正在加载消息…</p>}
             {messages.isError && (
               <Banner
                 icon="alert"
-                title="Couldn't load messages"
+                title="无法加载消息"
                 action={
                   <Button small onClick={() => void messages.refetch()}>
-                    Retry
+                    重试
                   </Button>
                 }
               />
@@ -883,7 +896,7 @@ export function ThreadDetail({
                   view.notice.action && (
                     <Button small onClick={() => onAction(view.notice!.action!)}>
                       {view.notice.action === 'resume' && thread.retryOpenAllowed
-                        ? 'Retry opening'
+                        ? '重试打开'
                         : actionLabels[view.notice.action]}
                     </Button>
                   )
@@ -895,11 +908,18 @@ export function ThreadDetail({
                 value={draft}
                 onChange={setDraft}
                 onSend={onSend}
-                placeholder={`Message ${agentName}…`}
+                placeholder={`给 ${agentName} 发消息…`}
                 style={styles.composer}
                 chips={
                   <>
                     <ModelMenu thread={thread} agent={agent} onSelect={onModel} />
+                    <ThinkingMenu
+                      capability={thinking}
+                      selection={validThinking}
+                      side="top"
+                      lockedReason={running && mode === 'now' ? '插话沿用当前回复的思考强度' : undefined}
+                      onSelect={(value) => setThinkingChoice({ key: thinkingKey, value })}
+                    />
                     {thread.agent && (
                       <ThreadAccessMenu side="top" agent={thread.agent} user={device?.commandAccess.user ?? ''} />
                     )}
@@ -908,7 +928,7 @@ export function ThreadDetail({
                 actions={
                   running && (
                     <>
-                      <div role="group" aria-label="Send mode" {...stylex.props(styles.segmented)}>
+                      <div role="group" aria-label="发送方式" {...stylex.props(styles.segmented)}>
                         <button
                           type="button"
                           aria-pressed={mode === 'next'}
@@ -923,7 +943,7 @@ export function ThreadDetail({
                             focusRing.ring,
                           )}
                         >
-                          Send next
+                          下一条发送
                         </button>
                         <button
                           type="button"
@@ -936,12 +956,12 @@ export function ThreadDetail({
                             focusRing.ring,
                           )}
                         >
-                          Send now
+                          立即发送
                         </button>
                       </div>
                       <IconButton
                         icon="stop"
-                        label="Stop current reply"
+                        label="停止当前回复"
                         onClick={() => setConfirm('stop')}
                         style={styles.stop}
                       />
@@ -965,7 +985,7 @@ export function ThreadDetail({
             <div {...stylex.props(text.caption, styles.footer)}>
               <span {...stylex.props(styles.footerItem)}>
                 <Icon name="laptop" size={12} />
-                {device?.name ?? 'Removed device'}
+                {device?.name ?? '设备已移除'}
               </span>
               <span {...stylex.props(styles.footerItem)}>
                 <Icon name="folder" size={12} />
@@ -1030,16 +1050,16 @@ export function ThreadDetail({
   return (
     <aside aria-label={thread.title} {...stylex.props(styles.panel, pane.card)}>
       <div {...stylex.props(styles.header)}>
-        {onBack && <IconButton icon="chevron-left" label="Back to overview" onClick={onBack} />}
+        {onBack && <IconButton icon="chevron-left" label="返回概览" onClick={onBack} />}
         <h2 {...stylex.props(text.bodyMedium, styles.headerTitle, text.truncate)}>{thread.title}</h2>
         {statusLabel}
         <IconButton
           icon="external"
-          label="Open in full page"
+          label="在完整页面打开"
           onClick={() => void navigate({ to: '/threads/$threadId', params: { threadId } })}
         />
         {more}
-        {onClose && <IconButton icon="close" label="Close thread" onClick={onClose} />}
+        {onClose && <IconButton icon="close" label="关闭对话" onClick={onClose} />}
       </div>
       {body}
       {dialogs}
@@ -1063,7 +1083,7 @@ function Shell({
     <aside aria-label={title} {...stylex.props(styles.panel)}>
       <div {...stylex.props(styles.header)}>
         <h2 {...stylex.props(text.bodyMedium, styles.headerStatus, text.truncate)}>{title}</h2>
-        {onClose && <IconButton icon="close" label="Close thread" onClick={onClose} />}
+        {onClose && <IconButton icon="close" label="关闭对话" onClick={onClose} />}
       </div>
       {children}
     </aside>
@@ -1098,26 +1118,26 @@ function StopDialog({
       <Dialog
         open={open}
         onOpenChange={(next) => !next && onClose()}
-        title={`Can't stop ${agentName} from Baton`}
-        description={`Stop it on ${deviceName}, or wait for the reply.`}
+        title={`无法从 Baton 停止 ${agentName}`}
+        description={`请在 ${deviceName} 上停止，或等待回复。`}
         finalFocus={finalFocus}
-        actions={<DialogClose render={<Button>Back to thread</Button>} />}
+        actions={<DialogClose render={<Button>返回对话</Button>} />}
       />
     )
   }
-  const canceled = waiting > 0 ? `Cancels ${plural(waiting, 'waiting message')}. ` : ''
+  const canceled = waiting > 0 ? `将取消 ${waiting} 条待发送消息。` : ''
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => !next && onClose()}
-      title="Stop current reply?"
-      description={`${canceled}Changes already made stay.`}
+      title="停止当前回复？"
+      description={`${canceled}已完成的更改会保留。`}
       finalFocus={finalFocus}
       actions={
         <>
-          <DialogClose render={<Button>Keep running</Button>} />
+          <DialogClose render={<Button>继续运行</Button>} />
           <Button variant="dangerSolid" onClick={onConfirm}>
-            {submitting ? 'Stopping…' : 'Stop reply'}
+            {submitting ? '正在停止…' : '停止回复'}
           </Button>
         </>
       }
@@ -1152,31 +1172,31 @@ function ArchiveDialog({
       <Dialog
         open={open}
         onOpenChange={(next) => !next && onClose()}
-        title="Current reply must stop first"
-        description={`Stop it on ${deviceName}, or wait for the reply.`}
+        title="请先停止当前回复"
+        description={`请在 ${deviceName} 上停止，或等待回复。`}
         finalFocus={finalFocus}
-        actions={<DialogClose render={<Button>Back to thread</Button>} />}
+        actions={<DialogClose render={<Button>返回对话</Button>} />}
       />
     )
   }
-  const canceled = waiting > 0 ? ` and cancels ${plural(waiting, 'waiting message')}` : ''
+  const canceled = waiting > 0 ? `并取消 ${waiting} 条待发送消息` : ''
   const description = running
-    ? `Stops the current reply${canceled}. Replies and files are kept.`
+    ? `停止当前回复${canceled}。回复和文件会保留。`
     : waiting > 0
-      ? `Cancels ${plural(waiting, 'waiting message')}. Replies and files are kept.`
-      : 'Replies and files are kept.'
+      ? `将取消 ${waiting} 条待发送消息。回复和文件会保留。`
+      : '回复和文件会保留。'
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => !next && onClose()}
-      title="Archive this thread?"
+      title="归档此对话？"
       description={description}
       finalFocus={finalFocus}
       actions={
         <>
-          <DialogClose render={<Button>Keep thread</Button>} />
+          <DialogClose render={<Button>保留对话</Button>} />
           <Button variant="dangerSolid" onClick={onConfirm}>
-            {submitting ? 'Archiving…' : running ? 'Stop and archive' : 'Archive thread'}
+            {submitting ? '正在归档…' : running ? '停止并归档' : '归档对话'}
           </Button>
         </>
       }

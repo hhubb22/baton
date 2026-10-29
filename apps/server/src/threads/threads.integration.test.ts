@@ -13,19 +13,47 @@ import { httpApplication } from '../http/index.ts'
 import { CredentialSigner } from '../nodes.ts'
 
 type Run = TestDatabase['run']
-async function fixture(run: Run) {
+async function fixture(run: Run, thinking = false) {
   const report: P.RuntimeReport = {
     exec: { enabled: false, shell: '/bin/sh' },
     roots: [{ root_id: 'home', path: '/workspace' }],
     repos: [],
     agents: [
       {
-        agent_type: 'cursor',
+        agent_type: thinking ? 'codex' : 'cursor',
         version: '1.0.35',
         status: 'available',
-        models: [{ id: 'default', name: 'Default' }],
+        models: [
+          {
+            id: 'default',
+            name: 'Default',
+            ...(thinking
+              ? {
+                  thinking: {
+                    id: 'reasoningEffort' as const,
+                    options: [
+                      { id: 'medium', label: 'Medium' },
+                      { id: 'high', label: 'High' },
+                    ],
+                  },
+                }
+              : {}),
+          },
+          ...(thinking
+            ? [
+                {
+                  id: 'other',
+                  name: 'Other',
+                  thinking: {
+                    id: 'reasoningEffort' as const,
+                    options: [{ id: 'high', label: 'High' }],
+                  },
+                },
+              ]
+            : []),
+        ],
         default_model: 'default',
-        capabilities: { create: true, queue: true, steer: false, stop: true, resume: true, switch_model: false },
+        capabilities: { create: true, queue: true, steer: false, stop: true, resume: true, switch_model: thinking },
       },
     ],
   }
@@ -42,9 +70,13 @@ async function fixture(run: Run) {
   const input: P.CreateBrowserThreadInput = {
     client_thread_id: randomUUID(),
     node_id: node,
-    agent_type: 'cursor',
+    agent_type: thinking ? 'codex' : 'cursor',
     working_directory: '/workspace/project',
-    message: { client_message_id: randomUUID(), content: 'hello' },
+    message: {
+      client_message_id: randomUUID(),
+      content: 'hello',
+      ...(thinking ? { thinking: { id: 'reasoningEffort', value: 'high' } } : {}),
+    },
   }
   const create = () => run(threads.create(employee, input))
   return { employee, node, credential, source, input, create }
@@ -93,6 +125,46 @@ async function open(run: Run, f: Awaited<ReturnType<typeof fixture>>) {
   )
   return thread
 }
+
+it('persists model thinking per message, rejects conflicting retries and dispatches the selection', () =>
+  withTestDatabase(async ({ run }) => {
+    const f = await fixture(run, true)
+    const thinking = { id: 'reasoningEffort' as const, value: 'high' }
+    const created = await f.create()
+    expect(created.thread.next_thinking).toEqual(thinking)
+    await expect(
+      run(
+        threads.create(f.employee, {
+          ...f.input,
+          message: { ...f.input.message, thinking: { ...thinking, value: 'medium' } },
+        }),
+      ),
+    ).rejects.toMatchObject({ status: 409 })
+    const thread = await open(run, f)
+    const commands = await run(threads.claimCommands())
+    expect(commands.find((command) => command.body.action === 'message')?.body.thinking).toEqual(thinking)
+    const next = { client_message_id: randomUUID(), content: 'next', thinking }
+    expect((await run(threads.addMessage(f.employee, thread.id, next))).thinking).toEqual(thinking)
+    await expect(
+      run(
+        threads.addMessage(f.employee, thread.id, {
+          ...next,
+          thinking: { ...thinking, value: 'medium' },
+        }),
+      ),
+    ).rejects.toMatchObject({ status: 409 })
+    await expect(
+      run(
+        threads.addMessage(f.employee, thread.id, {
+          client_message_id: randomUUID(),
+          content: 'invalid',
+          thinking: { ...thinking, value: 'unsupported' },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'thinking_unavailable', status: 422 })
+    const switched = await run(threads.setModel(f.employee, thread.id, { model: 'other' }))
+    expect(switched.next_thinking).toBeNull()
+  }))
 
 it('returns persisted stop codes over HTTP and clears them after resume', () =>
   withTestDatabase(async ({ run, runtime }) => {

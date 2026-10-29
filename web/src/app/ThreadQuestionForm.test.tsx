@@ -36,7 +36,7 @@ it('submits upstream string values, multiple selections, and custom text without
   await user.click(screen.getByRole('checkbox', { name: /Linux build/ }))
   await user.click(screen.getByRole('checkbox', { name: 'Mac build' }))
   await user.type(screen.getAllByRole('textbox')[0], 'Windows')
-  await user.click(screen.getByRole('button', { name: 'Send answer' }))
+  await user.click(screen.getByRole('button', { name: '发送回答' }))
   expect(answer).toHaveBeenCalledExactlyOnceWith({
     request_id: 'targets',
     decision: 'accept',
@@ -49,10 +49,10 @@ it('keeps choices after a save failure and lets users cancel without required an
   const user = userEvent.setup()
   render(<ThreadQuestionForm question={question} onAnswer={answer} />)
   await user.click(screen.getByRole('checkbox', { name: /Linux build/ }))
-  await user.click(screen.getByRole('button', { name: 'Send answer' }))
+  await user.click(screen.getByRole('button', { name: '发送回答' }))
   await screen.findByRole('alert')
   expect(screen.getByRole('checkbox', { name: /Linux build/ })).toBeChecked()
-  await user.click(screen.getByRole('button', { name: 'Close question' }))
+  await user.click(screen.getByRole('button', { name: '关闭问题' }))
   expect(answer).toHaveBeenLastCalledWith({ request_id: 'targets', decision: 'cancel' })
 })
 
@@ -66,7 +66,7 @@ it('shows an MCP prompt and accepts confirmation with no questions', async () =>
     />,
   )
   expect(screen.getByText('Connect to the MCP server?')).toBeVisible()
-  await user.click(screen.getByRole('button', { name: 'Continue' }))
+  await user.click(screen.getByRole('button', { name: '继续' }))
   expect(answer).toHaveBeenCalledExactlyOnceWith({ request_id: 'mcp', decision: 'accept', answers: {} })
 })
 
@@ -83,10 +83,10 @@ it('treats prototype-named question IDs as ordinary required fields', async () =
       onAnswer={answer}
     />,
   )
-  await user.click(screen.getByRole('button', { name: 'Send answer' }))
+  await user.click(screen.getByRole('button', { name: '发送回答' }))
   expect(answer).not.toHaveBeenCalled()
   await user.type(screen.getByRole('textbox'), 'Build')
-  await user.click(screen.getByRole('button', { name: 'Send answer' }))
+  await user.click(screen.getByRole('button', { name: '发送回答' }))
   expect(answer).toHaveBeenCalledExactlyOnceWith({
     request_id: 'name',
     decision: 'accept',
@@ -101,8 +101,6 @@ it('explains uncertain answer delivery and preserves the original message', () =
       offline={false}
     />,
   )
-  expect(screen.getByRole('status')).toHaveTextContent('could not confirm whether the agent received your answer')
-  expect(screen.getByRole('status')).toHaveTextContent(
-    'will not resend the answer or your original message automatically',
-  )
+  expect(screen.getByRole('status')).toHaveTextContent('无法确认助手是否收到回答')
+  expect(screen.getByRole('status')).toHaveTextContent('不会自动重发回答或原消息')
 })

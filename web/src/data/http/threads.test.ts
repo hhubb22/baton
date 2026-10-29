@@ -126,6 +126,34 @@ function setup(handler: Handler, devices: Device[] = [device()]) {
 const rootResponse = { kind: 'roots', roots: [{ id: 'root-id', path: '/work' }], truncated: false }
 
 describe('HTTP thread contracts', () => {
+  it('sends the selected thinking option for new and queued messages and restores it on read', async () => {
+    const thinking = { id: 'reasoningEffort' as const, value: 'high' }
+    const bodies: Record<string, unknown>[] = []
+    const { api } = setup((url, init) => {
+      if (init.method === 'POST') {
+        bodies.push(JSON.parse(jsonBody(init.body)) as Record<string, unknown>)
+        return url.pathname.endsWith('/messages') ? message() : thread({ next_thinking: thinking })
+      }
+      return url.pathname.endsWith('/timeline') ? { events: [] } : thread({ next_thinking: thinking })
+    })
+    await api.createThread({
+      deviceId,
+      folder: '/work',
+      agent: 'codex',
+      model: 'reported-model',
+      body: 'First',
+      clientId: 'create',
+      thinking,
+    })
+    expect(bodies[0]).toMatchObject({ message: { thinking } })
+    await api.sendMessage({ threadId, body: 'Next', clientId: 'next', mode: 'next', thinking })
+    expect(bodies[1]).toMatchObject({ mode: 'queue', thinking })
+    await api.sendMessage({ threadId, body: 'Steer', clientId: 'steer', mode: 'now', thinking })
+    expect(bodies[2]).toMatchObject({ mode: 'steer' })
+    expect(bodies[2]).not.toHaveProperty('thinking')
+    expect((await api.getThread(threadId)).thinking).toEqual(thinking)
+  })
+
   it('loads questions and submits answers through the answer endpoint while preserving durable unknown results', async () => {
     const question = {
       request_id: 'targets',
@@ -177,7 +205,7 @@ describe('HTTP thread contracts', () => {
     const events = [accepted()]
     const { api } = setup((url) => (url.pathname.endsWith('/timeline') ? { events } : t), [cursorDevice])
     expect(await api.getThread(threadId)).toMatchObject({ agent: 'cursor', starting: true })
-    expect(threadView(await api.getThread(threadId), cursorDevice).status.label).toBe('Starting…')
+    expect(threadView(await api.getThread(threadId), cursorDevice).status.label).toBe('正在启动…')
     const op = await api.createThread({
       deviceId,
       folder: '/work',
@@ -189,9 +217,9 @@ describe('HTTP thread contracts', () => {
     expect(op.phase).toBe('saved')
     // 设备已持久接收消息，但尚未打开原生对话。
     events.push(event(2, 'message.queued', { client_message_id: 'client-message' }))
-    expect(threadView(await api.getThread(threadId), cursorDevice).status.label).toBe('Starting…')
+    expect(threadView(await api.getThread(threadId), cursorDevice).status.label).toBe('正在启动…')
     t = thread({ agent_type: 'cursor' })
-    expect(threadView(await api.getThread(threadId), cursorDevice).status.label).toBe('Idle')
+    expect(threadView(await api.getThread(threadId), cursorDevice).status.label).toBe('空闲')
     t = thread({
       agent_type: 'cursor',
       opened_at: null,
@@ -200,7 +228,7 @@ describe('HTTP thread contracts', () => {
       stop_code: 'start_failed',
     })
     expect(threadView(await api.getThread(threadId), cursorDevice).notice).toMatchObject({
-      title: 'Cursor could not start',
+      title: 'Cursor 无法启动',
       detail: expect.stringContaining('Local sandbox could not start.'),
     })
   })
@@ -431,7 +459,7 @@ describe('HTTP thread contracts', () => {
           unknownDelivery: failedMessages.some((item) => item.delivery === 'unknown'),
         }),
       ).toEqual({
-        status: { tone: 'neutral', label: 'Idle' },
+        status: { tone: 'neutral', label: '空闲' },
         group: 'idle',
         notice: null,
         composer: true,
@@ -470,7 +498,7 @@ describe('HTTP thread contracts', () => {
       })
       const current = await api.getThread(threadId)
       expect(threadMessageNotice(failure, current.agent)).toEqual({
-        title: 'Codex could not finish this reply',
+        title: 'Codex 未能完成此回复',
         detail: reason,
         tone: 'neutral',
         action: null,
@@ -572,9 +600,7 @@ describe('HTTP thread contracts', () => {
     expect(JSON.parse(jsonBody(request?.[1]?.body))).toEqual({ model: 'custom-model' })
     d.agents = d.agents.map((agent) => ({ ...agent, abilities: { ...agent.abilities, switchModel: false } }))
     fetcher.mockClear()
-    await expect(api.setThreadModel({ threadId, model: 'other-custom-model' })).rejects.toThrow(
-      'does not support changing models',
-    )
+    await expect(api.setThreadModel({ threadId, model: 'other-custom-model' })).rejects.toThrow('不支持切换模型')
     expect(fetcher.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
   })
 
@@ -665,9 +691,9 @@ describe('HTTP thread contracts', () => {
     const failed = await api.getThread(threadId)
     expect(failed).toMatchObject({ status: 'running', pending: null, stopFailed: true })
     expect(threadView(failed, device())).toMatchObject({
-      status: { label: 'Stop failed' },
+      status: { label: '停止失败' },
       group: 'attention',
-      notice: { title: "Couldn't stop Codex", detail: 'Codex may still be running.' },
+      notice: { title: '无法停止 Codex', detail: 'Codex 可能仍在运行。' },
     })
   })
 
@@ -756,7 +782,7 @@ describe('HTTP thread contracts', () => {
     const { api } = setup((url) =>
       url.pathname.endsWith('/timeline') ? { events: [accepted()], next_cursor: 'stuck' } : thread(),
     )
-    await expect(api.listMessages(threadId)).rejects.toThrow('cursor did not advance')
+    await expect(api.listMessages(threadId)).rejects.toThrow('分页未推进')
   })
 
   it('reads the actual trace for the reply turn and reports missing history honestly', async () => {
@@ -848,7 +874,7 @@ describe('HTTP thread contracts', () => {
           : thread(),
     )
     const id = (await api.listMessages(threadId))[0].id
-    await expect(api.readTrace(id)).rejects.toThrow('incomplete')
+    await expect(api.readTrace(id)).rejects.toThrow('不完整')
     result = { ok: true, page_cursor: 'same', steps: [traceStep()], next_cursor: 'same' }
     await expect(api.readTrace(id, 'same')).rejects.toThrow("Couldn't load more activity")
   })

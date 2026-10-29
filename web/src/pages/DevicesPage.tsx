@@ -166,7 +166,7 @@ interface Notice {
   action?: { label: string; run: () => void }
 }
 
-const unreachableNotice: Notice = { title: "Couldn't save the default device", detail: 'Try again.' }
+const unreachableNotice: Notice = { title: '无法保存默认设备', detail: '请重试。' }
 const connectionProtocol = {
   'openai-responses': 'OpenAI Responses',
   'openai-completions': 'OpenAI Chat Completions',
@@ -216,7 +216,7 @@ function DeviceRow({
       <span {...stylex.props(styles.identity)}>
         <span {...stylex.props(styles.nameLine)}>
           <span {...stylex.props(text.label, text.truncate)}>{device.name}</span>
-          {isDefault && <span {...stylex.props(text.caption, text.faint)}>Default</span>}
+          {isDefault && <span {...stylex.props(text.caption, text.faint)}>默认</span>}
         </span>
         <span
           title={`${device.system} · Baton ${device.batondVersion}`}
@@ -247,21 +247,19 @@ function CommandPermission({
   onChange: (enabled: boolean) => void
 }) {
   let line: { text: string; warning?: boolean } | null = null
-  if (state?.phase === 'saving') line = { text: 'Saving command permission…' }
-  else if (state?.phase === 'saved') line = { text: 'Saved' }
+  if (state?.phase === 'saving') line = { text: '正在保存命令权限…' }
+  else if (state?.phase === 'saved') line = { text: '已保存' }
   else if (state?.phase === 'failed') {
     line = {
       warning: true,
-      text: state.enabled ? "Couldn't save. Commands are still off." : "Couldn't save. Commands are still allowed.",
+      text: state.enabled ? '保存失败，命令执行仍处于关闭状态。' : '保存失败，命令执行仍处于允许状态。',
     }
   }
   return (
-    <section aria-label="Command permission" {...stylex.props(styles.permission)}>
+    <section aria-label="命令权限" {...stylex.props(styles.permission)}>
       <div {...stylex.props(styles.permissionText)}>
-        <span {...stylex.props(text.label)}>Allow project assistant to run commands</span>
-        <span {...stylex.props(text.caption, text.muted)}>
-          Shell commands the project assistant runs itself. Threads set their own access.
-        </span>
+        <span {...stylex.props(text.label)}>允许项目助手运行命令</span>
+        <span {...stylex.props(text.caption, text.muted)}>项目助手自行运行的 Shell 命令。对话单独设置访问权限。</span>
         {line && (
           <span role="status" {...stylex.props(text.caption, line.warning ? styles.attention : text.muted)}>
             {line.text}
@@ -269,7 +267,7 @@ function CommandPermission({
         )}
       </div>
       <Toggle
-        label="Allow project assistant to run commands"
+        label="允许项目助手运行命令"
         checked={enabled}
         onChange={(next) => {
           if (state?.phase !== 'saving') onChange(next)
@@ -322,26 +320,26 @@ function DeviceDetails({
     <div id={`device-${device.id}`} {...stylex.props(styles.details)}>
       <LocalDeviceDiagnostics nodeId={device.id} />
       <div {...stylex.props(styles.group)}>
-        <span {...stylex.props(text.label)}>Subscriptions</span>
+        <span {...stylex.props(text.label)}>订阅</span>
         {device.subscriptions.map((sub) => (
           <div key={sub.provider} {...stylex.props(styles.sourceRow)}>
             <div {...stylex.props(styles.sourceInfo)}>
               <span {...stylex.props(text.small)}>{sub.provider}</span>
-              <span {...stylex.props(text.caption, text.muted)}>{sub.signedIn ? 'Signed in' : 'Sign-in needed'}</span>
+              <span {...stylex.props(text.caption, text.muted)}>{sub.signedIn ? '已登录' : '需要登录'}</span>
             </div>
             {connected && (
               <Menu
                 narrow
                 align="end"
                 trigger={
-                  <Button small aria-label={`Manage ${sub.provider}`}>
-                    Manage…
+                  <Button small aria-label={`管理 ${sub.provider}`}>
+                    管理…
                   </Button>
                 }
               >
                 {sub.loginMethods?.includes('oauth') && (
                   <MenuOption onSelect={() => setLoginProvider({ provider: sub.provider, localOnly: false })}>
-                    {sub.signedIn ? 'Sign in again' : 'Sign in'}
+                    {sub.signedIn ? '重新登录' : '登录'}
                   </MenuOption>
                 )}
                 {sub.signedIn && (
@@ -353,7 +351,7 @@ function DeviceDetails({
                         .catch(() => setLogoutError(true))
                     }}
                   >
-                    Sign out
+                    退出登录
                   </MenuOption>
                 )}
               </Menu>
@@ -362,15 +360,15 @@ function DeviceDetails({
         ))}
         {logoutError && (
           <p role="alert" {...stylex.props(text.small, styles.attention)}>
-            Couldn't sign out. Try again.
+            无法退出登录，请重试。
           </p>
         )}
       </div>
       <div {...stylex.props(styles.group)}>
         <div {...stylex.props(styles.sourceHeading)}>
-          <span {...stylex.props(text.label)}>API connections</span>
+          <span {...stylex.props(text.label)}>API 连接</span>
           <Button small onClick={() => setEditing('new')}>
-            Add connection
+            添加连接
           </Button>
         </div>
         {(device.modelConnections ?? []).map((connection) => (
@@ -379,11 +377,11 @@ function DeviceDetails({
               <span {...stylex.props(text.small)}>{connection.name}</span>
               <span {...stylex.props(text.caption, text.muted)}>
                 {connectionProtocol[connection.protocol]} · {connectionHost(connection.base_url)}
-                {connection.keyNeeded ? ' · Key needed' : ''}
+                {connection.keyNeeded ? ' · 需要密钥' : ''}
               </span>
             </div>
-            <Button small aria-label={`Edit ${connection.name}`} onClick={() => setEditing(connection)}>
-              Edit
+            <Button small aria-label={`编辑 ${connection.name}`} onClick={() => setEditing(connection)}>
+              编辑
             </Button>
           </div>
         ))}
@@ -397,19 +395,19 @@ function DeviceDetails({
         />
       )}
       {device.upgradeState?.phase === 'failed' && (
-        <span {...stylex.props(text.small, text.muted)}>Waiting for the upgrade to be cancelled.</span>
+        <span {...stylex.props(text.small, text.muted)}>正在等待取消升级。</span>
       )}
       {device.credentialState === 'idle_expired' && (
-        <span {...stylex.props(text.small, styles.attention)}>Needs sign-in</span>
+        <span {...stylex.props(text.small, styles.attention)}>需要登录</span>
       )}
       {device.connection === 'offline' && device.credentialState !== 'idle_expired' && (
-        <span {...stylex.props(text.small, text.muted)}>New threads wait for it.</span>
+        <span {...stylex.props(text.small, text.muted)}>新对话将等待设备就绪。</span>
       )}
       {problems.length > 0 && (
         <div {...stylex.props(styles.group)}>
           {problems.length > 0 && (
             <>
-              <span {...stylex.props(text.caption, text.muted)}>Agents & subscriptions</span>
+              <span {...stylex.props(text.caption, text.muted)}>助手与订阅</span>
               {problems.map((line) => (
                 <span key={line.name} {...stylex.props(styles.capability)}>
                   <span {...stylex.props(text.small)}>{line.name}</span>
@@ -426,21 +424,21 @@ function DeviceDetails({
       <div {...stylex.props(styles.actions)}>
         {device.credentialState === 'idle_expired' && (
           <Button small onClick={onReconnect}>
-            Reconnect device
+            重新连接设备
           </Button>
         )}
         {!isDefault && (
           <Button small onClick={onDefault}>
-            {savingDefault ? 'Saving…' : 'Set as default'}
+            {savingDefault ? '正在保存…' : '设为默认'}
           </Button>
         )}
         {device.connection !== 'offline' && (
           <Button small onClick={onFolders}>
-            Folders…
+            文件夹…
           </Button>
         )}
         <Button small variant="danger" style={styles.disconnect} onClick={onDisconnect}>
-          Disconnect device
+          断开设备
         </Button>
       </div>
     </div>
@@ -506,10 +504,10 @@ export function DevicesPage() {
   const connectLabel = inDesktop
     ? local && (!local.registered || localReauth)
       ? local.registered
-        ? 'Reconnect this computer'
-        : 'Connect this computer'
+        ? '重新连接此电脑'
+        : '连接此电脑'
       : null
-    : 'Connect a device'
+    : '连接设备'
   const defaultId = session.data?.defaultDeviceId ?? null
   // 最后联系时间按分钟显示，每分钟刷新一次。
   const now = useNow(60_000)
@@ -558,7 +556,7 @@ export function DevicesPage() {
         setPermission(null)
         setDisconnect(null)
         if (wasDefault) setFeedback({ kind: 'chooseDefault', removed: device.name })
-        else notify({ title: `${device.name} disconnected`, detail: 'Its agents may still be running locally.' })
+        else notify({ title: `${device.name} 已断开连接`, detail: '此设备上的助手可能仍在本机运行。' })
       },
       onError: () => setDisconnect({ device, wasDefault, phase: 'failed' }),
     })
@@ -570,9 +568,9 @@ export function DevicesPage() {
   else if (feedback?.kind === 'chooseDefault' && !defaultId) {
     const replacement = list.find((item) => item.connection === 'online') ?? list[0]
     shownFeedback = {
-      title: 'Choose a new default device',
+      title: '选择新的默认设备',
       action: replacement && {
-        label: `Set ${replacement.name} as default`,
+        label: `将 ${replacement.name} 设为默认`,
         run: () => saveDefault(replacement),
       },
     }
@@ -580,19 +578,19 @@ export function DevicesPage() {
 
   let body
   if (devices.isPending) {
-    body = <p {...stylex.props(text.small, text.muted)}>Loading devices…</p>
+    body = <p {...stylex.props(text.small, text.muted)}>正在加载设备…</p>
   } else if (devices.isError) {
     body = (
-      <NoticeBox notice={{ title: "Couldn't load devices" }}>
+      <NoticeBox notice={{ title: '无法加载设备' }}>
         <Button small icon="refresh" onClick={() => void devices.refetch()}>
-          Try again
+          重试
         </Button>
       </NoticeBox>
     )
   } else if (list.length === 0) {
     body = (
       <div {...stylex.props(styles.empty)}>
-        <span {...stylex.props(text.heading)}>No devices yet</span>
+        <span {...stylex.props(text.heading)}>暂无设备</span>
         {connectLabel && (
           <Button variant="primary" icon="plus" onClick={() => setEnrolling(true)}>
             {connectLabel}
@@ -635,7 +633,7 @@ export function DevicesPage() {
   }
 
   return (
-    <Page title="Devices">
+    <Page title="设备">
       <div {...stylex.props(styles.column)}>
         <div {...stylex.props(styles.intro)}>
           <h2 ref={headingRef} tabIndex={-1} {...stylex.props(text.title, styles.heading)}>
@@ -643,7 +641,7 @@ export function DevicesPage() {
           </h2>
           {!inDesktop && downloads.data?.enabled && downloads.data.connect_url && (
             <a href={downloads.data.connect_url} {...stylex.props(text.small, styles.desktopLink, focusRing.ring)}>
-              Open in desktop app
+              在桌面客户端打开
             </a>
           )}
           {list.length > 0 && connectLabel && (
@@ -653,12 +651,12 @@ export function DevicesPage() {
           )}
         </div>
         {inDesktop && !enrolling && (
-          <section aria-label="This computer" {...stylex.props(styles.group)}>
+          <section aria-label="此电脑" {...stylex.props(styles.group)}>
             <span role="status" {...stylex.props(text.small, text.muted, styles.status)}>
               <StatusDot
                 tone={local?.state === 'online' ? 'success' : local?.state === 'rejected' ? 'attention' : 'hollow'}
               />
-              This computer · {local ? desktopStatusLabel(local) : 'Checking…'}
+              此电脑 · {local ? desktopStatusLabel(local) : '正在检查…'}
             </span>
             {local && desktopStatusReason(local) && (
               <p {...stylex.props(text.small, text.muted)}>{desktopStatusReason(local)}</p>
@@ -666,10 +664,10 @@ export function DevicesPage() {
             {desktop.isError && (
               <>
                 <p role="alert" {...stylex.props(text.small, text.muted)}>
-                  Couldn't read this computer's status.
+                  无法读取此电脑的状态。
                 </p>
                 <Button small onClick={() => void desktop.refetch()}>
-                  Try again
+                  重试
                 </Button>
               </>
             )}
@@ -695,11 +693,11 @@ export function DevicesPage() {
         onOpenChange={(open) => {
           if (!open) setAllowing(null)
         }}
-        title={`Let the project assistant run commands on ${allowing?.name ?? ''}?`}
-        description={`Commands run directly as ${allowing?.commandAccess.user || 'your user'} and can reach files outside your folders.`}
+        title={`允许项目助手在 ${allowing?.name ?? ''} 上运行命令？`}
+        description={`命令以 ${allowing?.commandAccess.user || '当前用户'} 的身份直接运行，可以访问所选文件夹以外的文件。`}
         actions={
           <>
-            <Button onClick={() => setAllowing(null)}>Cancel</Button>
+            <Button onClick={() => setAllowing(null)}>取消</Button>
             <Button
               variant="primary"
               onClick={() => {
@@ -707,7 +705,7 @@ export function DevicesPage() {
                 setAllowing(null)
               }}
             >
-              Allow commands
+              允许执行命令
             </Button>
           </>
         }
@@ -718,11 +716,11 @@ export function DevicesPage() {
         onOpenChange={(open) => {
           if (!open) setOfflineDefault(null)
         }}
-        title={`Use ${offlineDefault?.name ?? ''} as default?`}
-        description="It's offline. New threads on it wait until it's back."
+        title={`将 ${offlineDefault?.name ?? ''} 设为默认？`}
+        description="设备已离线，在此设备上新建的对话将在设备上线后开始。"
         actions={
           <>
-            <Button onClick={() => setOfflineDefault(null)}>Cancel</Button>
+            <Button onClick={() => setOfflineDefault(null)}>取消</Button>
             <Button
               variant="primary"
               onClick={() => {
@@ -730,7 +728,7 @@ export function DevicesPage() {
                 setOfflineDefault(null)
               }}
             >
-              Save default device
+              保存默认设备
             </Button>
           </>
         }
@@ -752,22 +750,22 @@ function FoldersDialog({ device, onClose }: { device: Device; onClose: () => voi
   const remove = useRemoveDeviceFolder()
   let body: ReactNode
   if (device.connection !== 'online') {
-    body = <p {...stylex.props(text.small, text.muted)}>Folders show when {device.name} is online.</p>
+    body = <p {...stylex.props(text.small, text.muted)}>{device.name} 上线后可查看文件夹。</p>
   } else if (folders.isPending) {
-    body = <p {...stylex.props(text.small, text.muted)}>Loading folders…</p>
+    body = <p {...stylex.props(text.small, text.muted)}>正在加载文件夹…</p>
   } else if (folders.isError) {
     body = (
       <div {...stylex.props(styles.group)}>
         <p role="alert" {...stylex.props(text.small, styles.attention)}>
-          Couldn't load folders.
+          无法加载文件夹。
         </p>
         <Button small onClick={() => void folders.refetch()}>
-          Try again
+          重试
         </Button>
       </div>
     )
   } else if (folders.data.length === 0) {
-    body = <p {...stylex.props(text.small, text.muted)}>No folders yet. Add one when you start a thread.</p>
+    body = <p {...stylex.props(text.small, text.muted)}>暂无文件夹，可在开始对话时添加。</p>
   } else {
     body = (
       <div {...stylex.props(styles.folders)}>
@@ -776,7 +774,7 @@ function FoldersDialog({ device, onClose }: { device: Device; onClose: () => voi
             <span {...stylex.props(text.mono, styles.folderPath)}>{folder}</span>
             <button
               type="button"
-              aria-label={`Remove ${folder}`}
+              aria-label={`移除 ${folder}`}
               aria-disabled={remove.isPending || undefined}
               onClick={() => {
                 if (!remove.isPending)
@@ -784,13 +782,13 @@ function FoldersDialog({ device, onClose }: { device: Device; onClose: () => voi
               }}
               {...stylex.props(text.small, styles.textButton, focusRing.ring)}
             >
-              Remove
+              移除
             </button>
           </div>
         ))}
         {remove.isError && (
           <p role="alert" {...stylex.props(text.caption, styles.attention)}>
-            Couldn't remove the folder. Try again.
+            无法移除文件夹，请重试。
           </p>
         )}
       </div>
@@ -802,8 +800,8 @@ function FoldersDialog({ device, onClose }: { device: Device; onClose: () => voi
       onOpenChange={(open) => {
         if (!open) onClose()
       }}
-      title={`Folders on ${device.name}`}
-      actions={<Button onClick={onClose}>Done</Button>}
+      title={`${device.name} 上的文件夹`}
+      actions={<Button onClick={onClose}>完成</Button>}
     >
       {body}
     </Dialog>
@@ -822,29 +820,29 @@ function DisconnectDialog({
   finalFocus: () => HTMLElement | null | boolean
 }) {
   const name = state?.device.name ?? ''
-  let title = `Disconnect “${name}”?`
+  let title = `断开“${name}”？`
   let description = state?.wasDefault
-    ? "You'll need to choose a new default. Agents already running on it keep running locally."
-    : 'Agents already running on it keep running locally.'
+    ? '请重新选择默认设备。已运行的助手会继续在本机运行。'
+    : '已运行的助手会继续在本机运行。'
   let actions = (
     <>
-      <Button onClick={onCancel}>Cancel</Button>
+      <Button onClick={onCancel}>取消</Button>
       <Button variant="dangerSolid" onClick={onConfirm}>
-        Disconnect device
+        断开设备
       </Button>
     </>
   )
   if (state?.phase === 'pending') {
-    title = `Disconnecting ${name}…`
-    actions = <Button variant="dangerSolid">Disconnecting…</Button>
+    title = `正在断开 ${name}…`
+    actions = <Button variant="dangerSolid">正在断开…</Button>
   } else if (state?.phase === 'failed') {
-    title = "Couldn't confirm disconnection"
-    description = `${name} may still be connected.`
+    title = '无法确认是否已断开'
+    description = `${name} 可能仍处于连接状态。`
     actions = (
       <>
-        <Button onClick={onCancel}>Cancel</Button>
+        <Button onClick={onCancel}>取消</Button>
         <Button variant="dangerSolid" onClick={onConfirm}>
-          Try again
+          重试
         </Button>
       </>
     )

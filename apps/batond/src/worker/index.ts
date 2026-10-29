@@ -1329,6 +1329,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
               text: request.payload,
               mode: request.mode ?? 'queue',
               model: request.model ?? null,
+              thinking: request.thinking ?? null,
             }
           : {}),
         ...(action === 'withdraw' ? { id: request.client_message_id } : {}),
@@ -1391,6 +1392,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
             text: request.payload,
             mode: request.mode ?? 'queue',
             model: request.model ?? null,
+            thinking: request.thinking ?? null,
           })
           const existingMessage = Object.hasOwn(draft.messages, request.client_message_id)
             ? draft.messages[request.client_message_id]
@@ -1411,6 +1413,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
             )
               return reject('unsupported', 'This Agent does not support steer')
             if (request.model) return reject('model_with_steer', 'Steering cannot change the model')
+            if (request.thinking) return reject('model_with_steer', 'Steering cannot change thinking')
             if (draft.phase !== 'busy' || !target || target.ended || target.turn === undefined)
               return reject('invalid_state', 'Steering requires an active target turn')
           }
@@ -1438,6 +1441,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
                 mode: request.mode ?? 'queue',
                 ...(request.mode === 'steer' && target?.turn !== undefined ? { targetTurn: target.turn } : {}),
                 ...(request.model === undefined ? {} : { model: request.model }),
+                ...(request.thinking === undefined ? {} : { thinking: request.thinking }),
               },
             } satisfies Message,
           })

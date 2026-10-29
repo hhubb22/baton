@@ -17,17 +17,17 @@ it('adds, edits and deletes a device API connection without sending a key to the
   render(<App client={client} router={router} />)
   await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
   expect(screen.getByText('Local gateway')).toBeInTheDocument()
-  expect(screen.getByText(/Key needed/)).toBeInTheDocument()
-  await user.click(screen.getByRole('button', { name: 'Add connection' }))
-  await user.type(screen.getByLabelText('Name'), 'Custom')
-  await user.clear(screen.getByLabelText('Base URL'))
-  await user.type(screen.getByLabelText('Base URL'), 'http://localhost:9999/v1')
-  await user.selectOptions(screen.getByLabelText('Protocol'), 'anthropic-messages')
-  expect(screen.getByLabelText('Base URL')).toHaveValue('http://localhost:9999/v1')
+  expect(screen.getByText(/需要密钥/)).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: '添加连接' }))
+  await user.type(screen.getByLabelText('名称'), 'Custom')
+  await user.clear(screen.getByLabelText('服务地址'))
+  await user.type(screen.getByLabelText('服务地址'), 'http://localhost:9999/v1')
+  await user.selectOptions(screen.getByLabelText('协议'), 'anthropic-messages')
+  expect(screen.getByLabelText('服务地址')).toHaveValue('http://localhost:9999/v1')
   expect(screen.getByText(/localhost:9999\/v1\/messages\?beta=true/)).toBeInTheDocument()
-  await user.type(screen.getByLabelText('Model IDs'), 'model-id')
+  await user.type(screen.getByLabelText('模型 ID'), 'model-id')
   expect(screen.getByText(/connection-key/)).toBeInTheDocument()
-  await user.click(screen.getByRole('button', { name: 'Save connection' }))
+  await user.click(screen.getByRole('button', { name: '保存连接' }))
   await screen.findByText('Custom')
   expect(configure).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -36,14 +36,14 @@ it('adds, edits and deletes a device API connection without sending a key to the
     }),
   )
   expect(JSON.stringify(configure.mock.calls)).not.toContain('key-file contents')
-  await user.click(screen.getByRole('button', { name: 'New project' }))
-  await user.type(screen.getByLabelText('Name'), 'API project')
+  await user.click(screen.getByRole('button', { name: '新建项目' }))
+  await user.type(screen.getByLabelText('名称'), 'API project')
   await user.selectOptions(
-    screen.getByLabelText('Model source'),
+    screen.getByLabelText('模型来源'),
     screen.getByRole('option', { name: 'Custom · Ubuntu Dev' }),
   )
-  expect(screen.getByText(/connection needs its device online and an API key/)).toBeInTheDocument()
-  await user.click(screen.getByRole('button', { name: 'Create project' }))
+  expect(screen.getByText(/此连接需要设备在线并配置 API 密钥/)).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: '创建项目' }))
   await waitFor(async () =>
     expect(
       (await client.listProjects()).some(
@@ -52,12 +52,12 @@ it('adds, edits and deletes a device API connection without sending a key to the
     ).toBe(true),
   )
   expect(await screen.findByText('Custom · Ubuntu Dev · model-id')).toBeInTheDocument()
-  await user.click(screen.getByRole('link', { name: /Devices/ }))
+  await user.click(screen.getByRole('link', { name: /设备/ }))
   await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
-  await user.click(screen.getByRole('button', { name: 'Edit Custom' }))
-  await user.click(screen.getByRole('button', { name: 'Delete connection' }))
-  expect(screen.getByText(/Deleting this connection will leave API project/)).toBeInTheDocument()
-  await user.click(screen.getByRole('button', { name: 'Confirm delete' }))
+  await user.click(screen.getByRole('button', { name: '编辑 Custom' }))
+  await user.click(screen.getByRole('button', { name: '删除连接' }))
+  expect(screen.getByText(/删除此连接后，API project/)).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: '确认删除' }))
   await waitFor(() => expect(screen.queryByText('Custom')).not.toBeInTheDocument())
 })
 
@@ -84,19 +84,19 @@ it('loads the complete model list before editing a truncated device report', asy
   const router = createAppRouter({ history: createMemoryHistory({ initialEntries: ['/devices'] }) })
   render(<App client={client} router={router} />)
   await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
-  await user.click(screen.getByRole('button', { name: 'Edit Local gateway' }))
-  expect(screen.getByLabelText('Model IDs')).toHaveAttribute('readonly')
-  await user.clear(screen.getByLabelText('Name'))
-  await user.type(screen.getByLabelText('Name'), 'Edited while loading')
-  await user.clear(screen.getByLabelText('Base URL'))
-  await user.type(screen.getByLabelText('Base URL'), 'http://localhost:9999/v1')
+  await user.click(screen.getByRole('button', { name: '编辑 Local gateway' }))
+  expect(screen.getByLabelText('模型 ID')).toHaveAttribute('readonly')
+  await user.clear(screen.getByLabelText('名称'))
+  await user.type(screen.getByLabelText('名称'), 'Edited while loading')
+  await user.clear(screen.getByLabelText('服务地址'))
+  await user.type(screen.getByLabelText('服务地址'), 'http://localhost:9999/v1')
   await act(async () => release())
-  await waitFor(() => expect(screen.getByLabelText('Model IDs')).toHaveValue('local-model'))
-  expect(screen.getByLabelText('Name')).toHaveValue('Edited while loading')
-  expect(screen.getByLabelText('Base URL')).toHaveValue('http://localhost:9999/v1')
-  expect(screen.getByLabelText('Model IDs')).not.toHaveAttribute('readonly')
+  await waitFor(() => expect(screen.getByLabelText('模型 ID')).toHaveValue('local-model'))
+  expect(screen.getByLabelText('名称')).toHaveValue('Edited while loading')
+  expect(screen.getByLabelText('服务地址')).toHaveValue('http://localhost:9999/v1')
+  expect(screen.getByLabelText('模型 ID')).not.toHaveAttribute('readonly')
   expect(configure).toHaveBeenCalledWith(expect.objectContaining({ action: 'get' }))
-  expect(screen.getByRole('button', { name: 'Save connection' })).toBeEnabled()
+  expect(screen.getByRole('button', { name: '保存连接' })).toBeEnabled()
 })
 
 describe('desktop app link', () => {
@@ -121,15 +121,15 @@ describe('desktop app link', () => {
     })
     const router = createAppRouter({ history: createMemoryHistory({ initialEntries: ['/devices'] }) })
     render(<App client={client} router={router} />)
-    await screen.findByRole('heading', { name: '3 devices, 2 online' })
+    await screen.findByRole('heading', { name: '3 台设备，2 台在线' })
     await waitFor(() => expect(getDownloads).toHaveBeenCalled())
     if (visible) {
-      expect(await screen.findByRole('link', { name: 'Open in desktop app' })).toHaveAttribute(
+      expect(await screen.findByRole('link', { name: '在桌面客户端打开' })).toHaveAttribute(
         'href',
         downloads.connect_url,
       )
     } else {
-      expect(screen.queryByRole('link', { name: 'Open in desktop app' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: '在桌面客户端打开' })).not.toBeInTheDocument()
     }
   })
 })
@@ -149,26 +149,22 @@ function desktopPage(initial = createDesktopBridge()) {
 it('offers local setup and tracks desktop updates, including external ownership and rejection reasons', async () => {
   const f = desktopPage()
   const view = f.show()
-  await screen.findByRole('button', { name: 'Connect this computer' })
-  expect(screen.queryByRole('button', { name: 'Connect a device' })).not.toBeInTheDocument()
+  await screen.findByRole('button', { name: '连接此电脑' })
+  expect(screen.queryByRole('button', { name: '连接设备' })).not.toBeInTheDocument()
   await act(async () => f.desktop.publish(registeredDesktop))
-  await waitFor(() => expect(screen.getByRole('region', { name: 'This computer' })).toHaveTextContent('Online'))
-  expect(screen.queryByRole('button', { name: 'Connect this computer' })).not.toBeInTheDocument()
+  await waitFor(() => expect(screen.getByRole('region', { name: '此电脑' })).toHaveTextContent('在线'))
+  expect(screen.queryByRole('button', { name: '连接此电脑' })).not.toBeInTheDocument()
   await act(async () =>
     f.desktop.publish({ ...registeredDesktop, state: 'external', connection_state: 'rejected', code: 'needs_reauth' }),
   )
-  await waitFor(() =>
-    expect(screen.getByRole('region', { name: 'This computer' })).toHaveTextContent('Managed by external service'),
-  )
-  expect(screen.getByText('Sign-in expired on this computer.')).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Reconnect this computer' })).toBeInTheDocument()
+  await waitFor(() => expect(screen.getByRole('region', { name: '此电脑' })).toHaveTextContent('由外部服务管理'))
+  expect(screen.getByText('此电脑的登录已过期。')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '重新连接此电脑' })).toBeInTheDocument()
   await act(async () =>
     f.desktop.publish({ ...registeredDesktop, state: 'rejected', code: 'node_version_incompatible' }),
   )
-  await waitFor(() =>
-    expect(screen.getByRole('region', { name: 'This computer' })).toHaveTextContent('Connection refused'),
-  )
-  expect(screen.getByText('Download the latest desktop app from Baton.')).toBeInTheDocument()
+  await waitFor(() => expect(screen.getByRole('region', { name: '此电脑' })).toHaveTextContent('连接被拒绝'))
+  expect(screen.getByText('请从 Baton 下载最新的桌面客户端。')).toBeInTheDocument()
   await act(async () => f.desktop.publish({ ...registeredDesktop, state: 'rejected', message: 'Certificate expired.' }))
   expect(await screen.findByText('Certificate expired.')).toBeInTheDocument()
   view.unmount()
@@ -184,8 +180,8 @@ it('reauthenticates the local idle-expired device using the current account API 
   const create = vi.spyOn(f.client, 'createEnrollment')
   f.desktop.bridge.reauth.mockResolvedValue(registeredDesktop)
   f.show()
-  await f.user.click(await screen.findByRole('button', { name: 'Reconnect this computer' }))
-  await f.user.click(await screen.findByRole('button', { name: 'Reconnect' }))
+  await f.user.click(await screen.findByRole('button', { name: '重新连接此电脑' }))
+  await f.user.click(await screen.findByRole('button', { name: '重新连接' }))
   await waitFor(() => expect(f.desktop.bridge.reauth).toHaveBeenCalledTimes(1))
   expect(create).toHaveBeenCalledWith('dev-mac')
   const issued = await create.mock.results[0]!.value
@@ -196,17 +192,17 @@ it('reauthenticates the local idle-expired device using the current account API 
 it('opens local setup with an editable, empty device name', async () => {
   const f = desktopPage()
   f.show()
-  await f.user.click(await screen.findByRole('button', { name: 'Connect this computer' }))
-  expect(await screen.findByRole('dialog', { name: 'Connect this computer' })).toBeInTheDocument()
-  expect(screen.getByLabelText('Device name')).toHaveValue('')
-  expect(screen.queryByLabelText('Run in terminal')).not.toBeInTheDocument()
+  await f.user.click(await screen.findByRole('button', { name: '连接此电脑' }))
+  expect(await screen.findByRole('dialog', { name: '连接此电脑' })).toBeInTheDocument()
+  expect(screen.getByLabelText('设备名称')).toHaveValue('')
+  expect(screen.queryByLabelText('在终端运行')).not.toBeInTheDocument()
 })
 
 it('retries failed status reads and ignores an older initial read after a status notification', async () => {
   const f = desktopPage()
   f.desktop.bridge.status.mockRejectedValueOnce(new Error('IPC unavailable'))
   f.show()
-  expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't read this computer's status.")
+  expect(await screen.findByRole('alert')).toHaveTextContent('无法读取此电脑的状态。')
   let finish!: (status: typeof registeredDesktop) => void
   f.desktop.bridge.status.mockImplementationOnce(
     () =>
@@ -214,9 +210,9 @@ it('retries failed status reads and ignores an older initial read after a status
         finish = resolve
       }),
   )
-  await f.user.click(screen.getByRole('button', { name: 'Try again' }))
+  await f.user.click(screen.getByRole('button', { name: '重试' }))
   await act(async () => f.desktop.publish(registeredDesktop))
   await act(async () => finish({ registered: false, state: 'unregistered' }))
-  await waitFor(() => expect(screen.getByRole('region', { name: 'This computer' })).toHaveTextContent('Online'))
-  expect(screen.queryByRole('button', { name: 'Connect this computer' })).not.toBeInTheDocument()
+  await waitFor(() => expect(screen.getByRole('region', { name: '此电脑' })).toHaveTextContent('在线'))
+  expect(screen.queryByRole('button', { name: '连接此电脑' })).not.toBeInTheDocument()
 })

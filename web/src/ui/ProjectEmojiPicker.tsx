@@ -42,13 +42,13 @@ export function ProjectEmojiPicker({
 }) {
   return (
     <div>
-      <Field label="Project icon" error={error}>
+      <Field label="项目图标" error={error}>
         {(props) => (
           <Input {...props} value={value} readOnly={readOnly} onChange={(event) => onChange(event.target.value)} />
         )}
       </Field>
       {!readOnly && (
-        <div aria-label="Suggested project icons" {...stylex.props(styles.choices)}>
+        <div aria-label="推荐的项目图标" {...stylex.props(styles.choices)}>
           {choices.map((emoji) => (
             <button
               key={emoji}
@@ -63,7 +63,7 @@ export function ProjectEmojiPicker({
           ))}
         </div>
       )}
-      {!readOnly && <p {...stylex.props(text.caption, text.muted)}>Choose an icon or enter an emoji.</p>}
+      {!readOnly && <p {...stylex.props(text.caption, text.muted)}>选择图标或输入表情。</p>}
     </div>
   )
 }

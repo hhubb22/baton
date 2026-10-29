@@ -72,8 +72,7 @@ function FullOutputReader({ threadId, reference, reader = readFullOutput }: Full
       setCurrent(result)
       setBody(decoded)
     } catch (cause) {
-      if (!controller.signal.aborted)
-        setError(cause instanceof Error ? cause.message : 'The device could not read this output.')
+      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '设备无法读取此输出。')
     } finally {
       if (!controller.signal.aborted) setLoading(false)
     }
@@ -94,7 +93,7 @@ function FullOutputReader({ threadId, reference, reader = readFullOutput }: Full
       {current && (
         <>
           <span {...stylex.props(text.caption, styles.muted)}>
-            {fileSize(current.page.next_offset)} of {fileSize(reference.total_bytes)} read
+            已读取 {fileSize(current.page.next_offset)}，共 {fileSize(reference.total_bytes)}
           </span>
           <pre {...stylex.props(styles.output)}>{body}</pre>
         </>
@@ -107,16 +106,16 @@ function FullOutputReader({ threadId, reference, reader = readFullOutput }: Full
       <div {...stylex.props(styles.actions)}>
         {(!current || !current.page.done) && (
           <Button small onClick={() => void load()}>
-            {loading ? 'Reading…' : current ? 'Read next' : 'Read full output'}
+            {loading ? '正在读取…' : current ? '继续读取' : '读取完整输出'}
           </Button>
         )}
         {current && (
           <>
             <Button small onClick={() => void load(true)}>
-              Read from start
+              从头读取
             </Button>
             <Button small onClick={downloadPage}>
-              Download this part
+              下载此部分
             </Button>
           </>
         )}

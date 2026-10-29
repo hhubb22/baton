@@ -329,9 +329,11 @@ describe('reliable Worker', () => {
                 client_message_id: 'model-first',
                 payload: 'first',
                 model: 'selected-model',
+                thinking: { id: 'reasoningEffort', value: 'high' },
               })
               yield* worker.handle(first)
               yield* completed(worker, first.command_id ?? '')
+              expect(f.sentInputs[0]?.thinking).toEqual({ id: 'reasoningEffort', value: 'high' })
               yield* Queue.offer(f.events, event('model-first', 'end'))
               const next = request(cfg, 'thread_message', { client_message_id: 'model-next', payload: 'next' })
               yield* worker.handle(rejected)
@@ -375,12 +377,14 @@ describe('reliable Worker', () => {
               const next = request(cfg, 'thread_message', {
                 client_message_id: 'model-after-restart',
                 payload: 'after restart',
+                thinking: { id: 'reasoningEffort', value: 'medium' },
               })
               yield* worker.handle(next)
               yield* completed(worker, next.command_id ?? '')
               expect(f.sentInputs.map((input) => [input.id, input.model])).toEqual([
                 ['model-after-restart', 'selected-model'],
               ])
+              expect(f.sentInputs[0]?.thinking).toEqual({ id: 'reasoningEffort', value: 'medium' })
               expect((yield* worker.handle(rejected)).command_status?.command_outcome).toBe('cancelled')
             }),
           )

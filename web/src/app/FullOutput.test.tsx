@@ -39,15 +39,15 @@ it('continues UTF-8 across pages while keeping only the current page in the view
     return { ...result, page: { ...result.page, encoding: 'base64' } }
   }
   const { container } = render(<FullOutput threadId="thread" reference={reference} reader={validReader} />)
-  fireEvent.click(screen.getByRole('button', { name: 'Read full output' }))
-  await screen.findByRole('button', { name: 'Read next' })
+  fireEvent.click(screen.getByRole('button', { name: '读取完整输出' }))
+  await screen.findByRole('button', { name: '继续读取' })
   expect(container.querySelector('pre')?.textContent).toBe('a'.repeat(12287))
-  fireEvent.click(screen.getByRole('button', { name: 'Read next' }))
+  fireEvent.click(screen.getByRole('button', { name: '继续读取' }))
   await screen.findByText('🙂middle!')
   expect(container.querySelector('pre')?.textContent).toBe('🙂middle!')
   expect(container.textContent).not.toContain('\uFFFD')
   expect(reader).toHaveBeenCalledTimes(2)
-  expect(screen.getByRole('button', { name: 'Download this part' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: '下载此部分' })).toBeTruthy()
 })
 
 it('sends the saved identity and cursor and rejects a mismatched output page', async () => {
@@ -70,7 +70,7 @@ it('sends the saved identity and cursor and rejects a mismatched output page', a
     }),
   )
   const read = createFullOutputReader(createTransport({ fetch: fetcher }).request)
-  await expect(read('thread', reference)).rejects.toThrow('invalid output page')
+  await expect(read('thread', reference)).rejects.toThrow('输出页面无效')
   const requested = fetcher.mock.calls[0]
   expect(requested).toBeDefined()
 })
@@ -81,7 +81,7 @@ it('keeps an offline read retryable and displays its reason', async () => {
       .request,
   )
   render(<FullOutput threadId="thread" reference={reference} reader={read} />)
-  fireEvent.click(screen.getByRole('button', { name: 'Read full output' }))
-  expect(await screen.findByRole('status')).toHaveTextContent('The device is offline.')
-  expect(screen.getByRole('button', { name: 'Read full output' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: '读取完整输出' }))
+  expect(await screen.findByRole('status')).toHaveTextContent('设备已离线')
+  expect(screen.getByRole('button', { name: '读取完整输出' })).toBeTruthy()
 })

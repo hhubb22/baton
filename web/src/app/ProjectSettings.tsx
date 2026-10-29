@@ -56,7 +56,7 @@ const styles = stylex.create({
   progress: { display: 'flex', alignItems: 'center', gap: space.sm },
 })
 
-const nameError = 'Enter a project name.'
+const nameError = '请输入项目名称。'
 
 // 设置页只在点「Save changes」时提交；编辑留在工作区草稿里，在应用内离开再回来也不会丢。
 export function ProjectSettings({
@@ -130,12 +130,12 @@ export function ProjectSettings({
     const invalid = !selected.name.trim()
       ? nameError
       : !validProjectEmoji(selected.emoji ?? '📁')
-        ? 'Choose or enter one emoji.'
+        ? '请选择或输入一个表情。'
         : !selected.subscription.trim() || !selected.model.trim()
-          ? 'Enter a provider and model.'
+          ? '请输入服务商和模型。'
           : selected.memoryEmbedding &&
               (!selected.memoryEmbedding.base_url.trim() || !selected.memoryEmbedding.model.trim())
-            ? 'Enter an embedding base URL and model.'
+            ? '请输入嵌入模型的基础 URL 和模型名称。'
             : null
     setSaved(false)
     setError(invalid)
@@ -153,7 +153,7 @@ export function ProjectSettings({
       if (mounted.current) setSaved(true)
     } catch (cause) {
       if (mounted.current)
-        setError(cause instanceof ClientError && cause.code === 'invalid' ? cause.message : "Couldn't save. Try again.")
+        setError(cause instanceof ClientError && cause.code === 'invalid' ? cause.message : '无法保存，请重试。')
     } finally {
       if (mounted.current) setSaving(false)
     }
@@ -173,7 +173,7 @@ export function ProjectSettings({
         setActionError(
           cause instanceof ClientError && cause.code === 'invalid'
             ? cause.message
-            : `Couldn't ${next === 'active' ? 'resume' : next === 'paused' ? 'pause' : 'archive'}. Try again.`,
+            : `无法${next === 'active' ? '恢复' : next === 'paused' ? '暂停' : '归档'}，请重试。`,
         )
     }
   }
@@ -184,9 +184,7 @@ export function ProjectSettings({
     setActionError(null)
   }
   const questionCount = pendingInbox(inbox.data ?? [], project.id).length
-  const questions = inbox.data
-    ? `${questionCount} open ${questionCount === 1 ? 'question' : 'questions'}`
-    : 'all open questions'
+  const questions = inbox.data ? `${questionCount} 个待处理问题` : '所有待处理问题'
   const projectThreads = (threads.data ?? []).filter((item) => item.projectId === project.id)
 
   const feedback = saving ? (
@@ -196,24 +194,24 @@ export function ProjectSettings({
       <span role="alert" {...stylex.props(styles.error)}>
         {error}
       </span>
-      {error === "Couldn't save. Try again." && (
+      {error === '无法保存，请重试。' && (
         <Button small onClick={() => void save()}>
-          Retry
+          重试
         </Button>
       )}
       <button type="button" onClick={discard} {...stylex.props(styles.link, focusRing.ring)}>
-        Discard changes
+        放弃更改
       </button>
     </>
   ) : dirty ? (
     <>
-      Changes not saved
+      更改尚未保存
       <button type="button" onClick={discard} {...stylex.props(styles.link, focusRing.ring)}>
-        Discard changes
+        放弃更改
       </button>
     </>
   ) : saved ? (
-    'Saved'
+    '已保存'
   ) : null
 
   return (
@@ -221,19 +219,19 @@ export function ProjectSettings({
       title={
         <span {...stylex.props(styles.title)}>
           <span {...stylex.props(text.truncate)}>{project.name}</span>
-          <span {...stylex.props(text.muted)}>/ Settings</span>
+          <span {...stylex.props(text.muted)}>/ 设置</span>
         </span>
       }
       actions={
         <Button variant="ghost" small onClick={onBack}>
-          Back to project
+          返回项目
         </Button>
       }
     >
       <div {...stylex.props(styles.content)}>
-        <h2 {...stylex.props(text.title)}>Project settings</h2>
+        <h2 {...stylex.props(text.title)}>项目设置</h2>
         {archived && <ArchivedNotice project={project} threads={projectThreads} devices={devices.data ?? []} />}
-        <Field label="Name" error={error === nameError ? nameError : undefined}>
+        <Field label="名称" error={error === nameError ? nameError : undefined}>
           {(props) => (
             <Input
               {...props}
@@ -246,10 +244,10 @@ export function ProjectSettings({
         <ProjectEmojiPicker
           value={values.emoji ?? '📁'}
           readOnly={archived}
-          error={error === 'Choose or enter one emoji.' ? error : undefined}
+          error={error === '请选择或输入一个表情。' ? error : undefined}
           onChange={(emoji) => change({ emoji })}
         />
-        <Field label="Goal" optional>
+        <Field label="目标" optional>
           {(props) => (
             <TextArea
               {...props}
@@ -267,16 +265,16 @@ export function ProjectSettings({
             readOnly={archived}
             loading={devices.isPending}
           />
-          <p {...stylex.props(text.caption, text.faint)}>Changes apply from the next run.</p>
+          <p {...stylex.props(text.caption, text.faint)}>更改将在下次运行时生效。</p>
         </div>
         <div {...stylex.props(styles.section)}>
           <div {...stylex.props(styles.row)}>
-            <h3 {...stylex.props(text.label, styles.description)}>Memory embeddings</h3>
+            <h3 {...stylex.props(text.label, styles.description)}>记忆嵌入</h3>
             {archived ? (
-              <span {...stylex.props(text.caption, text.muted)}>{embedding ? 'On' : 'Off'}</span>
+              <span {...stylex.props(text.caption, text.muted)}>{embedding ? '已开启' : '已关闭'}</span>
             ) : (
               <Toggle
-                label="Memory embeddings"
+                label="记忆嵌入"
                 checked={embedding !== null}
                 onChange={(enabled) => change({ memoryEmbedding: enabled ? { base_url: '', model: '' } : null })}
               />
@@ -285,13 +283,13 @@ export function ProjectSettings({
           {embedding && (
             <>
               <p {...stylex.props(text.caption, text.muted)}>
-                Your devices send requests to this OpenAI-compatible endpoint. Configure API keys on each device.
+                设备会向此兼容 OpenAI 的端点发送请求。请在各设备上配置 API 密钥。
               </p>
               {(
                 [
-                  ['base_url', 'Embedding base URL'],
-                  ['model', 'Embedding model'],
-                  ['credential_profile', 'Device credential name'],
+                  ['base_url', '嵌入模型基础 URL'],
+                  ['model', '嵌入模型'],
+                  ['credential_profile', '设备凭据名称'],
                 ] as const
               ).map(([key, label]) => (
                 <Field key={key} label={label} optional={key === 'credential_profile'}>
@@ -314,8 +312,7 @@ export function ProjectSettings({
                 </Field>
               ))}
               <p {...stylex.props(text.caption, text.muted)}>
-                Set the named key with <code>batond project-runtime embedding-key &lt;name&gt;</code>. Leave blank for a
-                keyless endpoint.
+                使用 <code>batond project-runtime embedding-key &lt;name&gt;</code> 设置对应密钥。无密钥的服务可留空。
               </p>
             </>
           )}
@@ -327,27 +324,23 @@ export function ProjectSettings({
                 {feedback}
               </span>
               <Button variant="primary" onClick={() => void save()}>
-                Save changes
+                保存更改
               </Button>
             </div>
             <div {...stylex.props(styles.controls)}>
               <div {...stylex.props(styles.row)}>
                 <div {...stylex.props(styles.description)}>
-                  <h3 {...stylex.props(text.label)}>
-                    {project.status === 'paused' ? 'Resume project' : 'Pause project'}
-                  </h3>
-                  <p {...stylex.props(text.caption, text.faint)}>New messages wait until you resume.</p>
+                  <h3 {...stylex.props(text.label)}>{project.status === 'paused' ? '恢复项目' : '暂停项目'}</h3>
+                  <p {...stylex.props(text.caption, text.faint)}>新消息将在恢复后处理。</p>
                 </div>
                 <Button small onClick={() => void changeStatus(project.status === 'paused' ? 'active' : 'paused')}>
-                  {status.isPending && !archiving ? 'Saving…' : project.status === 'paused' ? 'Resume' : 'Pause'}
+                  {status.isPending && !archiving ? '正在保存…' : project.status === 'paused' ? '恢复' : '暂停'}
                 </Button>
               </div>
               <div {...stylex.props(styles.row)}>
                 <div {...stylex.props(styles.description)}>
-                  <h3 {...stylex.props(text.label)}>Archive project</h3>
-                  <p {...stylex.props(text.caption, text.faint)}>
-                    Stops the assistant and running threads. Chat, memory, and thread history are kept.
-                  </p>
+                  <h3 {...stylex.props(text.label)}>归档项目</h3>
+                  <p {...stylex.props(text.caption, text.faint)}>停止助手和运行中的对话，保留聊天、记忆和对话记录。</p>
                 </div>
                 <Button
                   small
@@ -358,7 +351,7 @@ export function ProjectSettings({
                     setConfirm(true)
                   }}
                 >
-                  Archive
+                  归档
                 </Button>
               </div>
               {actionError && !confirm && (
@@ -371,19 +364,19 @@ export function ProjectSettings({
         )}
       </div>
       {confirm && !archived && archiving && (
-        <Dialog open title="Archiving project" onOpenChange={() => {}}>
+        <Dialog open title="正在归档项目" onOpenChange={() => {}}>
           <span role="status" {...stylex.props(text.small, text.muted, styles.progress)}>
             <StatusDot tone="info" />
-            Saving archive status…
+            正在保存归档状态…
           </span>
-          <p {...stylex.props(text.caption, text.faint)}>Stop requests go to online devices.</p>
+          <p {...stylex.props(text.caption, text.faint)}>停止请求会发送到在线设备。</p>
         </Dialog>
       )}
       {confirm && !archived && !archiving && (
         <Dialog
           open
-          title="Archive project?"
-          description={`Stops the project assistant and its running threads, and closes ${questions}. Chat, memory, and thread history are kept.${dirty ? ' Unsaved settings changes are discarded.' : ''}`}
+          title="归档项目？"
+          description={`停止项目助手和运行中的对话，并关闭 ${questions}。聊天、记忆和对话记录会保留。${dirty ? '未保存的设置更改会被放弃。' : ''}`}
           onOpenChange={(open) => {
             if (!open) closeConfirm()
           }}
@@ -396,9 +389,9 @@ export function ProjectSettings({
           }
           actions={
             <>
-              <Button onClick={closeConfirm}>Cancel</Button>
+              <Button onClick={closeConfirm}>取消</Button>
               <Button variant="dangerSolid" onClick={() => void changeStatus('archived')}>
-                Archive project
+                归档项目
               </Button>
             </>
           }
@@ -406,10 +399,6 @@ export function ProjectSettings({
       )}
     </Page>
   )
-}
-
-function plural(count: number, word: string) {
-  return `${count} ${word}${count === 1 ? '' : 's'}`
 }
 
 // 归档后的说明按 Thread 的实际状态写：设备确认停止前，只说停止请求在路上，不说已停止。
@@ -428,27 +417,25 @@ export function ArchivedNotice({
   const waiting = new Map<string, number>()
   for (const thread of live) {
     if (threadView(thread, deviceOf(thread)).group !== 'stopRequested') continue
-    const name = deviceOf(thread)?.name ?? 'the device'
+    const name = deviceOf(thread)?.name ?? '设备'
     waiting.set(name, (waiting.get(name) ?? 0) + 1)
   }
   const running = live.filter((thread) => thread.status === 'running' && !thread.pending)
   const failed = running.filter((thread) => thread.stopFailed).length
   const unstopped = running.length - failed
-  const assistantDevice = devices.find((item) => item.id === project.agent.deviceId)?.name ?? 'the device'
+  const assistantDevice = devices.find((item) => item.id === project.agent.deviceId)?.name ?? '设备'
   const parts = [
-    project.agent.state === 'stopping' && `Waiting for ${assistantDevice} to stop the assistant.`,
-    stopping > 0 && `${plural(stopping, 'thread')} still stopping.`,
-    ...[...waiting].map(([name, count]) => `${plural(count, 'thread')} will stop when ${name} connects.`),
-    failed > 0 && `${plural(failed, 'thread')} couldn't stop. Open ${failed === 1 ? 'it' : 'them'} to stop again.`,
-    unstopped > 0 && `${plural(unstopped, 'thread')} still running. Open ${unstopped === 1 ? 'it' : 'them'} to stop.`,
+    project.agent.state === 'stopping' && `等待 ${assistantDevice} 停止助手。`,
+    stopping > 0 && `${stopping} 个对话正在停止。`,
+    ...[...waiting].map(([name, count]) => `${count} 个对话将在 ${name} 连接后停止。`),
+    failed > 0 && `${failed} 个对话停止失败，请打开后重试。`,
+    unstopped > 0 && `${unstopped} 个对话仍在运行，请打开后停止。`,
   ].filter(Boolean)
   return (
     <Banner
       icon="archive"
-      title="Project archived"
-      detail={
-        parts.length > 0 ? `Read-only. ${parts.join(' ')}` : 'Read-only. Chat, memory, and thread history are kept.'
-      }
+      title="项目已归档"
+      detail={parts.length > 0 ? `只读。${parts.join('')}` : '只读。聊天、记忆和对话记录已保留。'}
     />
   )
 }

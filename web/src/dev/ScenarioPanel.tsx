@@ -66,7 +66,7 @@ export function ScenarioPanel({ controls }: { controls: MockControls }) {
     return (
       <div {...stylex.props(styles.collapsed)}>
         <Button small icon="settings" onClick={() => setOpen(true)}>
-          Scenario
+          场景
         </Button>
       </div>
     )
@@ -79,14 +79,14 @@ export function ScenarioPanel({ controls }: { controls: MockControls }) {
   }
 
   return (
-    <aside aria-label="Mock scenario" {...stylex.props(styles.panel)}>
+    <aside aria-label="模拟场景" {...stylex.props(styles.panel)}>
       <div {...stylex.props(styles.head)}>
-        <span {...stylex.props(text.label)}>Mock scenario</span>
-        <IconButton icon="close" label="Hide scenario panel" onClick={() => setOpen(false)} />
+        <span {...stylex.props(text.label)}>模拟场景</span>
+        <IconButton icon="close" label="隐藏场景面板" onClick={() => setOpen(false)} />
       </div>
       <div {...stylex.props(styles.row)}>
         <select
-          aria-label="Scenario"
+          aria-label="场景"
           value={scenario}
           onChange={(event) => switchTo(event.target.value as ScenarioId)}
           {...stylex.props(styles.select)}
@@ -98,13 +98,13 @@ export function ScenarioPanel({ controls }: { controls: MockControls }) {
           ))}
         </select>
         <Button small icon="refresh" onClick={() => controls.reset(scenario)}>
-          Reset
+          重置
         </Button>
       </div>
       <div {...stylex.props(styles.row, text.small)}>
-        <span>Baton reachable</span>
+        <span>Baton 可连接</span>
         <Toggle
-          label="Baton reachable"
+          label="Baton 可连接"
           checked={reachable}
           onChange={(next) => {
             setReachable(next)
@@ -115,26 +115,26 @@ export function ScenarioPanel({ controls }: { controls: MockControls }) {
       {session.data?.account && (
         <div {...stylex.props(styles.row)}>
           <Button small onClick={() => controls.endSession('expired')}>
-            Expire sign-in
+            模拟登录过期
           </Button>
           <Button small onClick={() => controls.endSession('passwordReset')}>
-            Reset password
+            重置密码
           </Button>
         </div>
       )}
       {pending && (
         <div {...stylex.props(styles.devices)}>
-          <span {...stylex.props(text.caption, text.muted)}>Setup code waiting</span>
+          <span {...stylex.props(text.caption, text.muted)}>设置码等待连接</span>
           <div {...stylex.props(styles.row)}>
             <Button small onClick={() => controls.connectEnrollment('Build Server', 'Linux')}>
-              Connect device
+              连接设备
             </Button>
             <Button small onClick={() => controls.expireEnrollment()}>
-              Expire code
+              模拟设置码过期
             </Button>
           </div>
           <Button small onClick={() => controls.useEnrollmentElsewhere()}>
-            Code used elsewhere
+            模拟设置码已被使用
           </Button>
         </div>
       )}
@@ -144,7 +144,7 @@ export function ScenarioPanel({ controls }: { controls: MockControls }) {
             <div key={device.id} {...stylex.props(styles.row, text.small)}>
               <span {...stylex.props(text.truncate)}>{device.name}</span>
               <Toggle
-                label={`${device.name} online`}
+                label={`${device.name} 在线`}
                 checked={device.connection === 'online'}
                 onChange={(online) => controls.setDeviceConnection(device.id, online ? 'online' : 'offline')}
               />

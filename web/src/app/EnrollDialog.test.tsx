@@ -17,7 +17,7 @@ function setup(scenario: ScenarioId = 'downloads', device?: { os: DeviceOS }) {
         <EnrollDialog device={original} onClose={() => {}} />
       </ClientProvider>,
     )
-    await screen.findByText('Waiting for device…')
+    await screen.findByText('等待设备连接…')
     return original
   }
   return { client, create, renderDialog }
@@ -34,23 +34,23 @@ describe('device setup downloads', () => {
       const f = setup()
       await f.renderDialog()
       await user.click(screen.getByRole('radio', { name: os }))
-      await user.type(screen.getByLabelText('Device name'), 'Build server')
+      await user.type(screen.getByLabelText('设备名称'), 'Build server')
       const file = `baton-v0.1.0-${target}.tar.gz`
-      const link = screen.getByRole('link', { name: `Download CLI · ${target.endsWith('x64') ? 'x64' : 'arm64'}` })
+      const link = screen.getByRole('link', { name: `下载命令行工具 · ${target.endsWith('x64') ? 'x64' : 'arm64'}` })
       expect(link).toHaveAttribute('href', `${window.location.origin}/downloads/${file}`)
       expect(link).toHaveAttribute('download', file)
       expect(screen.getByText(`SHA-256: ${hash.repeat(64)}`)).toBeInTheDocument()
       expect(screen.getAllByText(/v0.1.0 · \d+(\.\d+)? MB/).length).toBeGreaterThan(0)
-      const curl = screen.getByLabelText('Download in terminal')
+      const curl = screen.getByLabelText('在终端下载')
       expect(curl.textContent).toBe(`curl -fLk -O '${window.location.origin}/downloads/${file}'`)
-      const command = screen.getByLabelText('Run in terminal')
+      const command = screen.getByLabelText('在终端运行')
       expect(command).toHaveTextContent(`tar xzf "${file}" && cd "baton-v0.1.0-${target}"`)
       expect(command).toHaveTextContent('read -rs BATON_ENROLLMENT_TOKEN && export BATON_ENROLLMENT_TOKEN')
       expect(command).toHaveTextContent('./batond register --display-name "Build server" && ./batond service install')
-      expect(command.textContent).not.toContain(screen.getByLabelText('Setup code').textContent!)
+      expect(command.textContent).not.toContain(screen.getByLabelText('设置码').textContent!)
       expect(command.textContent).not.toMatch(/--coordinator|--ca-file|batond up/)
       if (os === 'macOS')
-        expect(screen.getByRole('link', { name: 'Download desktop app · arm64' })).toHaveAttribute(
+        expect(screen.getByRole('link', { name: '下载桌面客户端 · arm64' })).toHaveAttribute(
           'href',
           expect.stringContaining('.dmg'),
         )
@@ -62,9 +62,9 @@ describe('device setup downloads', () => {
     await setup().renderDialog()
     await user.click(screen.getByRole('radio', { name: 'Linux' }))
     await user.click(screen.getByRole('radio', { name: 'arm64' }))
-    expect(screen.getByLabelText('Download in terminal')).toHaveTextContent('baton-v0.1.0-linux-arm64.tar.gz')
-    expect(screen.getByLabelText('Run in terminal')).toHaveTextContent('cd "baton-v0.1.0-linux-arm64"')
-    expect(screen.getByLabelText('Run in terminal')).not.toHaveTextContent('linux-x64')
+    expect(screen.getByLabelText('在终端下载')).toHaveTextContent('baton-v0.1.0-linux-arm64.tar.gz')
+    expect(screen.getByLabelText('在终端运行')).toHaveTextContent('cd "baton-v0.1.0-linux-arm64"')
+    expect(screen.getByLabelText('在终端运行')).not.toHaveTextContent('linux-x64')
   })
 
   it.each([false, true])('offers the Windows desktop app without CLI commands (reauth: %s)', async (reauth) => {
@@ -72,15 +72,15 @@ describe('device setup downloads', () => {
     const f = setup('downloads', reauth ? { os: 'Windows' } : undefined)
     const original = await f.renderDialog()
     if (!reauth) await user.click(screen.getByRole('radio', { name: 'Windows' }))
-    expect(screen.getByRole('link', { name: 'Download desktop app · x64' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: '下载桌面客户端 · x64' })).toHaveAttribute(
       'href',
       `${window.location.origin}/downloads/baton-desktop-v0.1.0-win32-x64.exe`,
     )
     expect(screen.getByText(`SHA-256: ${'e'.repeat(64)}`)).toBeInTheDocument()
-    expect(screen.getByText(/Install the desktop app/)).toBeInTheDocument()
-    expect(screen.queryByLabelText('Run in terminal')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Download in terminal')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Setup code')).not.toBeInTheDocument()
+    expect(screen.getByText(/安装桌面客户端/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('在终端运行')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('在终端下载')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('设置码')).not.toBeInTheDocument()
     expect(f.create).toHaveBeenCalledWith(original?.id)
   })
 
@@ -89,10 +89,10 @@ describe('device setup downloads', () => {
     async (os) => {
       const f = setup('downloads', { os })
       const original = await f.renderDialog()
-      const command = screen.getByLabelText('Run in terminal')
+      const command = screen.getByLabelText('在终端运行')
       expect(command).toHaveTextContent('./batond reauth && ./batond service install')
       expect(command.textContent).not.toMatch(/--display-name|--coordinator|--ca-file|batond up/)
-      expect(command.textContent).not.toContain(screen.getByLabelText('Setup code').textContent!)
+      expect(command.textContent).not.toContain(screen.getByLabelText('设置码').textContent!)
       expect(f.create).toHaveBeenCalledWith(original?.id)
     },
   )
@@ -103,13 +103,11 @@ describe('device setup downloads', () => {
       const user = userEvent.setup()
       await setup('noDownloads').renderDialog()
       await user.click(screen.getByRole('radio', { name: os }))
-      expect(screen.getByLabelText('Run in terminal')).toHaveTextContent(
-        'batond up --coordinator https://baton.example.com',
-      )
-      expect(screen.getByLabelText('Run in terminal')).toHaveTextContent(
+      expect(screen.getByLabelText('在终端运行')).toHaveTextContent('batond up --coordinator https://baton.example.com')
+      expect(screen.getByLabelText('在终端运行')).toHaveTextContent(
         os === 'Windows' ? 'Read-Host -MaskInput' : 'read -rs BATON_ENROLLMENT_TOKEN',
       )
-      expect(screen.queryByLabelText('Download in terminal')).not.toBeInTheDocument()
+      expect(screen.queryByLabelText('在终端下载')).not.toBeInTheDocument()
       expect(screen.queryByRole('link', { name: /Download/ })).not.toBeInTheDocument()
     },
   )
@@ -121,11 +119,11 @@ describe('device setup downloads', () => {
     vi.spyOn(f.client, 'getDownloads').mockResolvedValue({ ...downloads, items: [] })
     await f.renderDialog()
     await user.click(screen.getByRole('radio', { name: 'Linux' }))
-    expect(screen.getByText('No CLI download available for Linux.')).toBeInTheDocument()
-    expect(screen.queryByLabelText('Run in terminal')).not.toBeInTheDocument()
+    expect(screen.getByText('暂无适用于 Linux 的命令行工具下载。')).toBeInTheDocument()
+    expect(screen.queryByLabelText('在终端运行')).not.toBeInTheDocument()
     await user.click(screen.getByRole('radio', { name: 'Windows' }))
-    expect(screen.getByText('No desktop download available for Windows.')).toBeInTheDocument()
-    expect(screen.queryByText(/Install the desktop app/)).not.toBeInTheDocument()
+    expect(screen.getByText('暂无适用于 Windows 的桌面客户端下载。')).toBeInTheDocument()
+    expect(screen.queryByText(/安装桌面客户端/)).not.toBeInTheDocument()
   })
 
   it('allows retrying a failed download query without issuing another setup code', async () => {
@@ -133,11 +131,11 @@ describe('device setup downloads', () => {
     const f = setup()
     vi.spyOn(f.client, 'getDownloads').mockRejectedValueOnce(new Error('unavailable'))
     await f.renderDialog()
-    expect(screen.getByRole('alert')).toHaveTextContent("Couldn't load downloads.")
-    expect(screen.queryByLabelText('Run in terminal')).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('无法加载下载信息。')
+    expect(screen.queryByLabelText('在终端运行')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '重试' }))
     await user.click(screen.getByRole('radio', { name: 'Linux' }))
-    await waitFor(() => expect(screen.getByLabelText('Run in terminal')).toHaveTextContent('./batond register'))
+    await waitFor(() => expect(screen.getByLabelText('在终端运行')).toHaveTextContent('./batond register'))
     expect(f.create).toHaveBeenCalledTimes(1)
   })
 })

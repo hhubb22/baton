@@ -72,18 +72,18 @@ function lastLines(text: string): string {
 export function diagnosticSummary(info: DesktopDiagnostics, log: string): string {
   const safe = (value: string) => redactDiagnostics(value)
   return [
-    `Client version: ${safe(info.clientVersion)}`,
-    `batond version: ${safe(info.batondVersion)}`,
-    `Platform: ${safe(info.platform)}`,
-    `Device state: ${safe(info.processState)}`,
-    `Recent exit: ${info.lastExit ? safe(info.lastExit.at) : 'none'}`,
-    ...(info.lastExit ? [`Exit reason: ${safe(info.lastExit.reason)}`] : []),
-    `Upgrade phase: ${info.upgradePhase === null ? 'none' : safe(info.upgradePhase)}`,
-    `Can restart: ${info.canRestart ? 'yes' : 'no'}`,
+    `客户端版本： ${safe(info.clientVersion)}`,
+    `batond 版本： ${safe(info.batondVersion)}`,
+    `平台： ${safe(info.platform)}`,
+    `设备状态： ${safe(info.processState)}`,
+    `最近退出： ${info.lastExit ? safe(info.lastExit.at) : '无'}`,
+    ...(info.lastExit ? [`退出原因： ${safe(info.lastExit.reason)}`] : []),
+    `升级阶段： ${info.upgradePhase === null ? '无' : safe(info.upgradePhase)}`,
+    `可以重启： ${info.canRestart ? '是' : '否'}`,
     '',
-    'Recent batond log (last 200 lines):',
+    '最近 batond 日志（最多 200 行）：',
     // 先脱敏再截行，保留多行私有内容的上下文。
-    lastLines(redactDiagnostics(log)) || '(log unavailable)',
+    lastLines(redactDiagnostics(log)) || '（日志不可用）',
   ].join('\n')
 }
 

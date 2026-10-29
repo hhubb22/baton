@@ -59,9 +59,9 @@ describe('local thread actions', () => {
     async (path) => {
       const f = fixture(path)
       f.show()
-      const reveal = await screen.findByRole('button', { name: 'Show in Finder' })
+      const reveal = await screen.findByRole('button', { name: '在 Finder 中显示' })
       await f.user.click(reveal)
-      await f.user.click(screen.getByRole('button', { name: 'Open in editor' }))
+      await f.user.click(screen.getByRole('button', { name: '在编辑器中打开' }))
       expect(f.desktop.bridge.openLocal.mock.calls).toEqual([
         [{ threadId: 'thr-webui', action: 'reveal' }],
         [{ threadId: 'thr-webui', action: 'editor' }],
@@ -90,7 +90,7 @@ describe('local thread actions', () => {
         </ClientProvider>,
       )
       if (mode !== 'browser') await waitFor(() => expect(desktop.bridge.status).toHaveBeenCalled())
-      expect(screen.queryByRole('group', { name: 'Open local folder' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('group', { name: '打开本地文件夹' })).not.toBeInTheDocument()
     },
   )
 
@@ -102,26 +102,26 @@ describe('local thread actions', () => {
         <LocalThreadActions thread={{ id: 'thr-webui', deviceId: 'dev-mac' }} />
       </ClientProvider>,
     )
-    expect(await screen.findByRole('button', { name: 'Show in File Explorer' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '在文件资源管理器中显示' })).toBeInTheDocument()
     await act(async () => desktop.publish({ ...registeredDesktop, node_id: 'dev-windows' }))
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Open in editor' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('button', { name: '在编辑器中打开' })).not.toBeInTheDocument())
   })
 
   it('offers actions on local project thread rows, with no project directory or picker', async () => {
     const f = fixture('/projects/prj-baton', localBridge({ ...registeredDesktop, node_id: 'dev-ubuntu' }))
     f.show()
-    const overview = await screen.findByRole('complementary', { name: 'Overview' })
-    await within(overview).findByRole('button', { name: 'Open in editor' })
+    const overview = await screen.findByRole('complementary', { name: '概览' })
+    await within(overview).findByRole('button', { name: '在编辑器中打开' })
     const thread = within(overview).getByRole('button', { name: /Fix gateway reconnect race/ })
     const row = thread.parentElement!
-    await f.user.click(await within(row).findByRole('button', { name: 'Open in editor' }))
+    await f.user.click(await within(row).findByRole('button', { name: '在编辑器中打开' }))
     expect(f.desktop.bridge.openLocal).toHaveBeenCalledWith({ threadId: 'thr-gateway', action: 'editor' })
     expect(f.router.state.location.search.thread).toBeUndefined()
-    expect(screen.queryByRole('button', { name: 'Choose local folder…' })).not.toBeInTheDocument()
-    await f.user.click(screen.getByRole('button', { name: 'New project' }))
-    const dialog = await screen.findByRole('dialog', { name: 'New project' })
-    expect(within(dialog).queryByLabelText('Device')).not.toBeInTheDocument()
-    expect(within(dialog).queryByRole('button', { name: 'Choose local folder…' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '选择本地文件夹…' })).not.toBeInTheDocument()
+    await f.user.click(screen.getByRole('button', { name: '新建项目' }))
+    const dialog = await screen.findByRole('dialog', { name: '新建项目' })
+    expect(within(dialog).queryByLabelText('设备')).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '选择本地文件夹…' })).not.toBeInTheDocument()
   })
 })
 
@@ -131,20 +131,20 @@ describe('native folder selection', () => {
     const list = vi.spyOn(f.client, 'listFolders')
     const add = vi.spyOn(f.client, 'addDeviceFolder')
     f.show()
-    const location = await screen.findByRole('button', { name: 'Folder: baton' })
+    const location = await screen.findByRole('button', { name: '文件夹：baton' })
     const pick = async () => {
       await f.user.click(location)
-      await f.user.click(await screen.findByRole('menuitem', { name: 'Choose local folder…' }))
+      await f.user.click(await screen.findByRole('menuitem', { name: '选择本地文件夹…' }))
     }
     await pick()
     await waitFor(() => expect(f.desktop.bridge.pickDirectory).toHaveBeenCalledWith({ nodeId: 'dev-mac' }))
-    expect(location).toHaveAccessibleName('Folder: baton')
+    expect(location).toHaveAccessibleName('文件夹：baton')
     expect(list).not.toHaveBeenCalled()
 
     f.desktop.bridge.pickDirectory.mockResolvedValueOnce('/private')
     await pick()
-    expect(await screen.findByText("Selected folder is outside this device's folders.")).toBeInTheDocument()
-    expect(location).toHaveAccessibleName('Folder: baton')
+    expect(await screen.findByText('所选文件夹不在此设备允许访问的范围内。')).toBeInTheDocument()
+    expect(location).toHaveAccessibleName('文件夹：baton')
     expect(add).not.toHaveBeenCalled()
 
     f.desktop.bridge.pickDirectory.mockResolvedValueOnce('~/src/compat-suite')
@@ -157,7 +157,7 @@ describe('native folder selection', () => {
     )
     await pick()
     await waitFor(() => expect(list).toHaveBeenLastCalledWith('dev-mac', '~/src/compat-suite'))
-    expect(location).toHaveAccessibleName('Folder: baton')
+    expect(location).toHaveAccessibleName('文件夹：baton')
     await act(async () =>
       finish({
         state: 'ready',
@@ -168,8 +168,8 @@ describe('native folder selection', () => {
         scanLimited: false,
       }),
     )
-    expect(await screen.findByRole('button', { name: 'Folder: compat-suite' })).toBeInTheDocument()
-    expect(screen.queryByText("Selected folder is outside this device's folders.")).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '文件夹：compat-suite' })).toBeInTheDocument()
+    expect(screen.queryByText('所选文件夹不在此设备允许访问的范围内。')).not.toBeInTheDocument()
     expect(add).not.toHaveBeenCalled()
   })
 
@@ -183,13 +183,13 @@ describe('native folder selection', () => {
         <FolderDialog deviceId="dev-ubuntu" onSelect={selected} onClose={() => {}} />
       </ClientProvider>,
     )
-    const dialog = await screen.findByRole('dialog', { name: 'Choose folder' })
-    expect(within(dialog).queryByRole('button', { name: 'Choose local folder…' })).not.toBeInTheDocument()
+    const dialog = await screen.findByRole('dialog', { name: '选择文件夹' })
+    expect(within(dialog).queryByRole('button', { name: '选择本地文件夹…' })).not.toBeInTheDocument()
     await within(dialog).findByRole('option', { name: 'MacBook Pro' })
-    await user.selectOptions(within(dialog).getByLabelText('Device'), 'dev-mac')
+    await user.selectOptions(within(dialog).getByLabelText('设备'), 'dev-mac')
     desktop.bridge.pickDirectory.mockResolvedValueOnce('/outside')
-    await user.click(await within(dialog).findByRole('button', { name: 'Choose local folder…' }))
-    expect(await within(dialog).findByText("Selected folder is outside this device's folders.")).toBeInTheDocument()
+    await user.click(await within(dialog).findByRole('button', { name: '选择本地文件夹…' }))
+    expect(await within(dialog).findByText('所选文件夹不在此设备允许访问的范围内。')).toBeInTheDocument()
     expect(selected).not.toHaveBeenCalled()
     let finish!: (path: string | null) => void
     desktop.bridge.pickDirectory.mockImplementationOnce(
@@ -198,11 +198,11 @@ describe('native folder selection', () => {
           finish = resolve
         }),
     )
-    await user.click(within(dialog).getByRole('button', { name: 'Choose local folder…' }))
-    await user.selectOptions(within(dialog).getByLabelText('Device'), 'dev-ubuntu')
+    await user.click(within(dialog).getByRole('button', { name: '选择本地文件夹…' }))
+    await user.selectOptions(within(dialog).getByLabelText('设备'), 'dev-ubuntu')
     await act(async () => finish('~/src/baton'))
     expect(selected).not.toHaveBeenCalled()
-    expect(within(dialog).queryByRole('button', { name: 'Choose local folder…' })).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '选择本地文件夹…' })).not.toBeInTheDocument()
   })
 
   it.each(['browser', 'old client', 'remote'])('keeps the location menu unchanged in %s', async (mode) => {
@@ -213,9 +213,9 @@ describe('native folder selection', () => {
     if (mode === 'browser') vi.stubGlobal('batonDesktop', undefined)
     if (mode === 'old client') f.desktop.bridge.capabilities = []
     f.show()
-    await f.user.click(await screen.findByRole('button', { name: 'Folder: baton' }))
-    await screen.findByRole('menuitem', { name: 'Choose another folder…' })
-    expect(screen.queryByRole('menuitem', { name: 'Choose local folder…' })).not.toBeInTheDocument()
+    await f.user.click(await screen.findByRole('button', { name: '文件夹：baton' }))
+    await screen.findByRole('menuitem', { name: '选择其他文件夹…' })
+    expect(screen.queryByRole('menuitem', { name: '选择本地文件夹…' })).not.toBeInTheDocument()
   })
 })
 
@@ -224,16 +224,16 @@ describe('local device diagnostics', () => {
     const f = fixture('/devices?device=dev-mac')
     f.desktop.bridge.diagnostics.mockResolvedValue({ ...diagnostics, upgradePhase: 'migrating' })
     f.show()
-    const section = await screen.findByRole('region', { name: 'On this computer' })
+    const section = await screen.findByRole('region', { name: '本机诊断' })
     expect(await within(section).findByText('Baton 0.1.0 · batond 0.1.1')).toBeInTheDocument()
     expect(section).toHaveTextContent('darwin arm64')
     expect(section).toHaveTextContent('Unexpected exit · code 1')
     expect(section.querySelector('time')).toHaveAttribute('datetime', diagnostics.lastExit!.at)
-    expect(section).toHaveTextContent('migrating')
-    await f.user.click(within(section).getByRole('button', { name: 'Open logs folder' }))
-    await f.user.click(within(section).getByRole('button', { name: 'Copy diagnostic summary' }))
-    expect(await within(section).findByRole('button', { name: 'Summary copied' })).toBeInTheDocument()
-    await f.user.click(within(section).getByRole('button', { name: 'Restart device service' }))
+    expect(section).toHaveTextContent('正在升级')
+    await f.user.click(within(section).getByRole('button', { name: '打开日志文件夹' }))
+    await f.user.click(within(section).getByRole('button', { name: '复制诊断摘要' }))
+    expect(await within(section).findByRole('button', { name: '诊断摘要已复制' })).toBeInTheDocument()
+    await f.user.click(within(section).getByRole('button', { name: '重启设备服务' }))
     expect(f.desktop.bridge.restartDaemon).toHaveBeenCalledWith({ nodeId: 'dev-mac' })
     expect(f.desktop.bridge.openLogs).toHaveBeenCalledWith({ nodeId: 'dev-mac' })
     expect(f.desktop.bridge.copyDiagnostics).toHaveBeenCalledWith({ nodeId: 'dev-mac' })
@@ -244,11 +244,11 @@ describe('local device diagnostics', () => {
     const f = fixture('/devices?device=dev-mac', localBridge({ ...registeredDesktop, state: 'external' }))
     f.desktop.bridge.diagnostics.mockResolvedValue({ ...diagnostics, processState: 'external', canRestart: false })
     f.show()
-    const section = await screen.findByRole('region', { name: 'On this computer' })
-    expect(await within(section).findByText('Managed by external service')).toBeInTheDocument()
-    expect(within(section).queryByRole('button', { name: 'Restart device service' })).not.toBeInTheDocument()
-    expect(within(section).getByRole('button', { name: 'Open logs folder' })).toBeInTheDocument()
-    expect(within(section).getByRole('button', { name: 'Copy diagnostic summary' })).toBeInTheDocument()
+    const section = await screen.findByRole('region', { name: '本机诊断' })
+    expect(await within(section).findByText('由外部服务管理')).toBeInTheDocument()
+    expect(within(section).queryByRole('button', { name: '重启设备服务' })).not.toBeInTheDocument()
+    expect(within(section).getByRole('button', { name: '打开日志文件夹' })).toBeInTheDocument()
+    expect(within(section).getByRole('button', { name: '复制诊断摘要' })).toBeInTheDocument()
   })
 
   it('retries failed reads and displays action failures', async () => {
@@ -256,10 +256,10 @@ describe('local device diagnostics', () => {
     f.desktop.bridge.diagnostics.mockRejectedValueOnce(new Error('IPC unavailable'))
     f.desktop.bridge.openLogs.mockRejectedValueOnce(new Error('Could not open logs folder.'))
     f.show()
-    const section = await screen.findByRole('region', { name: 'On this computer' })
-    await within(section).findByText("Couldn't read diagnostics.")
-    await f.user.click(within(section).getByRole('button', { name: 'Retry' }))
-    await f.user.click(await within(section).findByRole('button', { name: 'Open logs folder' }))
+    const section = await screen.findByRole('region', { name: '本机诊断' })
+    await within(section).findByText('无法读取诊断信息。')
+    await f.user.click(within(section).getByRole('button', { name: '重试' }))
+    await f.user.click(await within(section).findByRole('button', { name: '打开日志文件夹' }))
     expect(await within(section).findByRole('alert')).toHaveTextContent('Could not open logs folder.')
   })
 
@@ -268,8 +268,8 @@ describe('local device diagnostics', () => {
     if (mode === 'browser') vi.stubGlobal('batonDesktop', undefined)
     if (mode === 'old client') f.desktop.bridge.capabilities = []
     f.show()
-    await screen.findByRole('button', { name: 'Disconnect device' })
-    expect(screen.queryByRole('region', { name: 'On this computer' })).not.toBeInTheDocument()
+    await screen.findByRole('button', { name: '断开设备' })
+    expect(screen.queryByRole('region', { name: '本机诊断' })).not.toBeInTheDocument()
     expect(f.desktop.bridge.diagnostics).not.toHaveBeenCalled()
   })
 })

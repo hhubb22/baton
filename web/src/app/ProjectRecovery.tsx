@@ -11,7 +11,7 @@ export function ProjectRecovery({ project }: { project: Project }) {
   return (
     <Banner
       icon="alert"
-      title={project.agent.reason ?? 'The project assistant needs attention'}
+      title={project.agent.reason ?? '项目助手需要处理'}
       detail={error ?? undefined}
       action={
         <Button
@@ -20,11 +20,11 @@ export function ProjectRecovery({ project }: { project: Project }) {
             if (retry.isPending) return
             setError(null)
             retry.mutate(project.id, {
-              onError: (cause) => setError(cause instanceof ClientError ? cause.message : "Couldn't retry. Try again."),
+              onError: (cause) => setError(cause instanceof ClientError ? cause.message : '无法重试，请再试一次。'),
             })
           }}
         >
-          {retry.isPending ? 'Retrying…' : 'Retry'}
+          {retry.isPending ? '正在重试…' : '重试'}
         </Button>
       }
     />

@@ -224,6 +224,7 @@ it('migrates live and acknowledged challenges without changing business history 
     await run(query('DROP TABLE browser_notifications, browser_notification_cursors'))
     await run(query('ALTER TABLE project_agents DROP COLUMN source_node_id'))
     await run(query('ALTER TABLE projects DROP COLUMN emoji'))
+    await run(query('ALTER TABLE thread_messages DROP COLUMN thinking'))
     await run(query("DELETE FROM schema_migrations WHERE version>='0009_thread_activity_probes.sql'"))
     const commands = [randomUUID(), randomUUID(), randomUUID()]
     const checks = await run(

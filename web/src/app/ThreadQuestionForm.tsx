@@ -63,7 +63,7 @@ export function ThreadQuestionForm({
         item.required !== false &&
         (value === undefined || value === '' || (Array.isArray(value) && value.length === 0))
       ) {
-        setError(`Answer “${item.header || item.question}” to continue.`)
+        setError(`请回答“${item.header || item.question}”后继续。`)
         return
       }
     }
@@ -73,7 +73,7 @@ export function ThreadQuestionForm({
       ...(decision === 'accept' ? { answers } : {}),
     }
     if (new TextEncoder().encode(JSON.stringify(answer)).length > 64 * 1024) {
-      setError('Keep your answers within 64 KB of text.')
+      setError('回答不能超过 64 KB。')
       return
     }
     setSaving(true)
@@ -82,7 +82,7 @@ export function ThreadQuestionForm({
       await onAnswer(answer)
       setSaved(true)
     } catch {
-      setError('Your answer could not be saved. Your choices and text are kept. Try again.')
+      setError('无法保存回答，所选内容和文字已保留。请重试。')
     } finally {
       setSaving(false)
     }
@@ -90,7 +90,7 @@ export function ThreadQuestionForm({
 
   return (
     <form
-      aria-label="Agent question"
+      aria-label="助手的问题"
       {...stylex.props(styles.form)}
       onSubmit={(event) => {
         event.preventDefault()
@@ -140,7 +140,7 @@ export function ThreadQuestionForm({
                 )
               })}
               {(item.options.length === 0 || item.allowCustomAnswer !== false) && (
-                <Field label={item.options.length ? 'Other answer' : 'Your answer'} optional={item.required === false}>
+                <Field label={item.options.length ? '其他回答' : '你的回答'} optional={item.required === false}>
                   {(props) => (
                     <TextArea
                       {...props}
@@ -172,18 +172,18 @@ export function ThreadQuestionForm({
       <div {...stylex.props(styles.actions)}>
         <Button type="submit" variant="secondary">
           {saving
-            ? 'Saving…'
+            ? '正在保存…'
             : question.kind === 'mcp-elicitation' && question.questions.length === 0
-              ? 'Continue'
-              : 'Send answer'}
+              ? '继续'
+              : '发送回答'}
         </Button>
         <Button variant="ghost" onClick={() => void submit('cancel')}>
-          Close question
+          关闭问题
         </Button>
       </div>
       {saved && (
         <p role="status" {...stylex.props(text.caption)}>
-          Answer saved
+          回答已保存
         </p>
       )}
     </form>

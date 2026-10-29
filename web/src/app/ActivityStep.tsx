@@ -67,40 +67,37 @@ function presentation(step: TraceStep): { label: string; icon: IconName; body: R
   switch (step.type) {
     case 'command_execution':
       return {
-        label: string(data.input) ?? title ?? 'Command',
+        label: string(data.input) ?? title ?? '命令',
         icon: 'terminal',
         body: (
           <>
             {string(data.encoding) && data.encoding !== 'utf8' && (
               <span {...stylex.props(text.caption, styles.muted)}>
-                Output encoding: {data.encoding === 'base64' ? 'Base64' : String(data.encoding)}
+                输出编码： {data.encoding === 'base64' ? 'Base64' : String(data.encoding)}
               </span>
             )}
-            <Output
-              label={data.encoding === 'base64' ? 'Base64-encoded command output' : 'Command output'}
-              value={data.output}
-            />
+            <Output label={data.encoding === 'base64' ? 'Base64 编码的命令输出' : '命令输出'} value={data.output} />
             {typeof data.exitCode === 'number' && (
-              <span {...stylex.props(text.caption, styles.muted)}>exit {data.exitCode}</span>
+              <span {...stylex.props(text.caption, styles.muted)}>退出码 {data.exitCode}</span>
             )}
           </>
         ),
       }
     case 'dynamic_tool':
       return {
-        label: title ?? string(data.toolName) ?? 'Tool call',
+        label: title ?? string(data.toolName) ?? '工具调用',
         icon: 'tool',
         body: (
           <>
-            <Output label="Tool input" value={data.input} />
-            <Output label="Tool output" value={data.output} />
+            <Output label="工具输入" value={data.input} />
+            <Output label="工具输出" value={data.output} />
           </>
         ),
       }
     case 'file_change': {
       const path = string(data.fileName)
       return {
-        label: title ?? (path ? `Changed ${baseName(path)}` : 'File changes'),
+        label: title ?? (path ? `已更改 ${baseName(path)}` : '文件更改'),
         icon: 'file',
         body: (
           <>
@@ -112,16 +109,16 @@ function presentation(step: TraceStep): { label: string; icon: IconName; body: R
               </span>
             )}
             {typeof data.diffStr === 'string' ? (
-              <Suspense fallback={<Output label="File changes" value={data.diffStr} />}>
+              <Suspense fallback={<Output label="文件改动" value={data.diffStr} />}>
                 <ChangeDiff
                   patch={data.diffStr}
                   path={path}
-                  fallback={<Output label="File changes" value={data.diffStr} />}
+                  fallback={<Output label="文件改动" value={data.diffStr} />}
                 />
               </Suspense>
             ) : (
               <Output
-                label="File changes"
+                label="文件改动"
                 value={
                   data.changes ??
                   (data.oldStr !== undefined || data.newStr !== undefined
@@ -135,16 +132,16 @@ function presentation(step: TraceStep): { label: string; icon: IconName; body: R
       }
     }
     case 'reasoning':
-      return { label: title ?? 'Reasoning', icon: 'reasoning', body: <Output label="Reasoning" value={data.text} /> }
+      return { label: title ?? '思考过程', icon: 'reasoning', body: <Output label="思考过程" value={data.text} /> }
     case 'proposed_plan':
-      return { label: title ?? 'Plan', icon: 'tasks', body: <Output label="Plan" value={data.markdown} /> }
+      return { label: title ?? '计划', icon: 'tasks', body: <Output label="计划" value={data.markdown} /> }
     case 'todo_list':
       return {
-        label: title ?? 'Plan',
+        label: title ?? '计划',
         icon: 'tasks',
         body: (
           <>
-            <Output label="Plan notes" value={data.explanation} />
+            <Output label="计划说明" value={data.explanation} />
             {Array.isArray(data.steps) && (
               <ol {...stylex.props(text.small, styles.list)}>
                 {data.steps.map((item, index) => {
@@ -164,72 +161,84 @@ function presentation(step: TraceStep): { label: string; icon: IconName; body: R
     case 'file_search':
     case 'web_search':
       return {
-        label: title ?? (step.type === 'file_search' ? 'File search' : 'Web search'),
+        label: title ?? (step.type === 'file_search' ? '文件搜索' : '网页搜索'),
         icon: step.type === 'file_search' ? 'file-search' : 'web-search',
         body: (
           <>
-            <Output label="Search query" value={data.pattern ?? data.patterns} />
-            <Output label="Search results" value={data.results} />
+            <Output label="搜索内容" value={data.pattern ?? data.patterns} />
+            <Output label="搜索结果" value={data.results} />
           </>
         ),
       }
     case 'approval_request':
     case 'user_input_request':
       return {
-        label: title ?? 'Question',
+        label: title ?? '问题',
         icon: 'message',
-        body: <Output label="Question" value={data.prompt ?? data.questions ?? step.data} />,
+        body: <Output label="问题" value={data.prompt ?? data.questions ?? step.data} />,
       }
     case 'subagent':
       return {
-        label: title ?? 'Assistant task',
+        label: title ?? '助手任务',
         icon: 'subagent',
         body: (
           <>
-            <Output label="Task prompt" value={data.prompt} />
-            <Output label="Task progress" value={data.progress} />
-            <Output label="Task result" value={data.result ?? undefined} />
+            <Output label="任务内容" value={data.prompt} />
+            <Output label="任务进度" value={data.progress} />
+            <Output label="任务结果" value={data.result ?? undefined} />
           </>
         ),
       }
     case 'error':
       return {
-        label: title ?? 'Error',
+        label: title ?? '错误',
         icon: 'alert',
         body: (
           <>
-            <Output label="Error details" value={data.failure} />
-            <Output label="Retry details" value={data.retry} />
+            <Output label="错误详情" value={data.failure} />
+            <Output label="重试详情" value={data.retry} />
           </>
         ),
       }
     case 'token_usage':
-      return { label: title ?? 'Token usage', icon: 'usage', body: <Output label="Token usage" value={step.data} /> }
+      return { label: title ?? 'Token 用量', icon: 'usage', body: <Output label="Token 用量" value={step.data} /> }
     case 'notification':
     case 'system_notice':
       return {
-        label: title ?? string(data.title) ?? 'Notice',
+        label: title ?? string(data.title) ?? '提示',
         icon: 'message',
-        body: <Output label="Notice" value={data.message ?? data.detail ?? step.data} />,
+        body: <Output label="提示" value={data.message ?? data.detail ?? step.data} />,
       }
     case 'compaction':
       return {
-        label: title ?? 'Context summary',
+        label: title ?? '上下文摘要',
         icon: 'memory',
-        body: <Output label="Context summary" value={data.summary ?? step.data} />,
+        body: <Output label="上下文摘要" value={data.summary ?? step.data} />,
       }
     default:
       return {
         label: title ?? statusLabel(step.type),
         icon: 'dots',
-        body: <Output label="Activity details" value={step.data} />,
+        body: <Output label="执行详情" value={step.data} />,
       }
   }
 }
 
 function statusLabel(status: string) {
-  const label = status.replaceAll('_', ' ')
-  return label.charAt(0).toUpperCase() + label.slice(1)
+  const labels: Record<string, string> = {
+    pending: '等待中',
+    running: '运行中',
+    in_progress: '进行中',
+    completed: '已完成',
+    succeeded: '已完成',
+    failed: '失败',
+    cancelled: '已取消',
+    stopped: '已停止',
+    added: '已添加',
+    modified: '已修改',
+    deleted: '已删除',
+  }
+  return Object.hasOwn(labels, status) ? labels[status]! : status
 }
 
 export function ActivityStep({
@@ -242,7 +251,7 @@ export function ActivityStep({
   device: Device | undefined
 }) {
   const view = presentation(step)
-  const times = [step.started_at && `Started ${step.started_at}`, step.completed_at && `Finished ${step.completed_at}`]
+  const times = [step.started_at && `开始：${step.started_at}`, step.completed_at && `结束：${step.completed_at}`]
     .filter(Boolean)
     .join('\n')
   const data = record(step.data)
@@ -258,16 +267,14 @@ export function ActivityStep({
       {view.body}
       {step.truncated && (
         <>
-          <span title={`${step.original_bytes} bytes`} {...stylex.props(text.caption, styles.muted)}>
-            Truncated from {fileSize(step.original_bytes)}
-            {step.full_output &&
-              device?.connection !== 'online' &&
-              ` · full output on ${device?.name ?? 'the original device'}`}
+          <span title={`${step.original_bytes} 字节`} {...stylex.props(text.caption, styles.muted)}>
+            原始大小 {fileSize(step.original_bytes)}，内容已截断
+            {step.full_output && device?.connection !== 'online' && ` · 完整输出保存在 ${device?.name ?? '原设备'}`}
           </span>
           {step.full_output ? (
             <FullOutput threadId={threadId} reference={step.full_output} />
           ) : (
-            <span {...stylex.props(text.caption, styles.muted)}>The rest of this step is unavailable.</span>
+            <span {...stylex.props(text.caption, styles.muted)}>此步骤的其余内容不可用。</span>
           )}
         </>
       )}

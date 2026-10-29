@@ -40,7 +40,7 @@ it('requires the authenticated center employee to own the local identity', () =>
   expect(localAccount(saved, identity.coordinator_url, employee)).toEqual(identity)
   expect(() => localAccount(saved, identity.coordinator_url, other)).toThrow('Sign in')
   expect(() => localAccount(saved, 'https://other.test', employee)).toThrow('Sign in')
-  expect(() => localAccount({ registered: false }, identity.coordinator_url, employee)).toThrow('Connect')
+  expect(() => localAccount({ registered: false }, identity.coordinator_url, employee)).toThrow('请先连接')
 })
 
 it('declares all three versioned local capabilities', () => {
@@ -73,7 +73,7 @@ it('writes a connection key only for this computer', async () => {
   dependencies.setModelConnectionKey = vi.fn(async () => {})
   await expect(
     actions.setModelConnectionKey({ nodeId: other, connectionId: thread, key: 'offline-key' }),
-  ).rejects.toThrow('not this computer')
+  ).rejects.toThrow('不是当前电脑')
   expect(dependencies.setModelConnectionKey).not.toHaveBeenCalled()
   await actions.setModelConnectionKey({ nodeId: node, connectionId: thread, key: 'offline-key' })
   expect(dependencies.setModelConnectionKey).toHaveBeenCalledWith(thread, 'offline-key')
@@ -88,13 +88,15 @@ it('opens only a locally recorded work directory for an authenticated local Thre
     expect(dependencies.directory).toHaveBeenCalledWith(thread)
     expect(dependencies.openDirectory).toHaveBeenCalledWith(await realpath(directory), false)
     expect(dependencies.openDirectory).toHaveBeenCalledWith(await realpath(directory), true)
-    await expect(actions.openLocal({ threadId: thread, action: 'editor', path: '/etc' })).rejects.toThrow('Invalid')
+    await expect(actions.openLocal({ threadId: thread, action: 'editor', path: '/etc' })).rejects.toThrow(
+      '本机操作无效',
+    )
     vi.mocked(dependencies.threadNode).mockResolvedValue(other)
-    await expect(actions.openLocal({ threadId: thread, action: 'reveal' })).rejects.toThrow('not on this computer')
+    await expect(actions.openLocal({ threadId: thread, action: 'reveal' })).rejects.toThrow('不在当前电脑上')
     vi.mocked(dependencies.threadNode).mockResolvedValue(node)
     for (const mismatch of [{ node_id: other }, { employee_id: other }, { coordinator_url: 'https://other.test' }]) {
       vi.mocked(dependencies.directory).mockResolvedValue({ ...identity, working_directory: directory, ...mismatch })
-      await expect(actions.openLocal({ threadId: thread, action: 'reveal' })).rejects.toThrow('not on this computer')
+      await expect(actions.openLocal({ threadId: thread, action: 'reveal' })).rejects.toThrow('不在当前电脑上')
     }
     expect(dependencies.openDirectory).toHaveBeenCalledTimes(2)
   } finally {
@@ -106,11 +108,11 @@ it('does not create missing folders and rejects links that replace the validated
   const directory = await mkdtemp(join(tmpdir(), 'desktop-missing-'))
   try {
     const { actions, dependencies } = fixture(join(directory, 'missing'))
-    await expect(actions.openLocal({ threadId: thread, action: 'reveal' })).rejects.toThrow('no longer exists')
+    await expect(actions.openLocal({ threadId: thread, action: 'reveal' })).rejects.toThrow('已不存在')
     const link = join(directory, 'link')
     await symlink(tmpdir(), link)
     vi.mocked(dependencies.directory).mockResolvedValue({ ...identity, working_directory: link })
-    await expect(actions.openLocal({ threadId: thread, action: 'reveal' })).rejects.toThrow('folder changed')
+    await expect(actions.openLocal({ threadId: thread, action: 'reveal' })).rejects.toThrow('文件夹已更改')
     vi.mocked(dependencies.directory).mockRejectedValue(new Error('Not a work directory'))
     await expect(actions.openLocal({ threadId: thread, action: 'reveal' })).rejects.toThrow('Not a work directory')
     expect(dependencies.openDirectory).not.toHaveBeenCalled()
@@ -123,7 +125,7 @@ it('cancelling native selection returns null and foreign device actions are deni
   const { actions, dependencies } = fixture()
   await expect(actions.pickDirectory({ nodeId: node })).resolves.toBeNull()
   for (const method of ['pickDirectory', 'diagnostics', 'restartDaemon', 'openLogs', 'copyDiagnostics'] as const)
-    await expect(actions[method]({ nodeId: other })).rejects.toThrow('not this computer')
+    await expect(actions[method]({ nodeId: other })).rejects.toThrow('不是当前电脑')
   expect(dependencies.pickDirectory).toHaveBeenCalledTimes(1)
   expect(dependencies.restart).not.toHaveBeenCalled()
 })
@@ -132,7 +134,7 @@ it('never restarts an external service or during migration', async () => {
   const { actions, dependencies } = fixture()
   for (const state of ['external', 'stopped']) {
     vi.mocked(dependencies.diagnostics).mockResolvedValue({ ...info, processState: state, canRestart: false })
-    await expect(actions.restartDaemon({ nodeId: node })).rejects.toThrow('cannot be restarted')
+    await expect(actions.restartDaemon({ nodeId: node })).rejects.toThrow('无法重启')
   }
   expect(dependencies.restart).not.toHaveBeenCalled()
 })

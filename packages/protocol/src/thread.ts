@@ -2,6 +2,7 @@ import { Schema } from 'effect'
 import { TraceContext } from './trace.ts'
 import { FullOutputPage, FullOutputReference } from './full-output.ts'
 import { ThreadQuestion, ThreadAnswerInput, ThreadQuestionAnswer } from './thread-question.ts'
+import { ThinkingSelection } from './device.ts'
 import {
   AgentType,
   CommandOutcome,
@@ -33,6 +34,7 @@ export const CreateBrowserThreadInput = Schema.Struct({
   message: Schema.Struct({
     client_message_id: ClientMessageID,
     content: boundedText(64 * 1024).check(Schema.isMinLength(1)),
+    thinking: Schema.optionalKey(ThinkingSelection),
   }),
 })
 export type CreateBrowserThreadInput = typeof CreateBrowserThreadInput.Type
@@ -42,10 +44,12 @@ export const ThreadMessageInput = Schema.Struct({
   content: boundedText(64 * 1024).check(Schema.isMinLength(1)),
   mode: Schema.optionalKey(Schema.Literals(['queue', 'steer', ''])),
   model: Schema.optionalKey(summary(512)),
+  thinking: Schema.optionalKey(ThinkingSelection),
 }).check(
   Schema.makeFilter(
     (value) => value.mode !== 'steer' || value.model === undefined || value.model === '' || '插入不能切换模型',
   ),
+  Schema.makeFilter((value) => value.mode !== 'steer' || value.thinking === undefined || '插入不能切换思考强度'),
 )
 export type ThreadMessageInput = typeof ThreadMessageInput.Type
 
@@ -111,6 +115,7 @@ export type ThreadStopCode = typeof ThreadStopCode.Type
 
 export const Thread = Schema.Struct({
   next_model: Schema.optionalKey(summary(512)),
+  next_thinking: Schema.optionalKey(Schema.NullOr(ThinkingSelection)),
   id: UUID,
   employee_id: UUID,
   client_thread_id: ClientMessageID,
@@ -164,6 +169,7 @@ export const ThreadCommand = Schema.Struct({
   storage_generation: Schema.optionalKey(StorageGeneration),
   agent_type: Schema.optionalKey(AgentType),
   model: Schema.optionalKey(summary(512)),
+  thinking: Schema.optionalKey(ThinkingSelection),
   working_directory: Schema.optionalKey(boundedText(4096).check(Schema.isMinLength(1))),
   execution_timeout_seconds: Schema.optionalKey(ExecutionTimeoutSeconds),
   client_message_id: Schema.optionalKey(ClientMessageID),
@@ -210,6 +216,7 @@ export type ThreadEvent = typeof ThreadEvent.Type
 
 export const ThreadMessage = Schema.Struct({
   requested_model: Schema.optionalKey(Text),
+  thinking: Schema.optionalKey(ThinkingSelection),
   id: Text,
   thread_id: UUID,
   client_message_id: ClientMessageID,

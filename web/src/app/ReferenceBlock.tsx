@@ -44,7 +44,7 @@ const styles = stylex.create({
 
 function lineRange(lines: Reference['lines']) {
   if (!lines) return null
-  return lines.from === lines.to ? `Line ${lines.from}` : `Lines ${lines.from}—${lines.to}`
+  return lines.from === lines.to ? `第 ${lines.from} 行` : `第 ${lines.from}—${lines.to} 行`
 }
 
 // 选中内容的引用：来源、摘录，以及超过 8 KB 时只带开头的说明。输入区和已发送的消息共用。
@@ -53,8 +53,8 @@ export function ReferenceBlock({ reference, onRemove }: { reference: Reference; 
   const threads = useThreads()
   const device = devices.data?.find((item) => item.id === reference.deviceId)
   const thread = threads.data?.find((item) => item.id === reference.threadId)
-  const deviceName = reference.deviceId ? (device?.name ?? 'Removed device') : null
-  const reply = reference.reply !== null ? `Reply ${reference.reply}` : reference.threadId ? 'Earlier history' : null
+  const deviceName = reference.deviceId ? (device?.name ?? '已移除的设备') : null
+  const reply = reference.reply !== null ? `回复 ${reference.reply}` : reference.threadId ? '更早的记录' : null
 
   let meta: string[]
   switch (reference.kind) {
@@ -65,22 +65,19 @@ export function ReferenceBlock({ reference, onRemove }: { reference: Reference; 
       meta = [thread?.title ?? null, reply, deviceName].filter((item): item is string => item !== null)
       break
     case 'item':
-      meta = [`Question ${reference.itemId}`]
+      meta = [`问题 ${reference.itemId}`]
       break
   }
   const icon = reference.kind === 'file' ? 'file' : reference.kind === 'item' ? 'inbox' : 'message'
 
   return (
-    <figure
-      aria-label={`Reference from ${reference.title}`}
-      {...stylex.props(styles.block, !onRemove && styles.inBubble)}
-    >
+    <figure aria-label={`引用：${reference.title}`} {...stylex.props(styles.block, !onRemove && styles.inBubble)}>
       <div {...stylex.props(styles.head)}>
         <span {...stylex.props(styles.icon)}>
           <Icon name={icon} size={12} />
         </span>
-        <span {...stylex.props(text.captionMedium, styles.title, text.truncate)}>From {reference.title}</span>
-        {onRemove && <IconButton icon="close" label="Remove reference" onClick={onRemove} />}
+        <span {...stylex.props(text.captionMedium, styles.title, text.truncate)}>来自 {reference.title}</span>
+        {onRemove && <IconButton icon="close" label="移除引用" onClick={onRemove} />}
       </div>
       {meta.length > 0 && <span {...stylex.props(text.caption, styles.meta)}>{meta.join(' · ')}</span>}
       {reference.path && (
@@ -92,7 +89,7 @@ export function ReferenceBlock({ reference, onRemove }: { reference: Reference; 
       <pre {...stylex.props(styles.excerpt)}>{reference.excerpt}</pre>
       {reference.bytes > referenceLimit && (
         <span {...stylex.props(text.caption, styles.note)}>
-          Showing the first {fileSize(referenceLimit)} of {fileSize(reference.bytes)} selected.
+          已显示所选内容的前 {fileSize(referenceLimit)}，共 {fileSize(reference.bytes)}。
         </span>
       )}
     </figure>

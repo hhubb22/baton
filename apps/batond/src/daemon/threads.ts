@@ -248,6 +248,7 @@ export function makeThreadService(options: {
           ...(cmd.content !== undefined ? { payload: cmd.content } : {}),
           ...(cmd.mode ? { mode: cmd.mode } : {}),
           ...(cmd.model ? { model: cmd.model } : {}),
+          ...(cmd.thinking ? { thinking: cmd.thinking } : {}),
           ...(cmd.answer ? { answer: cmd.answer } : {}),
           ...(cmd.execution_timeout_seconds !== undefined
             ? { execution_timeout_seconds: cmd.execution_timeout_seconds }

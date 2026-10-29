@@ -9,18 +9,19 @@ export interface ErrorPayload {
 }
 
 const messages: Record<string, string> = {
-  invalid_credentials: 'Invalid username or password.',
-  password_change_required: 'Change your initial password to continue.',
-  invalid_password: 'Use 12–128 characters and avoid your username or a common password.',
-  password_reused: 'Choose a different password.',
-  csrf_rejected: 'Your sign-in needs to be refreshed. Try again.',
-  origin_rejected: 'This address is not allowed to access Baton.',
-  forbidden: 'You do not have access to this resource.',
-  revoked: 'This device was disconnected from Baton.',
-  path_changed: 'The folder is changing. Retry when it settles.',
-  directory_changed: 'The folder changed. Reload it to see all entries.',
-  roots_changed: 'Allowed folders changed. Reload the list.',
-  file_changed: 'The file changed. Reload it to continue reading.',
+  invalid_credentials: '用户名或密码错误。',
+  password_change_required: '请先修改初始密码。',
+  invalid_password: '密码需为 12 至 128 个字符，不能使用用户名或常见密码。',
+  password_reused: '请使用其他密码。',
+  csrf_rejected: '登录状态需要刷新，请重试。',
+  origin_rejected: '此地址无权访问 Baton。',
+  forbidden: '你无权访问此内容。',
+  revoked: '此设备已从 Baton 断开。',
+  path_changed: '文件夹正在更改，请稍后重试。',
+  directory_changed: '文件夹已更改，请重新加载。',
+  roots_changed: '允许访问的文件夹已更改，请重新加载列表。',
+  file_changed: '文件已更改，请重新加载后继续阅读。',
+  thinking_unavailable: '模型的思考强度选项已变更，请重新选择。',
 }
 
 export class HttpError extends ClientError {
@@ -40,12 +41,12 @@ export class HttpError extends ClientError {
               : 'invalid',
       messages[code] ??
         (status >= 500
-          ? 'Baton could not complete this request. Try again.'
+          ? 'Baton 无法完成请求，请重试。'
           : status === 409
-            ? 'This record changed. Review the latest result.'
+            ? '记录已更改，请查看最新内容。'
             : status === 404
-              ? 'This record is no longer available.'
-              : 'Baton could not accept this request. Check your input and try again.'),
+              ? '此记录已不可用。'
+              : 'Baton 无法接受请求，请检查输入后重试。'),
     )
     this.status = status
     this.payload = payload
@@ -74,7 +75,7 @@ export function createTransport(options: TransportOptions = {}) {
     try {
       response = await fetcher(`${base}${path}`, { ...init, headers, credentials: 'same-origin', cache: 'no-store' })
     } catch {
-      throw new ClientError('unavailable', 'Baton could not be reached. Check your connection and try again.')
+      throw new ClientError('unavailable', '无法连接 Baton，请检查网络后重试。')
     }
     const payload = response.status === 204 ? null : ((await response.json().catch(() => null)) as ErrorPayload | null)
     if (!response.ok) {
@@ -90,7 +91,7 @@ export function createTransport(options: TransportOptions = {}) {
       throw new HttpError(response.status, payload ?? {})
     }
     if (response.status !== 204 && payload === null)
-      throw new ClientError('unavailable', 'Baton returned an unreadable response. Try again.')
+      throw new ClientError('unavailable', 'Baton 返回了无法读取的内容，请重试。')
     if (payload && typeof payload.csrf_token === 'string') csrf = payload.csrf_token
     return payload as T
   }

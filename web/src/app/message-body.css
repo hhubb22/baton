@@ -31,6 +31,6 @@
   margin-block: 0;
 }
 
-.message-body [role='region'][aria-label='Table'] {
+.message-body [role='region'][aria-label='表格'] {
   margin-bottom: 0.8em;
 }

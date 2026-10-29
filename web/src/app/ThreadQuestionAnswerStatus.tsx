@@ -12,17 +12,17 @@ export function ThreadQuestionAnswerStatus({ answer, offline }: { answer: Thread
   const notice =
     answer.outcome === 'pending'
       ? offline
-        ? 'Answer saved · sends when this device is online'
-        : 'Answer saved · waiting for the agent'
+        ? '回答已保存 · 设备上线后发送'
+        : '回答已保存 · 等待助手接收'
       : answer.outcome === 'unknown'
-        ? 'The device could not confirm whether the agent received your answer. Check its output before continuing. Baton will not resend the answer or your original message automatically.'
+        ? '设备无法确认助手是否收到回答。请检查输出后再继续。Baton 不会自动重发回答或原消息。'
         : answer.outcome === 'failed'
-          ? 'The agent could not receive your answer. Your original message is kept and will not be sent again automatically.'
+          ? '助手无法接收回答。原消息已保留，且不会自动重发。'
           : answer.outcome === 'cancelled'
-            ? 'The question closed before your answer could be delivered.'
+            ? '回答送达前，问题已关闭。'
             : answer.decision === 'cancel'
-              ? 'Question closed'
-              : 'Answer delivered'
+              ? '问题已关闭'
+              : '回答已送达'
   return (
     <p
       role="status"

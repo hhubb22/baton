@@ -37,27 +37,27 @@ export async function resolveDesktopTarget(client: BatonClient, target: DesktopT
   if (target.thread_id) {
     try {
       const thread = await client.getThread(target.thread_id)
-      if (thread.status === 'archived') return { kind: 'threads' as const, notice: 'This thread was archived.' }
+      if (thread.status === 'archived') return { kind: 'threads' as const, notice: '对话已归档。' }
       if (thread.projectId) {
         const project = await client.getProject(thread.projectId)
-        if (project.status === 'archived') return { kind: 'projects' as const, notice: 'This project was archived.' }
+        if (project.status === 'archived') return { kind: 'projects' as const, notice: '项目已归档。' }
         return { kind: 'project' as const, id: project.id, threadId: thread.id }
       }
       return { kind: 'thread' as const, id: thread.id }
     } catch (error) {
       if (error instanceof ClientError && error.code === 'notFound')
-        return { kind: 'threads' as const, notice: 'This thread was deleted.' }
+        return { kind: 'threads' as const, notice: '对话已删除。' }
       throw error
     }
   }
   if (target.project_id) {
     try {
       const project = await client.getProject(target.project_id)
-      if (project.status === 'archived') return { kind: 'projects' as const, notice: 'This project was archived.' }
+      if (project.status === 'archived') return { kind: 'projects' as const, notice: '项目已归档。' }
       return { kind: 'project' as const, id: project.id }
     } catch (error) {
       if (error instanceof ClientError && error.code === 'notFound')
-        return { kind: 'projects' as const, notice: 'This project was deleted.' }
+        return { kind: 'projects' as const, notice: '项目已删除。' }
       throw error
     }
   }
@@ -159,7 +159,7 @@ export function DesktopWorkspace({ children }: { children: ReactNode }) {
         })
         .catch(() => {
           if (!disposed && currentRequest === requestId.current)
-            setNotice({ href: router.state.location.href, message: "Couldn't open this notification. Try again." })
+            setNotice({ href: router.state.location.href, message: '无法打开通知，请重试。' })
         })
     })
     return () => {

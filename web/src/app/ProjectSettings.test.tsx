@@ -18,13 +18,13 @@ describe('archived project notice', () => {
     render(
       <ArchivedNotice project={project} threads={[{ ...thread, pending: null, stopFailed: true }]} devices={devices} />,
     )
-    expect(screen.getByRole('status')).toHaveTextContent("Read-only. 1 thread couldn't stop. Open it to stop again.")
+    expect(screen.getByRole('status')).toHaveTextContent('只读。1 个对话停止失败，请打开后重试。')
   })
 
   it('says a thread is still running when no stop is on its way', async () => {
     const { project, thread, devices } = await data()
     render(<ArchivedNotice project={project} threads={[{ ...thread, pending: null }]} devices={devices} />)
-    expect(screen.getByRole('status')).toHaveTextContent('Read-only. 1 thread still running. Open it to stop.')
+    expect(screen.getByRole('status')).toHaveTextContent('只读。1 个对话仍在运行，请打开后停止。')
   })
 
   it('names the assistant device while the assistant is still stopping', async () => {
@@ -36,6 +36,6 @@ describe('archived project notice', () => {
         devices={devices}
       />,
     )
-    expect(screen.getByRole('status')).toHaveTextContent('Read-only. Waiting for Ubuntu Dev to stop the assistant.')
+    expect(screen.getByRole('status')).toHaveTextContent('只读。等待 Ubuntu Dev 停止助手。')
   })
 })

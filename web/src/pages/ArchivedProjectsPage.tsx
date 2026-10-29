@@ -26,27 +26,25 @@ export function ArchivedProjectsPage() {
     .filter((project) => project.status === 'archived')
     .sort((a, b) => (b.archivedAt ?? 0) - (a.archivedAt ?? 0))
   return (
-    <Page title="Archived projects">
+    <Page title="已归档项目">
       <Column>
         {projects.isPending && (
           <p role="status" {...stylex.props(text.small, text.muted)}>
-            Loading projects…
+            正在加载项目…
           </p>
         )}
         {projects.isError && (
           <Banner
             icon="alert"
-            title="Couldn't load archived projects"
+            title="无法加载已归档项目"
             action={
               <Button small onClick={() => void projects.refetch()}>
-                Retry
+                重试
               </Button>
             }
           />
         )}
-        {projects.data && archived.length === 0 && (
-          <p {...stylex.props(text.small, text.muted)}>No archived projects</p>
-        )}
+        {projects.data && archived.length === 0 && <p {...stylex.props(text.small, text.muted)}>暂无已归档项目</p>}
         {archived.map((project) => (
           <Link
             key={project.id}
@@ -58,7 +56,8 @@ export function ArchivedProjectsPage() {
             <span {...stylex.props(styles.content)}>
               <span {...stylex.props(text.bodyMedium, text.truncate)}>{project.name}</span>
               <span {...stylex.props(text.caption, text.muted)}>
-                Archived{project.archivedAt && ` · ${new Date(project.archivedAt).toLocaleString()}`}
+                已归档
+                {project.archivedAt && ` · ${new Date(project.archivedAt).toLocaleString('zh-CN', { hour12: false })}`}
               </span>
             </span>
           </Link>

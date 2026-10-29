@@ -170,7 +170,11 @@ describe('Codex Agent host', () => {
     let turns = 0
     const transcript: Transcript = {
       ...original,
-      metadata: { ...original.metadata, derivedFrom: original.scenario, purpose: 'per-turn model selection' },
+      metadata: {
+        ...original.metadata,
+        derivedFrom: original.scenario,
+        purpose: 'per-turn model and reasoning selection',
+      },
       entries: original.entries.map((entry) => {
         if (entry.type !== 'expect_outbound' || entry.label !== 'turn/start' || ++turns !== 2) return entry
         const frame = Schema.decodeUnknownSync(Schema.Struct({ params: Schema.Record(Schema.String, Schema.Unknown) }))(
@@ -180,7 +184,7 @@ describe('Codex Agent host', () => {
           ...entry,
           frame: {
             ...Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Unknown))(entry.frame),
-            params: { ...frame.params, model: 'custom-second-model' },
+            params: { ...frame.params, model: 'custom-second-model', effort: 'high' },
           },
         }
       }),
@@ -192,7 +196,15 @@ describe('Codex Agent host', () => {
     await completed(events)
     const secondInput = inputs[1]
     if (!secondInput) throw new Error('Codex transcript lacks a second turn')
-    const second = await submit(agent, { ...secondInput, model: 'custom-second-model' }, 1)
+    const second = await submit(
+      agent,
+      {
+        ...secondInput,
+        model: 'custom-second-model',
+        thinking: { id: 'reasoningEffort', value: 'high' },
+      },
+      1,
+    )
     expect(second.nativeSessionId).toBe(opened.nativeSessionId)
     await completed(events, 2)
     expect(second.executionId).not.toBe(first.executionId)

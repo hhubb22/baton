@@ -44,27 +44,27 @@ describe('MessageBody', () => {
       />,
     )
     expect(screen.getByRole('table')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Copy code' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '复制代码' })).toBeInTheDocument()
     expect(container.querySelector('pre')).toHaveTextContent('const x = 1')
   })
 
   it('copies the original fenced code', async () => {
     const user = userEvent.setup()
     render(<MessageBody body={'```ts\nconst answer = 42\n```'} onOpenPath={() => {}} />)
-    await user.click(screen.getByRole('button', { name: 'Copy code' }))
+    await user.click(screen.getByRole('button', { name: '复制代码' }))
     expect(await navigator.clipboard.readText()).toBe('const answer = 42')
-    expect(screen.getByRole('button', { name: 'Copied code' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '已复制代码' })).toBeInTheDocument()
   })
 
   it('previews a Mermaid diagram locally and keeps its source available', async () => {
     const user = userEvent.setup()
     const source = 'graph LR\n  A[Start] --> B[Done]'
     render(<MessageBody body={`\`\`\`mermaid\n${source}\n\`\`\``} onOpenPath={() => {}} />)
-    const diagram = await screen.findByRole('img', { name: 'Diagram' })
+    const diagram = await screen.findByRole('img', { name: '图表' })
     expect(diagram.getAttribute('src')).toMatch(/^data:image\/svg\+xml/)
-    await user.click(screen.getByRole('button', { name: 'Source' }))
-    expect(screen.getByLabelText('Code block')).toHaveTextContent('A[Start] --> B[Done]')
-    await user.click(screen.getByRole('button', { name: 'Copy code' }))
+    await user.click(screen.getByRole('button', { name: '源码' }))
+    expect(screen.getByLabelText('代码块')).toHaveTextContent('A[Start] --> B[Done]')
+    await user.click(screen.getByRole('button', { name: '复制代码' }))
     expect(await navigator.clipboard.readText()).toBe(source)
   })
 
@@ -75,7 +75,7 @@ describe('MessageBody', () => {
         onOpenPath={() => {}}
       />,
     )
-    const diagram = await screen.findByRole('img', { name: 'Diagram' })
+    const diagram = await screen.findByRole('img', { name: '图表' })
     expect(decodeURIComponent(diagram.getAttribute('src') ?? '')).not.toContain('https://example.com')
   })
 })

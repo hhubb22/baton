@@ -124,15 +124,15 @@ export function ActivityTrace({
 
   let content: ReactNode
   if (trace.isPending) {
-    content = <p {...stylex.props(text.small, styles.muted)}>Loading activity…</p>
+    content = <p {...stylex.props(text.small, styles.muted)}>正在加载执行过程…</p>
   } else if (trace.isError && !trace.data) {
     content = (
       <>
         <p role="status" {...stylex.props(text.small, styles.muted)}>
-          Couldn't load activity
+          无法加载执行过程
         </p>
         <Button small onClick={() => void trace.refetch()}>
-          Retry
+          重试
         </Button>
       </>
     )
@@ -144,10 +144,10 @@ export function ActivityTrace({
         {steps.map((step) => (
           <ActivityStep key={step.item_id} step={step} threadId={message.threadId} device={device} />
         ))}
-        {steps.length === 0 && <p {...stylex.props(text.small, styles.muted)}>No saved activity for this reply.</p>}
+        {steps.length === 0 && <p {...stylex.props(text.small, styles.muted)}>这条回复没有保存执行过程。</p>}
         {trace.isError && (
           <p role="status" {...stylex.props(text.small, styles.muted)}>
-            Couldn't load {trace.isFetchNextPageError ? 'more activity' : 'this activity'}.
+            无法加载{trace.isFetchNextPageError ? '更多执行记录' : '此执行记录'}。
           </p>
         )}
         {trace.hasNextPage && (
@@ -157,16 +157,12 @@ export function ActivityTrace({
               if (!trace.isFetching) void trace.fetchNextPage()
             }}
           >
-            {trace.isFetchingNextPage
-              ? 'Loading more…'
-              : trace.isFetchNextPageError
-                ? 'Retry loading more'
-                : 'Load more activity'}
+            {trace.isFetchingNextPage ? '正在加载…' : trace.isFetchNextPageError ? '重试加载' : '加载更多执行记录'}
           </Button>
         )}
         {trace.isError && !trace.isFetchNextPageError && (
           <Button small onClick={() => void trace.refetch()}>
-            Retry
+            重试
           </Button>
         )}
       </>
@@ -185,8 +181,8 @@ export function ActivityTrace({
         {message.activity
           ? activityLine(message.activity)
           : command
-            ? 'Command output'
-            : `Activity · ${message.traceItemCount} ${message.traceItemCount === 1 ? 'step' : 'steps'}`}
+            ? '命令输出'
+            : `执行过程 · ${message.traceItemCount} 个步骤`}
       </button>
       {open && <div {...stylex.props(styles.steps)}>{content}</div>}
     </div>
@@ -215,7 +211,7 @@ export function LiveActivityTrace({
         {...stylex.props(text.caption, styles.toggle, focusRing.ring)}
       >
         <Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} />
-        Activity · {steps.length} {steps.length === 1 ? 'step' : 'steps'}
+        执行过程 · {steps.length} 个步骤
       </button>
       {open && (
         <div {...stylex.props(styles.steps)}>
@@ -229,12 +225,12 @@ export function LiveActivityTrace({
                 if (!trace.isFetching) void trace.fetchNextPage()
               }}
             >
-              Load more activity
+              加载更多活动
             </Button>
           )}
           {trace.isError && (
             <p role="status" {...stylex.props(text.small, styles.muted)}>
-              Couldn't load activity.
+              无法加载执行过程。
             </p>
           )}
         </div>
@@ -255,7 +251,7 @@ export function Attachments({
 }) {
   if (attachments.length === 0) return null
   return (
-    <ul aria-label="Attachments" {...stylex.props(styles.attachmentList)}>
+    <ul aria-label="附件" {...stylex.props(styles.attachmentList)}>
       {attachments.map((item) =>
         item.kind === 'file' ? (
           <FileRow
@@ -281,11 +277,11 @@ function FileRow({
   device: Device | undefined
   onOpen: (deviceId: string, path: string) => void
 }) {
-  let detail = `${device?.name ?? 'Removed device'} · `
+  let detail = `${device?.name ?? '设备已移除'} · `
   if (!device) detail += 'unavailable'
   else if (device.connection === 'online') detail += fileSize(item.size)
-  else if (device.connection === 'syncing') detail += 'reconnecting, unavailable'
-  else detail += 'offline, unavailable'
+  else if (device.connection === 'syncing') detail += '正在重连，暂不可用'
+  else detail += '离线，不可用'
   const name = baseName(item.path)
   return (
     <li {...stylex.props(styles.attachment)}>
@@ -301,11 +297,11 @@ function FileRow({
       {device?.connection === 'online' && (
         <button
           type="button"
-          aria-label={`View ${name}`}
+          aria-label={`查看 ${name}`}
           onClick={() => onOpen(item.deviceId, item.path)}
           {...stylex.props(text.small, styles.link, focusRing.ring)}
         >
-          View
+          查看
         </button>
       )}
     </li>
@@ -333,14 +329,14 @@ function CommitRow({ item }: { item: Extract<Attachment, { kind: 'commit' }> }) 
         </span>
         {copied === false && (
           <span role="status" {...stylex.props(text.caption, text.danger)}>
-            Clipboard blocked. Copy it manually.
+            无法访问剪贴板，请手动复制。
           </span>
         )}
       </div>
       <button
         type="button"
-        aria-label={copied ? 'Copied commit SHA' : 'Copy commit SHA'}
-        title={copied ? 'Copied commit SHA' : 'Copy commit SHA'}
+        aria-label={copied ? '已复制提交 SHA' : '复制提交 SHA'}
+        title={copied ? '已复制提交 SHA' : '复制提交 SHA'}
         onClick={() => void copy()}
         {...stylex.props(styles.attachmentAction, focusRing.ring)}
       >
@@ -395,19 +391,19 @@ export function LiveOutput({
       {live ? (
         <span {...stylex.props(text.small, styles.liveHead, styles.info)}>
           <StatusDot tone="info" />
-          {thread.pending ? 'Stopping' : 'Running'} ·{' '}
+          {thread.pending ? '正在停止' : '运行中'} ·{' '}
           <span {...stylex.props(text.mono)}>{runTimer(thread.runStartedAt!, now)}</span>
         </span>
       ) : (
         <span {...stylex.props(text.small, styles.liveHead, styles.muted)}>
           <StatusDot tone="hollow" />
-          No report since {device ? clockTime(device.lastSeenAt) : 'the device was removed'}
+          {device ? `${clockTime(device.lastSeenAt)} 后没有新报告` : '设备已移除'}
         </span>
       )}
       {showReply && isReply && !saved && chunks.length > 0 && (
         <div>
           {chunks.some((chunk) => chunk.kind === 'gap') && (
-            <span {...stylex.props(text.caption, styles.gap)}>Earlier output not kept</span>
+            <span {...stylex.props(text.caption, styles.gap)}>较早的输出未保留</span>
           )}
           <MessageBody
             body={chunks
@@ -420,14 +416,14 @@ export function LiveOutput({
         </div>
       )}
       {!isReply && chunks.length > 0 && (
-        <pre ref={boxRef} aria-label="Live output" tabIndex={0} {...stylex.props(styles.liveBox, focusRing.ring)}>
+        <pre ref={boxRef} aria-label="实时输出" tabIndex={0} {...stylex.props(styles.liveBox, focusRing.ring)}>
           {chunks.map((chunk, index) =>
             chunk.kind === 'text' ? (
               <span key={index}>{chunk.text}</span>
             ) : (
               <span key={index} {...stylex.props(text.caption, styles.gap)}>
                 <Icon name="dots" size={12} />
-                Earlier output not kept
+                较早的输出未保留
               </span>
             ),
           )}
@@ -436,7 +432,7 @@ export function LiveOutput({
       {!live && (
         <span {...stylex.props(text.caption, styles.liveFoot)}>
           <Icon name="offline" size={12} />
-          Connection lost
+          连接已断开
         </span>
       )}
     </div>

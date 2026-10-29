@@ -102,7 +102,7 @@ it('桥接声明可扩展的版本能力，来源和输入大小在主进程核�
 })
 
 it('托盘按等待数加标记，菜单摘要使用员工全部 Thread 计数', () => {
-  expect(traySummary({ running: 2, waiting: 7, threads: [] })).toBe('2 running · 7 waiting for you')
+  expect(traySummary({ running: 2, waiting: 7, threads: [] })).toBe('2 个运行中 · 7 个待处理')
   expect(trayPixels(true).equals(trayPixels(false))).toBe(false)
   expect(windowsNotificationsDisabled('Enabled    REG_DWORD    0x0')).toBe(true)
   expect(windowsNotificationsDisabled('ToastEnabled    REG_DWORD    0x0')).toBe(true)

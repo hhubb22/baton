@@ -17,7 +17,7 @@ export function LocalThreadActions({ thread }: { thread: Pick<Thread, 'id' | 'de
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   if (!bridge?.openLocal || !status?.registered) return null
-  const revealLabel = /windows|win32/i.test(status.system) ? 'Show in File Explorer' : 'Show in Finder'
+  const revealLabel = /windows|win32/i.test(status.system) ? '在文件资源管理器中显示' : '在 Finder 中显示'
   const open = async (action: 'reveal' | 'editor') => {
     if (pending) return
     setError(null)
@@ -31,9 +31,9 @@ export function LocalThreadActions({ thread }: { thread: Pick<Thread, 'id' | 'de
     }
   }
   return (
-    <span role="group" aria-label="Open local folder" aria-busy={pending} {...stylex.props(styles.actions)}>
+    <span role="group" aria-label="打开本地文件夹" aria-busy={pending} {...stylex.props(styles.actions)}>
       <IconButton icon="folder" label={revealLabel} style={styles.icon} onClick={() => void open('reveal')} />
-      <IconButton icon="editor" label="Open in editor" style={styles.icon} onClick={() => void open('editor')} />
+      <IconButton icon="editor" label="在编辑器中打开" style={styles.icon} onClick={() => void open('editor')} />
       {error && (
         <span role="alert" {...stylex.props(text.caption, styles.error)}>
           {error}

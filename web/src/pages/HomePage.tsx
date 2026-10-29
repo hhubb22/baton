@@ -28,15 +28,15 @@ export function HomePage() {
   if (!devices.data) return null
   if (devices.data.length > 0) return <Navigate to="/threads" replace />
   return (
-    <Page title="Workspace">
+    <Page title="工作区">
       <div {...stylex.props(styles.empty)}>
-        <h2 {...stylex.props(text.title)}>Connect your first device</h2>
+        <h2 {...stylex.props(text.title)}>连接第一台设备</h2>
         <Button variant="primary" onClick={() => void navigate({ to: '/devices', search: { connect: true } })}>
-          Connect a device
+          连接设备
         </Button>
         <div {...stylex.props(styles.actions)}>
-          <Button onClick={newProject}>New project</Button>
-          <Button onClick={() => void navigate({ to: '/threads' })}>Open Threads</Button>
+          <Button onClick={newProject}>新建项目</Button>
+          <Button onClick={() => void navigate({ to: '/threads' })}>打开对话</Button>
         </div>
       </div>
     </Page>

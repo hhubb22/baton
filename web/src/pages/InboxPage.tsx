@@ -119,7 +119,7 @@ export function InboxPage() {
   return (
     <section {...stylex.props(styles.layout, pane.card)}>
       <ResizablePane
-        label="Resize inbox list"
+        label="调整待处理列表宽度"
         storageKey="baton.width.inbox-list"
         defaultWidth={400}
         min={280}
@@ -129,7 +129,7 @@ export function InboxPage() {
       >
         <div {...stylex.props(styles.listPane)}>
           <header {...stylex.props(styles.header)}>
-            <h1 {...stylex.props(text.bodyMedium, styles.headerTitle)}>{handled ? 'Handled' : 'Inbox'}</h1>
+            <h1 {...stylex.props(text.bodyMedium, styles.headerTitle)}>{handled ? '已处理' : '待处理'}</h1>
           </header>
           <div {...stylex.props(styles.notice)}>
             <DesktopTargetNotice />
@@ -144,7 +144,7 @@ export function InboxPage() {
               }}
               {...stylex.props(text.captionMedium, styles.tab, !handled && styles.activeTab, focusRing.ring)}
             >
-              Waiting {pending.length}
+              待回复 {pending.length}
             </button>
             <button
               type="button"
@@ -155,29 +155,29 @@ export function InboxPage() {
               }}
               {...stylex.props(text.captionMedium, styles.tab, handled && styles.activeTab, focusRing.ring)}
             >
-              Handled
+              已处理
             </button>
           </div>
           <div {...stylex.props(styles.listScroll)}>
             {inbox.isPending && (
               <p role="status" {...stylex.props(text.small, text.muted)}>
-                Loading inbox…
+                正在加载待处理事项…
               </p>
             )}
             {inbox.isError && (
               <Banner
                 icon="alert"
-                title="Couldn't load inbox"
+                title="无法加载待处理事项"
                 action={
                   <Button small onClick={() => void inbox.refetch()}>
-                    Retry
+                    重试
                   </Button>
                 }
               />
             )}
             {inbox.data && items.length === 0 && (
               <p {...stylex.props(text.body, text.muted, styles.empty)}>
-                {handled ? 'Nothing handled yet' : 'Nothing waiting'}
+                {handled ? '暂无已处理事项' : '没有待处理事项'}
               </p>
             )}
             {items.length > 0 && (
@@ -201,7 +201,7 @@ export function InboxPage() {
       </ResizablePane>
       <div {...stylex.props(styles.detail)}>
         <header {...stylex.props(text.small, text.muted, styles.header)}>
-          <span {...stylex.props(text.truncate)}>{(recent ?? selected)?.title ?? (handled ? 'Handled' : 'Inbox')}</span>
+          <span {...stylex.props(text.truncate)}>{(recent ?? selected)?.title ?? (handled ? '已处理' : '待处理')}</span>
         </header>
         <div {...stylex.props(styles.detailScroll)}>
           <div {...stylex.props(styles.detailContent)}>
@@ -219,7 +219,7 @@ export function InboxPage() {
                 ref={recentRef}
                 tabIndex={-1}
                 role="region"
-                aria-label="Latest result"
+                aria-label="最近的处理结果"
                 {...stylex.props(styles.recent)}
               >
                 <AttentionCard key={recent.id} item={recent} showProject detail feedback={recentResult?.feedback} />
@@ -228,7 +228,7 @@ export function InboxPage() {
                   variant="ghost"
                   onClick={() => void navigate({ to: '/inbox', search: { handled: true } })}
                 >
-                  View handled
+                  查看已处理事项
                 </Button>
               </div>
             )}

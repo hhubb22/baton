@@ -39,10 +39,10 @@ export function useLocalDirectoryPicker({
         onSelect({ deviceId: nodeId, folder: listing.path ?? path })
       } else {
         const reasons = {
-          outsideFolders: "Selected folder is outside this device's folders.",
-          offline: 'This device is offline. Try again when it is online.',
-          syncing: 'This device is syncing. Try again shortly.',
-          missing: 'Selected folder no longer exists or cannot be read.',
+          outsideFolders: '所选文件夹不在此设备允许访问的范围内。',
+          offline: '设备已离线，请在设备上线后重试。',
+          syncing: '设备正在同步，请稍后重试。',
+          missing: '所选文件夹不存在或无法读取。',
         }
         onError(reasons[listing.reason])
       }
@@ -52,5 +52,5 @@ export function useLocalDirectoryPicker({
       setPending(false)
     }
   }
-  return { available, pick, label: pending ? 'Checking folder…' : 'Choose local folder…' }
+  return { available, pick, label: pending ? '正在检查文件夹…' : '选择本地文件夹…' }
 }

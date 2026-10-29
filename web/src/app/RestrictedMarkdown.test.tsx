@@ -22,7 +22,7 @@ describe('RestrictedMarkdown', () => {
       />,
     )
 
-    const blocks = screen.getAllByLabelText('Code block')
+    const blocks = screen.getAllByLabelText('代码块')
     expect(blocks).toHaveLength(2)
     expect(blocks[0].querySelector('code')?.textContent).toBe('<script>alert("x")</script>\n**literal**\n')
     expect(blocks[1].querySelector('code')?.textContent).toBe('indented <img src="x">\n')
@@ -185,8 +185,8 @@ describe('RestrictedMarkdown', () => {
     const longValue = 'value'.repeat(400)
     render(<RestrictedMarkdown body={`\`\`\`\n${longValue}\n\`\`\`\n\n| Value |\n| --- |\n| ${longValue} |`} />)
 
-    const code = screen.getByLabelText('Code block')
-    const tableScroll = screen.getByRole('region', { name: 'Table' })
+    const code = screen.getByLabelText('代码块')
+    const tableScroll = screen.getByRole('region', { name: '表格' })
     expect(code.textContent).toBe(`${longValue}\n`)
     expect(within(tableScroll).getByRole('cell').textContent).toBe(longValue)
     expect(code).toHaveAttribute('tabindex', '0')

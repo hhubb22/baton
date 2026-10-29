@@ -30,6 +30,7 @@ interface ProviderThreadOptions {
   model: string
   version: string
   prepareTranscripts?: (directory: string) => Promise<string | void>
+  thinking?: P.ThinkingSelection
 }
 
 interface ProviderThreadContext {
@@ -82,7 +83,7 @@ const cases: ReadonlyArray<
 ]
 
 async function withProviderThread(
-  { agentType, model, version, prepareTranscripts }: ProviderThreadOptions,
+  { agentType, model, version, prepareTranscripts, thinking }: ProviderThreadOptions,
   run: (context: ProviderThreadContext) => Promise<void>,
 ) {
   const database = await openTestDatabase()
@@ -257,7 +258,20 @@ async function withProviderThread(
       agent_type: agentType,
       version,
       status: 'available',
-      models: [{ id: model, name: model }],
+      models: [
+        {
+          id: model,
+          name: model,
+          ...(thinking
+            ? {
+                thinking: {
+                  id: thinking.id,
+                  options: [{ id: thinking.value, label: thinking.value }],
+                },
+              }
+            : {}),
+        },
+      ],
       default_model: model,
       capabilities: {
         create: true,
@@ -307,6 +321,7 @@ async function withProviderThread(
       message: {
         client_message_id: firstMessageId,
         content: firstContent,
+        ...(thinking ? { thinking } : {}),
       },
     } satisfies P.CreateBrowserThreadInput)
     expect(created.status, JSON.stringify(created.body)).toBe(201)
@@ -356,6 +371,45 @@ async function withProviderThread(
     await rm(directory, { recursive: true, force: true })
   }
 }
+
+test('Codex thinking selection travels from HTTP through the Worker to the native turn', async () => {
+  const thinking = { id: 'reasoningEffort' as const, value: 'high' }
+  await withProviderThread(
+    {
+      agentType: 'codex',
+      model: 'gpt-6-luna',
+      version: '0.156.1',
+      thinking,
+      prepareTranscripts: async (directory) => {
+        const original = await Codex.readCodexTranscript(Codex.codexFixturePath('provider_thread_resume'))
+        const first = Codex.firstTurnOnly(original)
+        const transcript = {
+          ...first,
+          metadata: { ...first.metadata, derivedFrom: original.scenario, purpose: 'HTTP thinking selection' },
+          entries: first.entries.map((entry) => {
+            if (entry.type !== 'expect_outbound' || entry.label !== 'turn/start') return entry
+            const frame = Schema.decodeUnknownSync(
+              Schema.Struct({ params: Schema.Record(Schema.String, Schema.Unknown) }),
+            )(entry.frame)
+            return {
+              ...entry,
+              frame: {
+                ...Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Unknown))(entry.frame),
+                params: { ...frame.params, effort: 'high' },
+              },
+            }
+          }),
+        }
+        await Codex.writeCodexTranscript(join(directory, 'codex-first.ndjson'), transcript)
+        await Codex.writeCodexTranscript(join(directory, 'codex-resumed.ndjson'), Codex.resumedOnly(original))
+      },
+    },
+    async ({ view, replies }) => {
+      await expect.poll(async () => (await replies()).length, { timeout: 15_000 }).toBe(1)
+      expect((await view()).next_thinking).toEqual(thinking)
+    },
+  )
+}, 45_000)
 
 test.each(cases)(
   '$agentType: browser API receives a reply, stops and resumes the native thread',

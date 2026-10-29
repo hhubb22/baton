@@ -114,9 +114,11 @@ export const claimCommands = (): DB<ClaimedCommand[]> =>
             content: string
             mode: 'queue' | 'steer'
             model: string
-          }>`SELECT content,mode,model FROM thread_messages WHERE employee_id=${o.employee_id} AND thread_id=${t.id} AND client_message_id=${o.payload.client_message_id!}`
+            thinking: ThreadCommand['thinking'] | null
+          }>`SELECT content,mode,model,thinking FROM thread_messages WHERE employee_id=${o.employee_id} AND thread_id=${t.id} AND client_message_id=${o.payload.client_message_id!}`
           if (!messages.length) return yield* Effect.fail(failure())
-          Object.assign(body, messages[0]!)
+          const { thinking, ...message } = messages[0]!
+          Object.assign(body, message, thinking ? { thinking } : {})
         }
         const dispatchTrace = yield* withTraceSpan(captureTrace, 'baton.command.dispatch', o.trace_context, {
           kind: 'producer',

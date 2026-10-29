@@ -98,11 +98,18 @@ export interface BatonClient {
     folder: string
     agent: AgentKind
     model: string
+    thinking?: import('@baton/protocol').ThinkingSelection
     executionTimeoutSeconds?: number
     body: string
     clientId: string
   }): Promise<Operation>
-  sendMessage(input: { threadId: ID; body: string; clientId: string; mode?: SendMode }): Promise<Operation>
+  sendMessage(input: {
+    threadId: ID
+    body: string
+    clientId: string
+    mode?: SendMode
+    thinking?: import('@baton/protocol').ThinkingSelection
+  }): Promise<Operation>
   // 撤回还没发给 Agent 的消息；已经发出时返回 conflict。
   cancelMessage(messageId: ID): Promise<Message>
   // 换模型从下一轮开始生效，Agent 不支持换模型时返回 invalid。

@@ -391,6 +391,8 @@ export const list = (employeeID: string, query: P.ThreadListQuery = {}): DB<P.Th
       }>`SELECT jsonb_strip_nulls(to_jsonb(t)-'request_hash'-'exec_wait_until') || jsonb_build_object(
     'node_online',COALESCE(p.online,false),'node_synced',COALESCE(p.synced,false),'node_last_contact_at',p.last_contact_at,
     'stop_failure',${sql.literal(stopFailure)},
+    'next_thinking',(SELECT CASE WHEN COALESCE(NULLIF(m.model,''),t.model)=COALESCE(NULLIF(t.next_model,''),t.model) THEN m.thinking END
+      FROM thread_messages m WHERE m.thread_id=t.id AND m.mode='queue' ORDER BY m.created_at DESC,m.id DESC LIMIT 1),
     'title',COALESCE((SELECT left(split_part(content,chr(10),1),120) FROM thread_messages WHERE thread_id=t.id ORDER BY created_at,id LIMIT 1),t.working_directory),
     'current_turn',(SELECT jsonb_strip_nulls(to_jsonb(v)-'employee_id') FROM thread_turns v WHERE thread_id=t.id AND ended_at IS NULL),
     'stop_canceled',(SELECT count(*)::integer FROM thread_events e WHERE e.thread_id=t.id AND kind='message.withdrawn' AND id>COALESCE((SELECT max(id) FROM thread_events WHERE thread_id=t.id AND kind IN ('stop.requested','archive.requested')),9223372036854775807))) AS value

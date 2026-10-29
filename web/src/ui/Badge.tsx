@@ -55,6 +55,6 @@ export function Tag({ tone, children }: { tone?: 'agent' | 'attention'; children
   )
 }
 
-export function UnreadDot({ label = 'Unread' }: { label?: string }) {
+export function UnreadDot({ label = '未读' }: { label?: string }) {
   return <span {...stylex.props(styles.unread)} role="img" aria-label={label} />
 }

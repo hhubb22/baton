@@ -131,7 +131,7 @@ it('最近退出使用注入时间，保留 code、signal 和固定失败说明�
   f.children[0]!.emit('close', 17, 'SIGTERM')
   expect(f.supervisor.lastExit).toEqual({
     at: '2026-06-01T12:00:00.500Z',
-    reason: 'batond exited (code: 17, signal: SIGTERM); batond reported a failure; check logs',
+    reason: 'batond 已退出 (退出码: 17, 信号: SIGTERM); batond 报告了错误，请查看日志',
   })
   const exit = f.supervisor.lastExit
   await vi.advanceTimersByTimeAsync(1000)
@@ -146,13 +146,11 @@ it('正常退出、信号退出及普通 stderr 均记录实际结果，停止�
   const f = fixture()
   f.supervisor.start()
   f.children[0]!.emit('close', 0, null)
-  expect(f.supervisor.lastExit?.reason).toBe('batond exited (code: 0, signal: none)')
+  expect(f.supervisor.lastExit?.reason).toBe('batond 已退出 (退出码: 0, 信号: 无)')
   await vi.advanceTimersByTimeAsync(1000)
   f.children[1]!.stderr.emit('data', Buffer.from('ordinary diagnostic\nlast failure line\n'))
   f.children[1]!.emit('close', null, 'SIGABRT')
-  expect(f.supervisor.lastExit?.reason).toBe(
-    'batond exited (code: none, signal: SIGABRT); batond reported a failure; check logs',
-  )
+  expect(f.supervisor.lastExit?.reason).toBe('batond 已退出 (退出码: 无, 信号: SIGABRT); batond 报告了错误，请查看日志')
   const exit = f.supervisor.lastExit
   await f.supervisor.stop()
   expect(f.supervisor.lastExit).toEqual(exit)
@@ -164,7 +162,7 @@ it('主动停止和手动重启保留有意义的退出原因，超时后的 clo
   const stopping = f.supervisor.stop()
   f.children[0]!.emit('close', 0, null)
   await stopping
-  expect(f.supervisor.lastExit?.reason).toBe('batond stopped by client (code: 0, signal: none)')
+  expect(f.supervisor.lastExit?.reason).toBe('batond 已由客户端停止 (退出码: 0, 信号: 无)')
   f.supervisor.start()
   const child = f.children[1]!
   vi.spyOn(child, 'kill').mockImplementation(() => true)
@@ -172,7 +170,7 @@ it('主动停止和手动重启保留有意义的退出原因，超时后的 clo
   await vi.advanceTimersByTimeAsync(15_000)
   await restarting
   child.emit('close', null, 'SIGKILL')
-  expect(f.supervisor.lastExit?.reason).toBe('batond stopped for restart (code: none, signal: SIGKILL)')
+  expect(f.supervisor.lastExit?.reason).toBe('batond 已停止以便重启 (退出码: 无, 信号: SIGKILL)')
   const exit = f.supervisor.lastExit
   await vi.advanceTimersByTimeAsync(1000)
   expect(f.spawn).toHaveBeenCalledTimes(3)
@@ -190,14 +188,12 @@ it('同步和异步启动失败均记录可诊断原因', async () => {
   f.supervisor.start()
   expect(f.supervisor.lastExit).toEqual({
     at: '2026-06-01T12:00:00.000Z',
-    reason: 'batond exited (code: none, signal: none); spawn_failed; 无法启动内置 batond',
+    reason: 'batond 已退出 (退出码: 无, 信号: 无); spawn_failed; 无法启动内置 batond',
   })
   await vi.advanceTimersByTimeAsync(1000)
   f.children[0]!.emit('error', new Error('offline-spawn-detail'))
   f.children[0]!.emit('close', -2, null)
-  expect(f.supervisor.lastExit?.reason).toBe(
-    'batond exited (code: -2, signal: none); spawn_failed; 无法启动内置 batond',
-  )
+  expect(f.supervisor.lastExit?.reason).toBe('batond 已退出 (退出码: -2, 信号: 无); spawn_failed; 无法启动内置 batond')
   await f.supervisor.stop()
 })
 
@@ -216,10 +212,9 @@ it('普通多行 stderr 和结构化错误的私有 message、未知 code 不进
     f.children[0]!.stderr.emit('data', Buffer.from(stderr))
     f.children[0]!.emit('close', 78, null)
     expect(f.supervisor.lastExit?.reason).not.toContain('offline-')
-    expect(f.supervisor.lastExit?.reason).toContain('code: 78, signal: none')
-    expect(f.supervisor.lastExit?.reason).toContain('batond reported a failure; check logs')
-    if (stderr.includes('deployment_invalid'))
-      expect(f.supervisor.lastExit?.reason).toContain('Invalid connection settings')
+    expect(f.supervisor.lastExit?.reason).toContain('退出码: 78, 信号: 无')
+    expect(f.supervisor.lastExit?.reason).toContain('batond 报告了错误，请查看日志')
+    if (stderr.includes('deployment_invalid')) expect(f.supervisor.lastExit?.reason).toContain('连接设置无效')
     await f.supervisor.stop()
   }
 })
@@ -269,8 +264,8 @@ it.each(['close', 'timeout'])('重启等待 %s 后重新检查启动许可，不
 
 it('已知退出原因使用固定公开说明，诊断脱敏后仍可读', async () => {
   for (const [code, reason] of [
-    ['needs_reauth', 'Sign-in expired'],
-    ['deployment_invalid', 'Invalid connection settings'],
+    ['needs_reauth', '登录已过期'],
+    ['deployment_invalid', '连接设置无效'],
   ]) {
     const f = fixture()
     f.supervisor.start()
@@ -278,7 +273,7 @@ it('已知退出原因使用固定公开说明，诊断脱敏后仍可读', asyn
     f.children[0]!.emit('close', 78, null)
     const safe = redactDiagnostics(f.supervisor.lastExit!.reason)
     expect(safe).toContain(reason)
-    expect(safe).toContain('code: 78')
+    expect(safe).toContain('退出码: 78')
     expect(safe).not.toContain('offline-private-message')
     await f.supervisor.stop()
   }

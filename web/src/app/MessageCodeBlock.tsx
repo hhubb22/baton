@@ -89,7 +89,7 @@ export function MessageCodeBlock({ children }: { children?: ReactNode }) {
   return (
     <div {...stylex.props(styles.root)}>
       <div {...stylex.props(text.caption, styles.header)}>
-        <span>{language || 'Code'}</span>
+        <span>{language || '代码'}</span>
         <div>
           {language === 'mermaid' && (
             <button
@@ -97,12 +97,12 @@ export function MessageCodeBlock({ children }: { children?: ReactNode }) {
               onClick={() => setShowSource(!showSource)}
               {...stylex.props(text.caption, styles.copy, focusRing.ring)}
             >
-              {showSource ? 'Preview' : 'Source'}
+              {showSource ? '预览' : '源码'}
             </button>
           )}
           <button
             type="button"
-            aria-label={copyStatus === 'copied' ? 'Copied code' : 'Copy code'}
+            aria-label={copyStatus === 'copied' ? '已复制代码' : '复制代码'}
             onClick={() => {
               void copyText(value).then(
                 () => setCopyStatus('copied'),
@@ -112,14 +112,14 @@ export function MessageCodeBlock({ children }: { children?: ReactNode }) {
             {...stylex.props(text.caption, styles.copy, focusRing.ring)}
           >
             <Icon name={copyStatus === 'copied' ? 'check' : 'copy'} size={12} />
-            {copyStatus === 'copied' ? 'Copied' : copyStatus === 'error' ? 'Copy failed' : 'Copy'}
+            {copyStatus === 'copied' ? '已复制' : copyStatus === 'error' ? '复制失败' : '复制'}
           </button>
         </div>
       </div>
       {language === 'mermaid' && !showSource ? (
         <MessageDiagram source={value} />
       ) : (
-        <pre aria-label="Code block" tabIndex={0} {...stylex.props(styles.pre, focusRing.ring)}>
+        <pre aria-label="代码块" tabIndex={0} {...stylex.props(styles.pre, focusRing.ring)}>
           <HighlightedCode value={value} language={language} />
         </pre>
       )}

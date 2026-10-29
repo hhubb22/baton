@@ -86,7 +86,7 @@ it.each([false, true])(
             runtimeMode: 'full-access',
             interactionMode: 'default',
             runtimePolicy: (cwd) => ({ cwd, runtimeMode: 'full-access', interactionMode: 'default' }),
-            model: () => ({ instanceId, model: 'default' }),
+            model: () => ({ instanceId, model: 'default', options: [{ id: 'serviceTier', value: 'fast' }] }),
             probe: Effect.succeed({ authenticated: 'valid', models: [], details: {} }),
           }).pipe(
             Effect.provide(IdAllocator.layer),
@@ -116,9 +116,21 @@ it.each([false, true])(
             Effect.forkChild,
           )
           yield* driver.send({
-            message: { id: 'message', text: 'run', epoch: 0, operationId: 'operation', mode: 'queue' },
+            message: {
+              id: 'message',
+              text: 'run',
+              epoch: 0,
+              operationId: 'operation',
+              mode: 'queue',
+              thinking: { id: 'thinking', value: 'high' },
+            },
             preparation: { nativeSessionId: 'native', preparationId: 'prepared', confirmedSends: 0 },
           })
+          expect(input.modelSelection.options).toEqual([
+            { id: 'serviceTier', value: 'fast' },
+            { id: 'thinking', value: 'high' },
+          ])
+          expect(input.appThread.modelSelection.options).toEqual(input.modelSelection.options)
           const item = (
             id: string,
             status: string,

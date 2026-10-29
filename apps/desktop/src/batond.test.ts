@@ -80,7 +80,7 @@ it('目录查询只传 Thread ID，返回公开身份与可信路径，并保留
   expect(await batond.directory(id)).toEqual(saved)
   expect(spawn.mock.calls[0]?.[1]).toEqual(['desktop-directory', '--thread-id', id, '--data-dir', '/data'])
   missing = true
-  await expect(batond.directory(id)).rejects.toThrow('This folder no longer exists.')
+  await expect(batond.directory(id)).rejects.toThrow('此文件夹已不存在。')
 })
 
 it('失败不向网页返回子进程原始输出或注册凭据', async () => {

@@ -45,14 +45,14 @@ export function MessageDiagram({ source }: { source: string }) {
   const url = cache.get(key) ?? (result?.key === key ? result.url : undefined)
   if (!url || failedImage === key) {
     return (
-      <pre aria-label="Code block" tabIndex={0} {...stylex.props(styles.source, focusRing.ring)}>
+      <pre aria-label="代码块" tabIndex={0} {...stylex.props(styles.source, focusRing.ring)}>
         <code>{source}</code>
       </pre>
     )
   }
   return (
     <div {...stylex.props(styles.preview)}>
-      <img src={url} alt="Diagram" onError={() => setFailedImage(key)} {...stylex.props(styles.image)} />
+      <img src={url} alt="图表" onError={() => setFailedImage(key)} {...stylex.props(styles.image)} />
     </div>
   )
 }

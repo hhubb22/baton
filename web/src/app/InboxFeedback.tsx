@@ -9,17 +9,17 @@ export function InboxFeedback() {
   if (inbox.isPending)
     return (
       <p role="status" {...stylex.props(text.caption, text.muted)}>
-        Loading questions…
+        正在加载问题…
       </p>
     )
   if (!inbox.isError) return null
   return (
     <Banner
       icon="alert"
-      title="Couldn't load questions"
+      title="无法加载问题"
       action={
         <Button small onClick={() => void inbox.refetch()}>
-          Retry questions
+          重试加载问题
         </Button>
       }
     />

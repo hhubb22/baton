@@ -124,16 +124,16 @@ describe('desktop workspace', () => {
     const f = fixture()
     await waitFor(() => expect(f.bridge.onOpenTarget).toHaveBeenCalled())
     f.open({ thread_id: 'deleted' })
-    expect(await screen.findByText('This thread was deleted.')).toBeInTheDocument()
+    expect(await screen.findByText('对话已删除。')).toBeInTheDocument()
     expect(f.router.state.location.pathname).toBe('/threads')
     const read = f.client.getProject.bind(f.client)
     f.client.getProject = async (id) => ({ ...(await read(id)), status: 'archived' })
     const project = (await f.client.listProjects())[0]!
     f.open({ project_id: project.id })
-    expect(await screen.findByText('This project was archived.')).toBeInTheDocument()
+    expect(await screen.findByText('项目已归档。')).toBeInTheDocument()
     expect(f.router.state.location.pathname).toBe('/projects/archived')
     await act(() => f.router.navigate({ to: '/threads' }))
-    expect(screen.queryByText('This project was archived.')).not.toBeInTheDocument()
+    expect(screen.queryByText('项目已归档。')).not.toBeInTheDocument()
   })
 })
 
@@ -144,11 +144,11 @@ it('resolves deleted and archived threads without navigating to unavailable deta
   client.getThread = async (id) => ({ ...(await read(id)), status: 'archived' })
   expect(await resolveDesktopTarget(client, { thread_id: thread.id })).toEqual({
     kind: 'threads',
-    notice: 'This thread was archived.',
+    notice: '对话已归档。',
   })
   expect(await resolveDesktopTarget(client, { project_id: 'deleted' })).toEqual({
     kind: 'projects',
-    notice: 'This project was deleted.',
+    notice: '项目已删除。',
   })
   client.getThread = async () => {
     throw new ClientError('unavailable', 'offline')

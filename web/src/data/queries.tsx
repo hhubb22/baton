@@ -376,6 +376,7 @@ export function useCreateThread() {
       folder: string
       agent: AgentKind
       model: string
+      thinking?: import('@baton/protocol').ThinkingSelection
       executionTimeoutSeconds?: number
       body: string
       clientId: string
@@ -386,7 +387,13 @@ export function useCreateThread() {
 export function useSendMessage() {
   const client = useClient()
   return useMutation({
-    mutationFn: (input: { threadId: ID; body: string; clientId: string; mode?: SendMode }) => client.sendMessage(input),
+    mutationFn: (input: {
+      threadId: ID
+      body: string
+      clientId: string
+      mode?: SendMode
+      thinking?: import('@baton/protocol').ThinkingSelection
+    }) => client.sendMessage(input),
   })
 }
 

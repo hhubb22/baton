@@ -60,32 +60,32 @@ export function createTray(actions: {
           })),
           { type: 'separator' },
           {
-            label: 'Notifications',
+            label: '通知',
             type: 'checkbox',
             checked: actions.notificationsEnabled(),
             click: (item) => actions.setNotifications(item.checked),
           },
           ...(notificationsDisabled === true
             ? [
-                { label: 'Disabled in system settings', enabled: false },
-                { label: 'Open notification settings', click: actions.notificationSettings },
+                { label: '已在系统设置中关闭', enabled: false },
+                { label: '打开通知设置', click: actions.notificationSettings },
               ]
             : []),
           {
-            label: 'Launch at login',
+            label: '登录时启动',
             type: 'checkbox',
             checked: actions.loginEnabled(),
             click: (item) => actions.setLogin(item.checked),
           },
-          { label: 'Settings…', click: actions.settings },
+          { label: '设置…', click: actions.settings },
           { type: 'separator' },
-          { label: 'Open Baton', click: actions.open },
+          { label: '打开 Baton', click: actions.open },
           { label: actions.updateLabel(), click: actions.update },
           ...(status.state === 'external' || !actions.restartAvailable()
             ? []
-            : [{ label: 'Restart device service', click: actions.restart }]),
-          { label: 'Open logs folder', click: actions.logs },
-          { label: 'Quit Baton', click: actions.quit },
+            : [{ label: '重启设备服务', click: actions.restart }]),
+          { label: '打开日志文件夹', click: actions.logs },
+          { label: '退出 Baton', click: actions.quit },
         ]),
       )
     },

@@ -204,7 +204,7 @@ export function copyText(value: string) {
 // 复制选中的文字，返回按钮上显示的结果。
 export function copySelection(value: string) {
   return copyText(value).then(
-    () => 'Copied',
-    () => 'Clipboard blocked. Press ⌘C to copy.',
+    () => '已复制',
+    () => '无法访问剪贴板，请按 ⌘C 复制。',
   )
 }

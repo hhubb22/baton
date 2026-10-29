@@ -150,49 +150,43 @@ export function needsDesktopReauth(status: DesktopStatus, devices: Device[]) {
 
 export function desktopStatusLabel(status: DesktopStatus) {
   const labels: Record<DesktopStatus['state'], string> = {
-    unregistered: 'Not connected',
-    stopped: 'Stopped',
-    connecting: 'Connecting…',
-    restarting: 'Reconnecting…',
-    rejected: 'Connection refused',
-    external: 'Managed by external service',
-    stopping: 'Stopping…',
-    online: 'Online',
+    unregistered: '未连接',
+    stopped: '已停止',
+    connecting: '正在连接…',
+    restarting: '正在重新连接…',
+    rejected: '连接被拒绝',
+    external: '由外部服务管理',
+    stopping: '正在停止…',
+    online: '在线',
   }
   return labels[status.state]
 }
 
 export function desktopErrorMessage(error: unknown, secret = '') {
-  const raw =
-    typeof error === 'string'
-      ? error
-      : error instanceof Error
-        ? error.message
-        : 'Could not connect this computer. Try again.'
+  const raw = typeof error === 'string' ? error : error instanceof Error ? error.message : '无法连接此电脑，请重试。'
   const message = raw.replace(
     /^Error invoking remote method 'baton:(?:enroll|reauth|status|open-local|pick-directory|diagnostics|restart-daemon|open-logs|copy-diagnostics)': (?:Error: )?/,
     '',
   )
   const messages: Record<string, string> = {
-    '接入凭据已过期，请在中心重新领取': 'Setup code expired. Try again.',
-    '接入参数无效，请重新领取接入凭据': 'Could not use this setup code. Try again.',
-    'batond 操作失败，请检查设备状态或重新领取接入凭据':
-      'Could not connect this computer. Check its status and try again.',
-    '请先停止外部 batond 服务，再重新认证': 'Stop the external device service before reconnecting.',
-    '本机已接入，请使用已有身份或重新认证': 'This computer is already connected. Check its status.',
-    'batond 命令超时，请检查本机设备状态后重试': 'This computer did not respond. Check its status and try again.',
-    '无法运行内置 batond，请重新安装客户端': 'Reinstall the desktop app to connect this computer.',
-    '无法启动内置 batond': 'Could not start this computer. Reinstall the desktop app.',
-    '无法读取本机设备状态，请检查日志': "Couldn't read this computer's status. Check its logs.",
+    '接入凭据已过期，请在中心重新领取': '设置码已过期，请重试。',
+    '接入参数无效，请重新领取接入凭据': '无法使用此设置码，请重试。',
+    'batond 操作失败，请检查设备状态或重新领取接入凭据': '无法连接此电脑，请检查状态后重试。',
+    '请先停止外部 batond 服务，再重新认证': '请先停止外部设备服务，再重新连接。',
+    '本机已接入，请使用已有身份或重新认证': '此电脑已连接，请检查状态。',
+    'batond 命令超时，请检查本机设备状态后重试': '此电脑没有响应，请检查状态后重试。',
+    '无法运行内置 batond，请重新安装客户端': '请重新安装桌面客户端以连接此电脑。',
+    '无法启动内置 batond': '无法启动此电脑上的服务，请重新安装桌面客户端。',
+    '无法读取本机设备状态，请检查日志': '无法读取此电脑的状态，请查看日志。',
     'batond 在 60 秒内连续失败 5 次，请检查日志后重启':
-      'This computer stopped after repeated failures. Check its logs and restart the desktop app.',
+      '此电脑上的服务多次失败后已停止，请查看日志并重新启动桌面客户端。',
   }
   const translated = messages[message] ?? message
   return secret ? translated.replaceAll(secret, '[hidden]') : translated
 }
 
 export function desktopStatusReason(status: DesktopStatus) {
-  if (status.code === 'needs_reauth') return 'Sign-in expired on this computer.'
-  if (status.code === 'node_version_incompatible') return 'Download the latest desktop app from Baton.'
+  if (status.code === 'needs_reauth') return '此电脑的登录已过期。'
+  if (status.code === 'node_version_incompatible') return '请从 Baton 下载最新的桌面客户端。'
   return status.message ? desktopErrorMessage(status.message) : null
 }

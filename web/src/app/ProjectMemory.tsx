@@ -52,7 +52,7 @@ const styles = stylex.create({
 })
 
 function metadata(version: MemoryVersion) {
-  return `v${version.version} · ${version.source === 'you' ? 'You' : 'Project assistant'} · ${new Date(version.updatedAt).toLocaleString()}`
+  return `v${version.version} · ${version.source === 'you' ? '你' : '项目助手'} · ${new Date(version.updatedAt).toLocaleString('zh-CN', { hour12: false })}`
 }
 
 function MemoryEditor({ project, note, onClose }: { project: Project; note: MemoryNote | null; onClose: () => void }) {
@@ -88,7 +88,7 @@ function MemoryEditor({ project, note, onClose }: { project: Project; note: Memo
   const submit = async () => {
     if (saving.current || latest || archived) return
     if (!draft.body.trim()) {
-      setError('Enter a memory.')
+      setError('请输入记忆内容。')
       return
     }
     setError(null)
@@ -102,9 +102,7 @@ function MemoryEditor({ project, note, onClose }: { project: Project; note: Memo
       workspace.memoryDrafts.set(key, (current) => (current?.clientId === draft.clientId ? null : (current ?? null)))
       onClose()
     } catch (cause) {
-      setError(
-        cause instanceof ClientError && cause.code === 'invalid' ? cause.message : 'Not saved. Your draft is kept.',
-      )
+      setError(cause instanceof ClientError && cause.code === 'invalid' ? cause.message : '保存失败，草稿已保留。')
     } finally {
       saving.current = false
     }
@@ -129,11 +127,7 @@ function MemoryEditor({ project, note, onClose }: { project: Project; note: Memo
       workspace.memoryDrafts.set(key, null)
       onClose()
     } catch {
-      setError(
-        note.status === 'retired'
-          ? 'Could not restore memory. Check its current history.'
-          : 'Could not stop using memory. Your draft is kept.',
-      )
+      setError(note.status === 'retired' ? '无法恢复记忆，请查看当前历史记录。' : '无法停用记忆，草稿已保留。')
     } finally {
       saving.current = false
     }
@@ -141,23 +135,19 @@ function MemoryEditor({ project, note, onClose }: { project: Project; note: Memo
   return (
     <Dialog
       open
-      title={note ? 'Edit memory' : 'Add memory'}
+      title={note ? '编辑记忆' : '添加记忆'}
       onOpenChange={(open) => {
         if (!open) cancel()
       }}
       finalFocus={() => document.querySelector<HTMLButtonElement>(`[data-memory-id="${note?.id ?? 'new'}"]`)}
       note={
-        <span role="status">
-          {save.isPending ? 'Saving…' : latest ? 'Updated while you edited. Your draft is kept.' : null}
-        </span>
+        <span role="status">{save.isPending ? '正在保存…' : latest ? '编辑期间内容已更新，草稿已保留。' : null}</span>
       }
       actions={
         <>
-          <Button onClick={cancel}>Cancel</Button>
+          <Button onClick={cancel}>取消</Button>
           {note && !archived && !latest && (
-            <Button onClick={() => void changeStatus()}>
-              {note.status === 'retired' ? 'Restore memory' : 'Stop using'}
-            </Button>
+            <Button onClick={() => void changeStatus()}>{note.status === 'retired' ? '恢复记忆' : '停用'}</Button>
           )}
           {latest ? (
             <Button
@@ -167,20 +157,20 @@ function MemoryEditor({ project, note, onClose }: { project: Project; note: Memo
                 setError(null)
               }}
             >
-              Review latest
+              查看最新版本
             </Button>
           ) : (
             !archived && (
               <Button variant="primary" onClick={() => void submit()}>
-                {save.isPending ? 'Saving…' : 'Save memory'}
+                {save.isPending ? '正在保存…' : '保存记忆'}
               </Button>
             )
           )}
         </>
       }
     >
-      {archived && <Banner icon="archive" title="Project archived" detail="Read-only." />}
-      <Field label="Memory" error={error}>
+      {archived && <Banner icon="archive" title="项目已归档" detail="仅可查看。" />}
+      <Field label="记忆" error={error}>
         {(props) => (
           <TextArea
             {...props}
@@ -197,30 +187,26 @@ function MemoryEditor({ project, note, onClose }: { project: Project; note: Memo
       </Field>
       {latest && (
         <div {...stylex.props(styles.latest)}>
-          <p {...stylex.props(text.caption, text.muted)}>Latest · {metadata(latest)}</p>
+          <p {...stylex.props(text.caption, text.muted)}>最新 · {metadata(latest)}</p>
           <p {...stylex.props(text.small)}>{latest.body}</p>
         </div>
       )}
       {note && (
         <details onToggle={(event) => setShowSources(event.currentTarget.open)}>
-          <summary {...stylex.props(text.caption, text.muted, focusRing.ring)}>View source and history</summary>
+          <summary {...stylex.props(text.caption, text.muted, focusRing.ring)}>查看来源和历史</summary>
           <div {...stylex.props(styles.history)}>
-            {sources.isPending && showSources && <p role="status">Loading sources…</p>}
+            {sources.isPending && showSources && <p role="status">正在加载来源…</p>}
             {sources.isError && (
               <Button small onClick={() => void sources.refetch()}>
-                Retry sources
+                重试加载来源
               </Button>
             )}
             {sources.data?.map((source) => (
               <div key={source.id}>
                 <p {...stylex.props(text.caption, text.muted)}>
-                  {source.role === 'user'
-                    ? 'You'
-                    : source.role === 'execution'
-                      ? 'Execution result'
-                      : 'Assistant report'}
-                  {source.source_seq ? ' · Message ' + source.source_seq : ''}
-                  {source.suppressed ? ' · No longer used' : ''}
+                  {source.role === 'user' ? '你' : source.role === 'execution' ? '执行结果' : '助手报告'}
+                  {source.source_seq ? ' · 消息 ' + source.source_seq : ''}
+                  {source.suppressed ? ' · 已停用' : ''}
                 </p>
                 <p {...stylex.props(text.small)}>{source.text}</p>
               </div>
@@ -229,17 +215,17 @@ function MemoryEditor({ project, note, onClose }: { project: Project; note: Memo
               <div key={version.version}>
                 <p {...stylex.props(text.caption, text.muted)}>
                   {metadata(version)}
-                  {version.details?.retracted ? ' · Retracted' : ''}
+                  {version.details?.retracted ? ' · 已撤回' : ''}
                 </p>
                 {version.details?.reason && <p {...stylex.props(text.caption, text.muted)}>{version.details.reason}</p>}
                 {(version.details?.validFrom || version.details?.validUntil) && (
                   <p {...stylex.props(text.caption, text.muted)}>
-                    Applies{' '}
+                    生效时间：{' '}
                     {version.details.validFrom
-                      ? new Date(version.details.validFrom).toLocaleString()
-                      : 'from an unknown time'}
+                      ? new Date(version.details.validFrom).toLocaleString('zh-CN', { hour12: false })
+                      : '开始时间未知'}
                     {version.details.validUntil
-                      ? ' until ' + new Date(version.details.validUntil).toLocaleString()
+                      ? ' 至 ' + new Date(version.details.validUntil).toLocaleString('zh-CN', { hour12: false })
                       : ''}
                   </p>
                 )}
@@ -263,7 +249,7 @@ export function ProjectMemory({ project }: { project: Project }) {
   const active = memory.data?.filter((note) => note.effective && note.status !== 'retired') ?? []
   const retired = memory.data?.filter((note) => note.status === 'retired') ?? []
   const renderNote = (note: MemoryNote) => (
-    <article key={note.id} aria-label="Memory" {...stylex.props(styles.row)}>
+    <article key={note.id} aria-label="记忆" {...stylex.props(styles.row)}>
       <button
         data-memory-id={note.id}
         type="button"
@@ -277,18 +263,12 @@ export function ProjectMemory({ project }: { project: Project }) {
     </article>
   )
   return (
-    <section aria-label="Project memory" {...stylex.props(styles.list)}>
+    <section aria-label="项目记忆" {...stylex.props(styles.list)}>
       {attention && (
         <Banner
           attention
-          title={
-            attention === 'login_required' ? 'Memory updates need sign-in' : 'Memory search needs device credentials'
-          }
-          detail={
-            attention === 'login_required'
-              ? 'Saved conversations will be processed after sign-in.'
-              : 'Keyword search is still available.'
-          }
+          title={attention === 'login_required' ? '更新记忆需要登录' : '搜索记忆需要设备凭据'}
+          detail={attention === 'login_required' ? '登录后将处理已保存的对话。' : '仍可使用关键词搜索。'}
           action={
             <Button
               small
@@ -302,28 +282,28 @@ export function ProjectMemory({ project }: { project: Project }) {
                     }))
               }
             >
-              {attention === 'login_required' ? 'View devices' : 'Open settings'}
+              {attention === 'login_required' ? '查看设备' : '打开设置'}
             </Button>
           }
         />
       )}
       {memory.isPending && (
         <p role="status" {...stylex.props(text.small, text.muted)}>
-          Loading memory…
+          正在加载记忆…
         </p>
       )}
       {memory.isError && (
         <Banner
           icon="alert"
-          title="Couldn't load project memory"
+          title="无法加载项目记忆"
           action={
             <Button small onClick={() => void memory.refetch()}>
-              Retry memory
+              重试加载记忆
             </Button>
           }
         />
       )}
-      {memory.data?.length === 0 && <p {...stylex.props(text.small, text.muted)}>No memory yet</p>}
+      {memory.data?.length === 0 && <p {...stylex.props(text.small, text.muted)}>暂无记忆</p>}
       {[...new Set(active.map((note) => note.topic))].map((topic) => (
         <div key={topic}>
           {topic && <p {...stylex.props(text.caption, text.muted)}>{topic}</p>}
@@ -332,13 +312,13 @@ export function ProjectMemory({ project }: { project: Project }) {
       ))}
       {retired.length > 0 && (
         <details>
-          <summary {...stylex.props(text.caption, text.muted, focusRing.ring)}>No longer used</summary>
+          <summary {...stylex.props(text.caption, text.muted, focusRing.ring)}>已停用</summary>
           {retired.map(renderNote)}
         </details>
       )}
       {!archived && (
         <Button small data-memory-id="new" onClick={() => setEditing('new')}>
-          Add memory
+          添加记忆
         </Button>
       )}
       {editing && (

@@ -122,8 +122,8 @@ it('摘要包含版本、平台、设备状态、最近退出、升级阶段和�
   for (const value of ['1.2.3', '1.2.4', 'darwin-arm64', 'restarting', info.lastExit!.at, 'code: 7', 'draining']) {
     expect(result).toContain(value)
   }
-  expect(result).toContain('Can restart: no')
-  const log = result.split('Recent batond log (last 200 lines):\n')[1]!
+  expect(result).toContain('可以重启： 否')
+  const log = result.split('最近 batond 日志（最多 200 行）：\n')[1]!
   expect(log.split('\n')).toHaveLength(200)
   expect(log.split('\n')[0]).toBe('log line 50')
   expect(log.split('\n').at(-1)).toBe('log line 249')
@@ -143,15 +143,15 @@ it('摘要脱敏所有可变字段和退出消息，并在截取日志前处理�
     'deployment:\n' + Array.from({ length: 250 }, (_, i) => `offline-private-content-${i}`).join('\n'),
   )
   expect(result).not.toContain('offline-')
-  expect(result).toContain('Can restart: yes')
-  expect(result.split('Recent batond log (last 200 lines):\n')[1]!.split('\n')).toHaveLength(200)
+  expect(result).toContain('可以重启： 是')
+  expect(result.split('最近 batond 日志（最多 200 行）：\n')[1]!.split('\n')).toHaveLength(200)
 })
 
 it('无最近退出、升级或日志时仍可生成摘要', () => {
   const result = diagnosticSummary({ ...info, lastExit: null, upgradePhase: null }, '')
-  expect(result).toContain('Recent exit: none')
-  expect(result).toContain('Upgrade phase: none')
-  expect(result).toContain('(log unavailable)')
+  expect(result).toContain('最近退出： 无')
+  expect(result).toContain('升级阶段： 无')
+  expect(result).toContain('（日志不可用）')
 })
 
 it('日志不存在或为空时返回空字符串，不读取轮转文件', async () => {
@@ -179,7 +179,7 @@ it.each([201, 30_000])('实际尾读与摘要复制链路隐藏跨越 200 行边
   )
   const summary = diagnosticSummary(info, await readLogTail(path))
   expect(summary).not.toContain('offline-part-')
-  const log = summary.split('Recent batond log (last 200 lines):\n')[1]!
+  const log = summary.split('最近 batond 日志（最多 200 行）：\n')[1]!
   expect(log.split('\n')).toHaveLength(200)
   expect(log).toContain('[REDACTED]')
   expect(log.split('\n').at(-1)).toBe('INFO daemon exited')

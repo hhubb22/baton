@@ -1,6 +1,12 @@
 import { Context, Effect, Schema, Stream } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
-import { ThreadAnswerInput, ThreadQuestion, WorkerOpenConfig } from '@baton/protocol'
+import {
+  ThreadAnswerInput,
+  ThreadQuestion,
+  ThinkingCapability,
+  ThinkingSelection,
+  WorkerOpenConfig,
+} from '@baton/protocol'
 
 /** One input submitted to the native Agent. */
 const AgentMessage = Schema.Struct({
@@ -10,6 +16,7 @@ const AgentMessage = Schema.Struct({
   operationId: Schema.String,
   mode: Schema.Literals(['queue', 'steer']),
   model: Schema.optionalKey(Schema.String),
+  thinking: Schema.optionalKey(ThinkingSelection),
   targetTurn: Schema.optionalKey(Schema.Number),
 })
 export type AgentMessage = typeof AgentMessage.Type
@@ -91,6 +98,9 @@ const ProbeDetail = Schema.Union([Schema.String, Schema.Number, Schema.Boolean])
 export const ProbeResult = Schema.Struct({
   authenticated: Schema.Literals(['valid', 'missing', 'unknown']),
   models: Schema.Array(Schema.String),
+  model_thinking: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ model: Schema.String, thinking: ThinkingCapability })),
+  ),
   reason: Schema.optionalKey(Schema.String),
   details: Schema.Record(Schema.String, ProbeDetail),
 })

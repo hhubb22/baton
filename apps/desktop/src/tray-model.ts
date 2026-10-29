@@ -2,18 +2,18 @@ import type { DesktopStatus } from './status.ts'
 import type { Activity } from './notifications.ts'
 
 export const trayLabels: Record<DesktopStatus['state'], string> = {
-  unregistered: 'Not connected',
-  connecting: 'Connecting…',
+  unregistered: '未连接',
+  connecting: '正在连接…',
   online: '',
-  rejected: 'Rejected',
-  external: 'Managed by an external service',
-  restarting: 'Reconnecting…',
-  stopping: 'Stopping…',
-  stopped: 'Stopped',
+  rejected: '连接被拒绝',
+  external: '由外部服务管理',
+  restarting: '正在重新连接…',
+  stopping: '正在停止…',
+  stopped: '已停止',
 }
 
 export function traySummary(activity: Activity) {
-  return `${activity.running} running · ${activity.waiting} waiting for you`
+  return `${activity.running} 个运行中 · ${activity.waiting} 个待处理`
 }
 
 export function trayPixels(waiting: boolean) {

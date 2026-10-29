@@ -58,7 +58,7 @@ export function createMockClient(
   // 每次读写先等待模拟延迟，返回的数据是副本，页面改动不会影响模拟状态。
   async function connect(ms: number) {
     await scheduler.wait(ms)
-    if (!reachable) throw new ClientError('unavailable', 'Baton could not be reached')
+    if (!reachable) throw new ClientError('unavailable', '无法连接 Baton')
   }
 
   async function read<T>(pick: () => T): Promise<T> {
@@ -67,7 +67,7 @@ export function createMockClient(
   }
 
   function signedIn() {
-    if (!store.snapshot().session.account) throw new ClientError('unauthorized', 'Sign in to continue')
+    if (!store.snapshot().session.account) throw new ClientError('unauthorized', '请先登录')
   }
 
   async function guarded<T>(pick: () => T): Promise<T> {
@@ -116,7 +116,7 @@ export function createMockClient(
     async changePassword(currentPassword, newPassword) {
       await connect(latency.save)
       signedIn()
-      if (!currentPassword || newPassword.length < 12) throw new ClientError('invalid', 'Use at least 12 characters.')
+      if (!currentPassword || newPassword.length < 12) throw new ClientError('invalid', '密码至少需要 12 个字符。')
       store.signOut()
       return structuredClone(store.snapshot().session)
     },
@@ -134,7 +134,7 @@ export function createMockClient(
     listThreads: () => guarded(() => store.snapshot().threads),
     async getThread(threadId) {
       const thread = (await this.listThreads()).find((item) => item.id === threadId)
-      if (!thread) throw new ClientError('notFound', 'The thread was not found.')
+      if (!thread) throw new ClientError('notFound', '找不到对话。')
       return thread
     },
     listMessages: (threadId) => guarded(() => store.snapshot().messages.filter((item) => item.threadId === threadId)),
@@ -151,10 +151,10 @@ export function createMockClient(
       signedIn()
       return structuredClone(store.createThread(input, clientId))
     },
-    async sendMessage({ threadId, body, clientId, mode }) {
+    async sendMessage({ threadId, body, clientId, mode, thinking }) {
       await connect(latency.read)
       signedIn()
-      return structuredClone(store.sendMessage(threadId, body, clientId, mode))
+      return structuredClone(store.sendMessage(threadId, body, clientId, mode, thinking))
     },
     async answerThreadQuestion({ threadId, answer }) {
       await connect(latency.save)
@@ -250,8 +250,8 @@ export function createMockClient(
       await connect(latency.read)
       signedIn()
       const device = store.snapshot().devices.find((item) => item.id === deviceId)
-      if (!device) throw new ClientError('notFound', 'Device not found.')
-      if (device.connection !== 'online') throw new ClientError('unavailable', 'Device is offline.')
+      if (!device) throw new ClientError('notFound', '找不到设备。')
+      if (device.connection !== 'online') throw new ClientError('unavailable', '设备已离线。')
       return [...device.folders]
     },
     async addDeviceFolder({ deviceId, path }) {

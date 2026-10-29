@@ -26,13 +26,13 @@ export interface StatusView {
 export type ThreadGroup = 'attention' | 'running' | 'stopping' | 'stopRequested' | 'waiting' | 'idle' | 'archived'
 
 export const threadGroups: { id: ThreadGroup; label: string }[] = [
-  { id: 'attention', label: 'Needs attention' },
-  { id: 'running', label: 'Running' },
-  { id: 'stopping', label: 'Stopping' },
-  { id: 'stopRequested', label: 'Stop requested' },
-  { id: 'waiting', label: 'Waiting for device' },
-  { id: 'idle', label: 'Idle' },
-  { id: 'archived', label: 'Archived' },
+  { id: 'attention', label: '待处理' },
+  { id: 'running', label: '运行中' },
+  { id: 'stopping', label: '正在停止' },
+  { id: 'stopRequested', label: '已请求停止' },
+  { id: 'waiting', label: '等待设备' },
+  { id: 'idle', label: '空闲' },
+  { id: 'archived', label: '已归档' },
 ]
 
 // 卡片上的恢复办法。newChat 用同一设备和目录新建对话，chooseFolder 先选目录再新建。
@@ -67,16 +67,13 @@ function notice(
 
 export function threadMessageNotice(message: Message, agent: Thread['agent']): ThreadNotice | null {
   if (message.role !== 'failure') return null
-  return notice(
-    agent ? `${agentNames[agent]} could not finish this reply` : 'Command could not finish',
-    message.body.trim() || 'No further details are available.',
-  )
+  return notice(agent ? `${agentNames[agent]} 未能完成此回复` : '命令未能完成', message.body.trim() || '暂无更多详情。')
 }
 
 // 带尾随空格，直接拼在下一句前面。
 function canceledNote(count: number) {
   if (count === 0) return ''
-  return count === 1 ? '1 waiting message was canceled. ' : `${count} waiting messages were canceled. `
+  return count === 1 ? '已取消 1 条等待中的消息。' : `已取消 ${count} 条等待中的消息。`
 }
 
 // unknownDelivery：Thread 里有一条不确定是否送达的消息。
@@ -85,10 +82,10 @@ export function threadView(
   device: Device | undefined,
   options: { resume?: boolean; unknownDelivery?: boolean } = {},
 ): ThreadView {
-  const name = device?.name ?? 'This device'
-  const agent = thread.agent ? agentNames[thread.agent] : 'Command'
+  const name = device?.name ?? '此设备'
+  const agent = thread.agent ? agentNames[thread.agent] : '命令'
   const reachable = device?.connection === 'online'
-  const away = device?.connection === 'syncing' ? 'syncing' : 'offline'
+  const away = device?.connection === 'syncing' ? '正在同步' : '已离线'
   const view = (
     status: StatusView,
     group: ThreadGroup,
@@ -107,13 +104,13 @@ export function threadView(
   })
 
   if (thread.status === 'archived') {
-    return view({ tone: 'hollow', label: 'Archived' }, 'archived', notice('Archived', ''), false)
+    return view({ tone: 'hollow', label: '已归档' }, 'archived', notice('已归档', ''), false)
   }
   if (thread.stopFailed && thread.status === 'running') {
     return view(
-      { tone: 'attention', label: 'Stop failed' },
+      { tone: 'attention', label: '停止失败' },
       'attention',
-      notice(`Couldn't stop ${agent}`, `${agent} may still be running.`, null, 'attention'),
+      notice(`无法停止 ${agent}`, `${agent} 可能仍在运行。`, null, 'attention'),
       true,
       reachable,
     )
@@ -121,74 +118,62 @@ export function threadView(
   if (thread.pending === 'archive') {
     if (reachable) {
       return view(
-        { tone: 'info', label: 'Archiving…' },
+        { tone: 'info', label: '正在归档…' },
         'stopping',
-        notice('Stopping before archiving…', canceledNote(thread.stopCanceled).trim()),
+        notice('正在停止后归档…', canceledNote(thread.stopCanceled).trim()),
         false,
         true,
       )
     }
     return view(
-      { tone: 'neutral', label: 'Waiting to archive' },
+      { tone: 'neutral', label: '等待归档' },
       'stopRequested',
-      notice(
-        `Waiting for ${name}`,
-        `${canceledNote(thread.stopCanceled)}${agent} may still be running.`,
-        'viewDevices',
-      ),
+      notice(`等待 ${name}`, `${canceledNote(thread.stopCanceled)}${agent} may still be running.`, 'viewDevices'),
       false,
     )
   }
   if (thread.pending === 'stop') {
-    if (reachable) return view({ tone: 'info', label: 'Stopping…' }, 'stopping', null, true, true)
+    if (reachable) return view({ tone: 'info', label: '正在停止…' }, 'stopping', null, true, true)
     return view(
-      { tone: 'neutral', label: 'Waiting to stop' },
+      { tone: 'neutral', label: '等待停止' },
       'stopRequested',
-      notice(
-        `Stop is waiting for ${name}`,
-        `${canceledNote(thread.stopCanceled)}${agent} may still be running.`,
-        'viewDevices',
-      ),
+      notice(`等待 ${name} 停止`, `${canceledNote(thread.stopCanceled)}${agent} may still be running.`, 'viewDevices'),
       false,
     )
   }
   if (thread.resumePending) {
     return view(
-      { tone: 'info', label: 'Resuming…' },
+      { tone: 'info', label: '正在恢复…' },
       'waiting',
-      notice(`Resuming ${agent}…`, `Waiting for ${name} to confirm this thread has resumed.`),
+      notice(`正在恢复 ${agent}…`, `等待 ${name} 确认对话已恢复。`),
       false,
     )
   }
   if (thread.starting) {
     return reachable
       ? view(
-          { tone: 'info', label: 'Starting…' },
+          { tone: 'info', label: '正在启动…' },
           'waiting',
-          notice(`Starting ${agent}…`, `Your message is saved. Waiting for ${agent} to open on ${name}.`),
+          notice(`正在启动 ${agent}…`, `消息已保存，正在等待 ${agent} 在 ${name} 上启动。`),
         )
       : view(
-          { tone: 'neutral', label: 'Waiting for device' },
+          { tone: 'neutral', label: '等待设备' },
           'waiting',
-          notice(
-            `Waiting for ${name}`,
-            `Your message is saved. ${agent} has not opened this thread yet.`,
-            'viewDevices',
-          ),
+          notice(`等待 ${name}`, `消息已保存，${agent} 尚未打开此对话。`, 'viewDevices'),
         )
   }
   switch (thread.status) {
     case 'stopped':
-      return view({ tone: 'danger', label: 'Stopped' }, 'attention', ...stoppedNotice(thread, name, agent, options))
+      return view({ tone: 'danger', label: '已停止' }, 'attention', ...stoppedNotice(thread, name, agent, options))
     case 'unknown':
       return view(
-        { tone: 'attention', label: 'Status unknown' },
+        { tone: 'attention', label: '状态未知' },
         'attention',
         options.unknownDelivery
-          ? notice(`${agent} may have missed your last message`, '', 'viewActivity', 'attention')
+          ? notice(`${agent} 可能未收到上一条消息`, '', 'viewActivity', 'attention')
           : notice(
-              'Status unknown',
-              `${name} has not reported this thread since it reconnected. Check the activity before sending more messages.`,
+              '状态未知',
+              `${name} 重新连接后尚未报告此对话的状态。请先查看活动记录，再发送消息。`,
               'viewActivity',
               'attention',
             ),
@@ -196,23 +181,19 @@ export function threadView(
     case 'running':
       if (!reachable) {
         return view(
-          { tone: 'hollow', label: 'Last seen running' },
+          { tone: 'hollow', label: '上次运行中' },
           'running',
-          notice(`${name} is ${away}`, `${agent} may still be running.`, 'viewDevices'),
+          notice(`${name} ${away}`, `${agent} 可能仍在运行。`, 'viewDevices'),
         )
       }
-      return view({ tone: 'info', label: 'Running' }, 'running', null, true, true)
+      return view({ tone: 'info', label: '运行中' }, 'running', null, true, true)
     case 'waiting':
-      return view(
-        { tone: 'neutral', label: 'Waiting for device' },
-        'waiting',
-        notice(`${name} is ${away}`, '', 'viewDevices'),
-      )
+      return view({ tone: 'neutral', label: '等待设备' }, 'waiting', notice(`${name} ${away}`, '', 'viewDevices'))
     case 'idle':
       return view(
-        { tone: 'neutral', label: 'Idle' },
+        { tone: 'neutral', label: '空闲' },
         'idle',
-        reachable ? null : notice(`${name} is ${away}`, 'New messages wait until it connects.'),
+        reachable ? null : notice(`${name} ${away}`, '新消息将在设备连接后发送。'),
       )
   }
 }
@@ -224,35 +205,35 @@ function stoppedNotice(
   options: { resume?: boolean },
 ): [ThreadNotice, boolean] {
   const stop = thread.stop ?? { kind: 'byYou', detail: null }
-  const keep = `${canceledNote(thread.stopCanceled)}Changed files were kept.`
+  const keep = `${canceledNote(thread.stopCanceled)}已更改的文件已保留。`
   switch (stop.kind) {
     case 'byYou':
-      return [notice('Stopped by you', keep), true]
+      return [notice('已由你停止', keep), true]
     case 'forced':
-      return [notice('Stopped by you', `${agent} didn't stop within 1 minute, so ${name} ended it. ${keep}`), true]
+      return [notice('已由你停止', `${agent} 在 1 分钟内未停止，${name} 已将其结束。${keep}`), true]
     case 'interrupted':
       if (options.resume) {
         return [
           notice(
-            `${agent} stopped before finishing`,
-            `${agent} on ${name} was interrupted, for example by a restart. Resume the thread to continue where it left off.`,
+            `${agent} 未完成即停止`,
+            `${name} 上的 ${agent} 已中断，可能是由于重启。恢复对话后可继续执行。`,
             'resume',
             'danger',
           ),
           true,
         ]
       }
-      return [notice(`${agent} can't resume this thread`, '', 'newChat', 'danger'), false]
+      return [notice(`${agent} 无法恢复此对话`, '', 'newChat', 'danger'), false]
     case 'historyLost':
-      return [notice(`Thread history was deleted on ${name}`, '', 'newChat', 'danger'), false]
+      return [notice(`${name} 上的对话记录已删除`, '', 'newChat', 'danger'), false]
     case 'folderMissing':
-      return [notice(`${stop.detail ?? thread.folder} no longer exists`, '', 'chooseFolder', 'danger'), false]
+      return [notice(`${stop.detail ?? thread.folder} 不存在`, '', 'chooseFolder', 'danger'), false]
     case 'startFailed':
       if (thread.retryOpenAllowed)
         return [
           notice(
-            `${agent} could not start`,
-            `Fix the reported issue on ${name}, then retry opening this thread. Your saved message is kept for you to send again.`,
+            `${agent} 无法启动`,
+            `请先解决 ${name} 上报告的问题，再重试打开对话。已保存的消息可重新发送。`,
             'resume',
             'danger',
           ),
@@ -260,8 +241,8 @@ function stoppedNotice(
         ]
       return [
         notice(
-          `${agent} could not start`,
-          `${stop.detail ?? `${agent} exited during startup`}. Fix it on ${name}, then start a new thread in this folder.`,
+          `${agent} 无法启动`,
+          `${stop.detail ?? `${agent} 在启动时退出`}。请在 ${name} 上解决问题，再在此文件夹中开始新对话。`,
           'newChat',
           'danger',
         ),
@@ -271,25 +252,25 @@ function stoppedNotice(
 }
 
 export function projectAgentStatus(project: Project, devices: Device[]): StatusView {
-  if (project.status === 'paused') return { tone: 'neutral', label: 'Paused' }
-  if (project.status === 'archived') return { tone: 'hollow', label: 'Archived' }
+  if (project.status === 'paused') return { tone: 'neutral', label: '已暂停' }
+  if (project.status === 'archived') return { tone: 'hollow', label: '已归档' }
   const device = devices.find((item) => item.id === project.agent.deviceId)
   switch (project.agent.state) {
     case 'blocked':
-      return { tone: 'attention', label: 'Needs attention' }
+      return { tone: 'attention', label: '待处理' }
     case 'notStarted':
-      return { tone: 'neutral', label: 'Not started yet' }
+      return { tone: 'neutral', label: '尚未开始' }
     case 'running':
-      return { tone: 'agent', label: device ? `Running on ${device.name}` : 'Running' }
+      return { tone: 'agent', label: device ? `在 ${device.name} 上运行` : '运行中' }
     case 'stopping':
-      return { tone: 'agent', label: device ? `Stopping on ${device.name}…` : 'Stopping…' }
+      return { tone: 'agent', label: device ? `正在 ${device.name} 上停止…` : '正在停止…' }
     case 'waitingDevice':
-      return { tone: 'neutral', label: 'Waiting for device' }
+      return { tone: 'neutral', label: '等待设备' }
     case 'stopped':
       // 你停止的运行没有原因，之后发消息就会重新运行，和空闲一样显示。
-      return project.agent.reason ? { tone: 'danger', label: 'Stopped' } : { tone: 'neutral', label: 'Idle' }
+      return project.agent.reason ? { tone: 'danger', label: '已停止' } : { tone: 'neutral', label: '空闲' }
     case 'idle':
-      return { tone: 'neutral', label: 'Idle' }
+      return { tone: 'neutral', label: '空闲' }
   }
 }
 
@@ -314,26 +295,26 @@ export function assistantBlock(device: Device, subscription: string): AssistantB
 export function blockReason(device: Device, block: AssistantBlock, subscription: string) {
   switch (block) {
     case 'noRuntime':
-      return `project assistant not installed on ${device.name}`
+      return `${device.name} 未安装项目助手`
     case 'offline':
-      return `${device.name} offline`
+      return `${device.name} 已离线`
     case 'syncing':
-      return `${device.name} syncing`
+      return `${device.name} 正在同步`
     case 'signedOut':
-      return `${subscription} not signed in on ${device.name}`
+      return `${device.name} 未登录 ${subscription}`
   }
 }
 
 function blockStep(device: Device, block: AssistantBlock, subscription: string) {
   switch (block) {
     case 'noRuntime':
-      return `The project assistant is not installed on ${device.name}.`
+      return `${device.name} 未安装项目助手。`
     case 'offline':
-      return `${device.name} is offline.`
+      return `${device.name} 已离线。`
     case 'syncing':
-      return `${device.name} is syncing.`
+      return `${device.name} 正在同步。`
     case 'signedOut':
-      return `Sign in to ${subscription} on ${device.name}.`
+      return `请在 ${device.name} 上登录 ${subscription}。`
   }
 }
 
@@ -354,25 +335,24 @@ export function assistantWait(project: Project, devices: Device[]): AssistantWai
   if (project.sourceNodeId) {
     const device = devices.find((item) => item.id === project.sourceNodeId)
     const connection = device?.modelConnections?.find((item) => `api-${item.id}` === project.subscription)
-    const name = connection?.name ?? 'The selected API connection'
+    const name = connection?.name ?? '所选 API 连接'
     const detail = !device
-      ? 'Choose another model source in project settings.'
+      ? '请在项目设置中选择其他模型来源。'
       : device.connection !== 'online'
-        ? `Reconnect ${device.name} to continue.`
+        ? `请重新连接 ${device.name} 后继续。`
         : !connection
-          ? `Choose another model source in project settings.`
+          ? `请在项目设置中选择其他模型来源。`
           : connection.keyNeeded
-            ? `Add an API key on ${device.name}.`
-            : `Waiting for ${device.name} to run the project assistant.`
-    return { title: `${name} is unavailable`, detail, overview: `Waiting for ${name}` }
+            ? `请在 ${device.name} 上添加 API 密钥。`
+            : `等待 ${device.name} 运行项目助手。`
+    return { title: `${name} 不可用`, detail, overview: `等待 ${name}` }
   }
   const subscription = project.subscription
-  const count = `${devices.length} ${devices.length === 1 ? 'device' : 'devices'}`
   if (devices.length > 0 && devices.every((item) => item.connection !== 'online')) {
     return {
-      title: devices.length === 1 ? 'Your device is offline' : 'All devices offline',
-      detail: 'Messages send when a device is back.',
-      overview: 'Waiting for device',
+      title: devices.length === 1 ? '设备已离线' : '所有设备已离线',
+      detail: '设备上线后会发送消息。',
+      overview: '等待设备',
     }
   }
   const steps = devices.flatMap((device) => {
@@ -380,9 +360,9 @@ export function assistantWait(project: Project, devices: Device[]): AssistantWai
     return block ? [blockStep(device, block, subscription)] : []
   })
   return {
-    title: devices.length === 0 ? 'No devices yet' : `No device has ${subscription} signed in`,
-    detail: (devices.length === 0 ? ['Connect a device first.'] : steps).join(' '),
-    overview: `${subscription} is unavailable on ${devices.length === 1 ? 'your device' : `all ${count}`}.`,
+    title: devices.length === 0 ? '暂无设备' : `没有设备登录 ${subscription}`,
+    detail: (devices.length === 0 ? ['请先连接设备。'] : steps).join(' '),
+    overview: `${subscription} 在${devices.length === 1 ? '此设备' : `全部 ${devices.length} 台设备`}上不可用。`,
   }
 }
 
@@ -390,10 +370,10 @@ export function assistantWait(project: Project, devices: Device[]): AssistantWai
 export function threadCardStatus(threads: Thread[]) {
   const running = threads.filter((item) => item.status === 'running' || item.pending === 'stop').length
   const waiting = threads.filter((item) => item.status === 'waiting').length
-  if (running > 0) return { tone: 'info' as const, label: `${running} running` }
-  if (waiting > 0) return { tone: 'neutral' as const, label: `${waiting} waiting for device` }
-  if (threads.some((item) => item.status === 'stopped')) return { tone: 'neutral' as const, label: 'Finished' }
-  return { tone: 'success' as const, label: 'All replied' }
+  if (running > 0) return { tone: 'info' as const, label: `${running} 个运行中` }
+  if (waiting > 0) return { tone: 'neutral' as const, label: `${waiting} 个等待设备` }
+  if (threads.some((item) => item.status === 'stopped')) return { tone: 'neutral' as const, label: '已完成' }
+  return { tone: 'success' as const, label: '已全部回复' }
 }
 
 export interface PreviewView {
@@ -410,25 +390,25 @@ export function baseName(path: string) {
 // 文件预览只显示从设备实时读到的内容，读不到时只给原因。
 export function previewProblem(preview: FilePreview, device: Device | undefined): PreviewView | null {
   if (preview.state === 'ready') return null
-  const name = device?.name ?? 'This device'
+  const name = device?.name ?? '此设备'
   const file = baseName(preview.path)
   switch (preview.reason) {
     case 'offline':
-      return { title: `${name} is offline`, detail: '', action: 'retry' }
+      return { title: `${name} 已离线`, detail: '', action: 'retry' }
     case 'syncing':
-      return { title: `${name} is syncing`, detail: '', action: 'retry' }
+      return { title: `${name} 正在同步`, detail: '', action: 'retry' }
     case 'outsideFolders':
-      return { title: "Link points outside the device's folders", detail: preview.path, action: 'back' }
+      return { title: '链接指向设备允许的文件夹之外', detail: preview.path, action: 'back' }
     case 'missing':
-      return { title: `${file} was moved or deleted`, detail: '', action: 'back' }
+      return { title: `${file} 已移动或删除`, detail: '', action: 'back' }
     case 'binary':
-      return { title: "Can't preview binary files", detail: '', action: 'back' }
+      return { title: '无法预览二进制文件', detail: '', action: 'back' }
   }
 }
 
 // 读取失败（设备没有返回）时的说明。
 export function readFailure(): PreviewView {
-  return { title: "Couldn't read this file", detail: '', action: 'retry' }
+  return { title: '无法读取文件', detail: '', action: 'retry' }
 }
 
 export function fileSize(bytes: number) {
@@ -440,19 +420,15 @@ export function fileSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1).replace(/\.0$/, '')} MB`
 }
 
-function counted(count: number, one: string, many: string) {
-  return `${count} ${count === 1 ? one : many}`
-}
-
-// 回复过程折叠时的一句话，例如「Ran 1 command, wrote 1 file」。
+// 回复过程折叠时的一句话。
 export function activityLine(activity: ActivitySummary) {
-  const parts = [
-    activity.commands > 0 && `ran ${counted(activity.commands, 'command', 'commands')}`,
-    activity.tools > 0 && `used ${counted(activity.tools, 'tool', 'tools')}`,
-    activity.files > 0 && `wrote ${counted(activity.files, 'file', 'files')}`,
-  ].filter((item): item is string => Boolean(item))
-  const line = parts.join(', ')
-  return line.charAt(0).toUpperCase() + line.slice(1)
+  return [
+    activity.commands > 0 && `运行 ${activity.commands} 条命令`,
+    activity.tools > 0 && `使用 ${activity.tools} 个工具`,
+    activity.files > 0 && `写入 ${activity.files} 个文件`,
+  ]
+    .filter(Boolean)
+    .join('，')
 }
 
 // 引用最多带 8 KiB。按 UTF-8 字节截断，不切开多字节字符。
@@ -480,25 +456,25 @@ function connectionCounts(devices: Device[]) {
 
 // 侧栏 Devices 右侧的数量。
 export function onlineSummary(devices: Device[]) {
-  if (devices.length === 0) return '0 devices'
+  if (devices.length === 0) return '0 台设备'
   const { online, syncing } = connectionCounts(devices)
-  if (syncing > 0) return `${online} online · ${syncing} syncing`
-  return `${online}/${devices.length} online`
+  if (syncing > 0) return `${online} 台在线 · ${syncing} 台同步中`
+  return `${online}/${devices.length} 台在线`
 }
 
 // 设备页标题。
 export function devicesHeading(devices: Device[]) {
-  if (devices.length === 0) return 'Your devices'
+  if (devices.length === 0) return '你的设备'
   const { online, syncing } = connectionCounts(devices)
-  const count = `${devices.length} ${devices.length === 1 ? 'device' : 'devices'}`
-  if (syncing > 0) return `${count}, ${online} online, ${syncing} syncing`
-  return `${count}, ${online} online`
+  const count = `${devices.length} 台设备`
+  if (syncing > 0) return `${count}，${online} 台在线，${syncing} 台同步中`
+  return `${count}，${online} 台在线`
 }
 
 export const agentNames: Record<AgentKind, string> = { codex: 'Codex', kiro: 'Kiro', pi: 'Pi', cursor: 'Cursor' }
 
-const clock = new Intl.DateTimeFormat('en', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
-const day = new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric' })
+const clock = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+const day = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' })
 
 // 24 小时制的时刻，例如 14:32。
 export function clockTime(at: number) {
@@ -507,7 +483,7 @@ export function clockTime(at: number) {
 
 // 当天只显示时刻，更早的加上日期；一分钟内显示 now。
 export function lastSeen(at: number, now: number) {
-  if (now - at < 60_000) return 'now'
+  if (now - at < 60_000) return '刚刚'
   const time = clock.format(at)
   return new Date(at).toDateString() === new Date(now).toDateString() ? time : `${day.format(at)}, ${time}`
 }
@@ -517,24 +493,24 @@ export function deviceConnectionView(device: Device, projects: Project[], now: n
   switch (device.upgradeState?.phase) {
     case 'draining':
     case 'ready':
-      return { tone: 'neutral', label: 'Waiting for upgrade' }
+      return { tone: 'neutral', label: '等待升级' }
     case 'migrating':
     case 'syncing':
-      return { tone: 'neutral', label: 'Upgrading' }
+      return { tone: 'neutral', label: '正在升级' }
     case 'failed':
-      return { tone: 'attention', label: 'Upgrade paused' }
+      return { tone: 'attention', label: '升级已暂停' }
   }
-  if (device.credentialState === 'idle_expired') return { tone: 'attention', label: 'Needs sign-in' }
+  if (device.credentialState === 'idle_expired') return { tone: 'attention', label: '需要登录' }
   switch (device.connection) {
     case 'offline':
-      return { tone: 'neutral', label: `Offline · last seen ${lastSeen(device.lastSeenAt, now)}` }
+      return { tone: 'neutral', label: `离线 · 最后在线 ${lastSeen(device.lastSeenAt, now)}` }
     case 'syncing':
-      return { tone: 'hollow', label: 'Syncing…' }
+      return { tone: 'hollow', label: '正在同步…' }
     case 'online': {
       const running = projects.find(
         (item) => item.status === 'active' && item.agent.state === 'running' && item.agent.deviceId === device.id,
       )
-      return running ? { tone: 'agent', label: `Running ${running.name}` } : { tone: 'success', label: 'Online' }
+      return running ? { tone: 'agent', label: `正在运行 ${running.name}` } : { tone: 'success', label: '在线' }
     }
   }
 }
@@ -548,13 +524,13 @@ export function canTrySubscription(subscription: Subscription) {
 export function subscriptionCredentialIssue(subscription: Subscription): string | null {
   switch (subscription.reason) {
     case 'credential_permissions_invalid':
-      return 'Credential file permissions are unsafe. Allow access only for the device user.'
+      return '凭据文件权限不安全，请仅允许设备用户访问。'
     case 'credential_owner_invalid':
-      return 'The credential file belongs to another user. Restore ownership to the device user.'
+      return '凭据文件属于其他用户，请将所有者改回设备用户。'
     case 'credential_path_invalid':
-      return 'The credential path is invalid. Use a regular file without symbolic links.'
+      return '凭据路径无效，请使用不含符号链接的普通文件。'
     case 'credential_private_file_failed':
-      return 'The credential file could not be opened securely. Check its path, ownership and permissions.'
+      return '无法安全地打开凭据文件，请检查路径、所有者和权限。'
     default:
       return null
   }
@@ -582,8 +558,8 @@ export interface CapabilityLine {
 
 function abilityNotes(agent: DeviceAgent) {
   const notes: string[] = []
-  if (agent.abilities.steer) notes.push('send now')
-  if (agent.abilities.resume) notes.push('resume thread')
+  if (agent.abilities.steer) notes.push('立即插话')
+  if (agent.abilities.resume) notes.push('恢复对话')
   return notes
 }
 
@@ -592,27 +568,25 @@ export function capabilityLines(device: Device): CapabilityLine[] {
   const lines = device.agents.map((agent): CapabilityLine => {
     const name = agentNames[agent.kind]
     if (!canCreateAgent(agent)) return { name, ok: false, detail: agentUnavailableReason(agent) }
-    return { name, ok: true, detail: [agent.account ? 'Signed in' : 'Installed', ...abilityNotes(agent)].join(' · ') }
+    return { name, ok: true, detail: [agent.account ? '已登录' : '已安装', ...abilityNotes(agent)].join(' · ') }
   })
   const subscriptions = device.subscriptions.filter((item) => item.signedIn).map((item) => item.provider)
   const diagnostics = device.subscriptions.flatMap((item) => {
     const issue = subscriptionCredentialIssue(item)
     if (issue) return [`${item.provider}: ${issue}`]
-    return item.status === 'unknown' ? [`${item.provider} sign-in check unavailable · can try`] : []
+    return item.status === 'unknown' ? [`${item.provider} 无法检查登录状态 · 可以尝试`] : []
   })
   let runtime: CapabilityLine = {
-    name: 'Project assistant',
+    name: '项目助手',
     ok: !device.subscriptions.some((item) => subscriptionCredentialIssue(item) !== null),
-    detail: [...(subscriptions.length ? [`${sentenceList(subscriptions)} signed in`] : []), ...diagnostics].join(' · '),
+    detail: [...(subscriptions.length ? [`${subscriptions.join('、')} 已登录`] : []), ...diagnostics].join(' · '),
   }
-  if (!device.hasRuntime) runtime = { name: 'Project assistant', ok: false, detail: 'Not installed' }
+  if (!device.hasRuntime) runtime = { name: '项目助手', ok: false, detail: '未安装' }
   else if (!subscriptionCanRun(device))
     runtime = {
-      name: 'Project assistant',
+      name: '项目助手',
       ok: false,
-      detail: device.subscriptions.some((item) => item.status)
-        ? 'Subscription sign-in needed'
-        : 'ChatGPT sign-in expired',
+      detail: device.subscriptions.some((item) => item.status) ? '需要登录订阅账号' : 'ChatGPT 登录已过期',
     }
   return [...lines, runtime]
 }
@@ -636,30 +610,29 @@ export function sentenceList(items: string[]) {
 export function setupSteps(device: Device) {
   const steps = device.agents.flatMap((agent) => {
     const name = agentNames[agent.kind]
-    if (agent.problem === 'signedOut') return [`sign in to ${agent.account} for ${name}`]
-    if (agent.problem === 'notInstalled') return [`install ${name}`]
+    if (agent.problem === 'signedOut') return [`为 ${name} 登录 ${agent.account}`]
+    if (agent.problem === 'notInstalled') return [`安装 ${name}`]
     return []
   })
-  if (!device.hasRuntime) steps.push('update Baton for the project assistant')
+  if (!device.hasRuntime) steps.push('更新 Baton 以使用项目助手')
   else if (
     !subscriptionCanRun(device) &&
     !device.agents.some((agent) => agent.account === 'ChatGPT' && agent.problem)
   ) {
-    const providers = device.subscriptions.map((item) => item.provider).join(' or ') || 'a supported subscription'
-    steps.push(`sign in to ${providers} for the project assistant`)
+    const providers = device.subscriptions.map((item) => item.provider).join(' 或 ') || '受支持的订阅账号'
+    steps.push(`为项目助手登录 ${providers}`)
   }
   for (const subscription of device.subscriptions) {
     const issue = subscriptionCredentialIssue(subscription)
     if (issue) steps.push(`${subscription.provider}: ${issue}`)
   }
-  const list = sentenceList(steps)
-  return `${list.charAt(0).toUpperCase()}${list.slice(1)}${list.endsWith('.') ? '' : '.'}`
+  return steps.join('；')
 }
 
 // 设备行的 Agent 列。
 export function agentSummary(device: Device) {
-  if (device.connection === 'syncing') return { label: 'Checking availability…', attention: false }
-  if (setupNeeded(device)) return { label: 'Setup needed', attention: true }
+  if (device.connection === 'syncing') return { label: '正在检查可用性…', attention: false }
+  if (setupNeeded(device)) return { label: '需要设置', attention: true }
   return { label: device.agents.map((agent) => agentNames[agent.kind]).join(' · '), attention: false }
 }
 
@@ -670,12 +643,12 @@ export function liveThreads(threads: Thread[]) {
 // 列表右侧的更新时间。
 export function relativeTime(at: number, now: number) {
   const minutes = Math.floor((now - at) / 60_000)
-  if (minutes < 1) return 'Just now'
-  if (minutes < 60) return `${minutes}m ago`
+  if (minutes < 1) return '刚刚'
+  if (minutes < 60) return `${minutes} 分钟前`
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
+  if (hours < 24) return `${hours} 小时前`
   const days = Math.round((startOfDay(now) - startOfDay(at)) / 86_400_000)
-  return days <= 1 ? 'Yesterday' : `${days}d ago`
+  return days <= 1 ? '昨天' : `${days} 天前`
 }
 
 function startOfDay(at: number) {
@@ -741,11 +714,11 @@ export function canCreateAgent(agent: DeviceAgent) {
 
 export function agentUnavailableReason(agent: DeviceAgent) {
   if (agent.reason) return agent.reason
-  if (agent.problem === 'notInstalled') return 'Program not installed'
-  if (agent.problem === 'signedOut') return `${agent.account ?? agentNames[agent.kind]} sign-in expired`
-  if (agent.status === 'unverified') return 'This agent has not been verified on this device.'
-  if (agent.status === 'available' && !agent.problem) return 'This agent does not support starting new threads.'
-  return 'Agent unavailable on this device'
+  if (agent.problem === 'notInstalled') return '程序未安装'
+  if (agent.problem === 'signedOut') return `${agent.account ?? agentNames[agent.kind]} 登录已过期`
+  if (agent.status === 'unverified') return '此设备上的助手尚未验证。'
+  if (agent.status === 'available' && !agent.problem) return '此助手不支持新建对话。'
+  return '此设备上的助手不可用'
 }
 
 // 新对话同时要求可用状态和明确的创建能力。
@@ -755,27 +728,27 @@ export function usableAgents(device: Device | undefined) {
 
 // 操作的确认阶段。已提交和已保存分开显示，设备确认前不显示最终结果。
 export function operationLabel(operation: Operation, device: Device | undefined): string | null {
-  const name = device?.name ?? 'the device'
+  const name = device?.name ?? '设备'
   switch (operation.phase) {
     case 'submitted':
-      return 'Sending…'
+      return '正在发送…'
     case 'saved':
-      return 'Saved'
+      return '已保存'
     case 'waitingDevice':
-      return operation.kind === 'stopThread' ? `Waiting for ${name} to confirm the stop` : `Saved · waiting for ${name}`
+      return operation.kind === 'stopThread' ? `等待 ${name} 确认停止` : `已保存 · 等待 ${name}`
     case 'queued':
-      return 'Sending next'
+      return '下一条发送'
     case 'running':
       return null
     case 'stopping':
-      return `Waiting for ${name} to confirm the assistant has stopped…`
+      return `等待 ${name} 确认助手已停止…`
     case 'stopped':
-      return operation.kind === 'stopThread' ? 'Stopped by you' : 'Not sent'
+      return operation.kind === 'stopThread' ? '已由你停止' : '未发送'
     case 'done':
       return null
     case 'conflict':
-      return operation.detail ?? 'Already handled'
+      return operation.detail ?? '已处理'
     case 'failed':
-      return operation.detail ?? "Couldn't save"
+      return operation.detail ?? '无法保存'
   }
 }

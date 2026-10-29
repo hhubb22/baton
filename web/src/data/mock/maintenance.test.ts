@@ -331,7 +331,7 @@ describe('project pause and archive', () => {
     expect(after.memory).toEqual(before.memory)
     expect(after.projectEntries).toEqual(before.projectEntries)
     for (const item of after.inbox.filter((item) => item.projectId === id || item.projectId === projectId)) {
-      expect(item).toMatchObject({ status: 'withdrawn', revision: 2, result: { reason: 'Project archived' } })
+      expect(item).toMatchObject({ status: 'withdrawn', revision: 2, result: { reason: '项目已归档' } })
     }
     expect(events.at(-1)).toEqual(expect.arrayContaining(['projects', 'inbox']))
     scheduler.advance(100)

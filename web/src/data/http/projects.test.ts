@@ -148,7 +148,7 @@ describe('Project and Inbox DTO mapping', () => {
       name: 'Baton',
       subscription: 'ChatGPT',
       model: 'gpt-5.4',
-      agent: { state: 'waitingDevice', reason: 'login_required' },
+      agent: { state: 'waitingDevice', reason: '需要登录模型账号' },
     })
     expect(
       mapProject(

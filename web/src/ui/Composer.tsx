@@ -98,7 +98,7 @@ export function Composer({
   chips,
   actions,
   header,
-  label = 'Message',
+  label = '消息',
   inputRef,
   style,
   roomy = false,
@@ -189,7 +189,7 @@ export function Composer({
           {actions}
           <button
             type="button"
-            aria-label="Send"
+            aria-label="发送"
             onClick={onSend}
             {...stylex.props(styles.send, empty && styles.sendIdle, focusRing.ring)}
           >

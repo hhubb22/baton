@@ -117,7 +117,7 @@ export function ThreadModelMenu({
   const selectCustom = () => {
     const id = model.trim()
     if (!id) {
-      setError('Enter a model ID.')
+      setError('请输入模型 ID。')
       return
     }
     if (!customAgent) return
@@ -145,14 +145,14 @@ export function ThreadModelMenu({
         {lockedReason ? (
           <>
             <p {...stylex.props(text.caption, styles.note)}>{lockedReason}</p>
-            <MenuOption selected>{choice?.model || 'Default model'}</MenuOption>
+            <MenuOption selected>{choice?.model || '默认模型'}</MenuOption>
           </>
         ) : (
           <>
             <input
               autoFocus
-              aria-label="Search models"
-              placeholder="Search models…"
+              aria-label="搜索模型"
+              placeholder="搜索模型…"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               onKeyDown={(event) => {
@@ -161,7 +161,7 @@ export function ThreadModelMenu({
               {...stylex.props(text.small, styles.search)}
             />
             {query && !visibleAgents.some(({ models, matchesAgent }) => models.length > 0 || matchesAgent) && (
-              <p {...stylex.props(text.caption, styles.note)}>No matching models</p>
+              <p {...stylex.props(text.caption, styles.note)}>没有匹配的模型</p>
             )}
             {visibleAgents
               .filter(({ models, matchesAgent }) => !query || models.length > 0 || matchesAgent)
@@ -184,7 +184,7 @@ export function ThreadModelMenu({
                           selected={choice?.agent === agent.kind && choice.model === id}
                           onSelect={() => onSelect({ agent: agent.kind, model: id })}
                         >
-                          {id || 'Default model'}
+                          {id || '默认模型'}
                         </MenuOption>
                       ))}
                       {agent.kind !== 'codex' && (
@@ -195,7 +195,7 @@ export function ThreadModelMenu({
                             setCustomAgent(agent)
                           }}
                         >
-                          Enter model ID…
+                          输入模型 ID…
                         </MenuOption>
                       )}
                     </>
@@ -210,17 +210,17 @@ export function ThreadModelMenu({
         onOpenChange={(open) => {
           if (!open) setCustomAgent(null)
         }}
-        title={`Choose ${customAgent ? agentNames[customAgent.kind] : ''} model`}
+        title={`选择 ${customAgent ? agentNames[customAgent.kind] : ''} 模型`}
         actions={
           <>
-            <DialogClose render={<Button variant="ghost" />}>Cancel</DialogClose>
+            <DialogClose render={<Button variant="ghost" />}>取消</DialogClose>
             <Button variant="primary" onClick={selectCustom}>
-              Use model
+              使用模型
             </Button>
           </>
         }
       >
-        <Field label="Model ID" error={error}>
+        <Field label="模型 ID" error={error}>
           {(props) => (
             <Input
               {...props}

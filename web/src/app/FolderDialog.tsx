@@ -61,16 +61,16 @@ const styles = stylex.create({
 })
 
 function unavailableText(listing: Extract<FolderListing, { state: 'unavailable' }>, device: Device | undefined) {
-  const name = device?.name ?? 'This device'
+  const name = device?.name ?? '此设备'
   switch (listing.reason) {
     case 'offline':
-      return { title: `${name} is offline`, detail: '' }
+      return { title: `${name} 已离线`, detail: '' }
     case 'syncing':
-      return { title: `${name} is syncing`, detail: '' }
+      return { title: `${name} 正在同步`, detail: '' }
     case 'outsideFolders':
-      return { title: "Link points outside the device's folders", detail: listing.path }
+      return { title: '链接指向设备允许的文件夹之外', detail: listing.path }
     case 'missing':
-      return { title: `Couldn't read ${listing.path}`, detail: '' }
+      return { title: `无法读取 ${listing.path}`, detail: '' }
   }
 }
 
@@ -102,21 +102,21 @@ export function FolderDialog({
     <Dialog
       open
       onOpenChange={(open) => !open && onClose()}
-      title="Choose folder"
+      title="选择文件夹"
       note={path ?? undefined}
       actions={
         <>
-          <DialogClose render={<Button>Cancel</Button>} />
+          <DialogClose render={<Button>取消</Button>} />
           <Button
             variant={path === null ? 'secondary' : 'primary'}
             onClick={() => path !== null && onSelect({ deviceId: selectedDevice, folder: path })}
           >
-            Select folder
+            选择文件夹
           </Button>
         </>
       }
     >
-      <Field label="Device">
+      <Field label="设备">
         {(props) => (
           <select
             {...props}
@@ -143,9 +143,9 @@ export function FolderDialog({
       )}
       {localError && <Banner icon="alert" title={localError} />}
       <div>
-        <div role="group" aria-label="Folders" {...stylex.props(styles.box)}>
+        <div role="group" aria-label="文件夹" {...stylex.props(styles.box)}>
           {path === null ? (
-            <span {...stylex.props(text.captionMedium, styles.heading)}>Folders</span>
+            <span {...stylex.props(text.captionMedium, styles.heading)}>文件夹</span>
           ) : (
             <>
               <span title={path} {...stylex.props(text.mono, styles.path, text.truncate)}>
@@ -157,18 +157,18 @@ export function FolderDialog({
                 {...stylex.props(text.small, styles.row, styles.back, focusRing.ring)}
               >
                 <Icon name="chevron-left" size={14} />
-                {atRoot || parent === null ? 'Back to folders' : `Back to ${folderName(parent)}`}
+                {atRoot || parent === null ? '返回文件夹列表' : `返回 ${folderName(parent)}`}
               </button>
             </>
           )}
-          {folders.isPending && <span {...stylex.props(text.caption, styles.status)}>Loading folders…</span>}
+          {folders.isPending && <span {...stylex.props(text.caption, styles.status)}>正在加载文件夹…</span>}
           {folders.isError && (
             <Banner
               icon="alert"
-              title="Couldn't load folders"
+              title="无法加载文件夹"
               action={
                 <Button small onClick={() => void folders.refetch()}>
-                  Retry
+                  重试
                 </Button>
               }
             />
@@ -180,24 +180,22 @@ export function FolderDialog({
               detail={problem.detail || undefined}
               action={
                 <Button small onClick={() => void folders.refetch()}>
-                  Retry
+                  重试
                 </Button>
               }
             />
           )}
           {listing?.state === 'ready' && listing.scanLimited && (
             <span role="status" {...stylex.props(text.caption, styles.status)}>
-              Folder scan limited. Some entries may be missing.{' '}
+              文件夹扫描受到限制，部分内容可能未显示。{' '}
               <Button small onClick={() => void folders.refetch()}>
-                Retry
+                重试
               </Button>
             </span>
           )}
           {listing?.state === 'ready' && !listing.scanLimited && listing.folders.length === 0 && (
             <span {...stylex.props(text.caption, styles.status)}>
-              {path === null
-                ? `No folders on ${device?.name ?? 'this device'} yet. Type a path below to add one.`
-                : 'No subfolders'}
+              {path === null ? `${device?.name ?? '此设备'} 暂无文件夹。请在下方输入路径添加。` : '没有子文件夹'}
             </span>
           )}
           {listing?.state === 'ready' &&
@@ -220,7 +218,7 @@ export function FolderDialog({
       <DeviceFolderForm
         key={selectedDevice}
         deviceId={selectedDevice}
-        deviceName={device?.name ?? 'this device'}
+        deviceName={device?.name ?? '此设备'}
         onAdded={(folder, updated) => {
           const added = updated.folders.find((item) => !device?.folders.includes(item))
           onSelect({ deviceId: selectedDevice, folder: updated.folders.includes(folder) ? folder : (added ?? folder) })

@@ -23,6 +23,7 @@ import type { SnapshotMessage } from '../../agent-host/evidence.ts'
 import { makeProviderHostDriver } from '../../agent-host/driver.ts'
 import type { AgentHostPaths } from '../../agent-host/paths.ts'
 import { AgentHostDriver, AgentHostError, type ProbeResult } from '../../agent-host/protocol.ts'
+import { thinkingCapability } from '../thinking.ts'
 
 const settingsFor = () =>
   Schema.decodeSync(CodexSettings)({
@@ -91,6 +92,10 @@ const codexProbe = Effect.gen(function* () {
       ...status.models.filter((model) => model.isDefault),
       ...status.models.filter((model) => !model.isDefault),
     ].map((model) => model.slug),
+    model_thinking: status.models.flatMap((model) => {
+      const thinking = thinkingCapability(model.capabilities)
+      return thinking ? [{ model: model.slug, thinking }] : []
+    }),
     ...(reason ? { reason } : {}),
     details: {
       version: status.version ?? 'unknown',

@@ -91,7 +91,7 @@ export function createOutputAPI(request: HttpContext['request']) {
         ...previous,
         error: new ClientError(
           'unavailable',
-          result.code === 'node_offline' ? 'The device is offline.' : 'The device could not read live output.',
+          result.code === 'node_offline' ? '设备已离线。' : '设备无法读取实时输出。',
         ),
       })
       return

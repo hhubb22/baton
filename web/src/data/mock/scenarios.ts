@@ -38,26 +38,26 @@ export const scenarioIds = [
 export type ScenarioId = (typeof scenarioIds)[number]
 
 export const scenarioLabels: Record<ScenarioId, string> = {
-  normal: 'Normal',
-  streamingMarkdown: 'Streaming Markdown',
-  streamingProject: 'Streaming project activity',
-  downloads: 'Device downloads',
-  noDownloads: 'No device downloads',
-  empty: 'Empty',
-  noChats: 'No threads',
-  offline: 'Offline',
-  waiting: 'Waiting',
-  error: 'Error',
-  conflict: 'Conflict',
-  signedOut: 'Signed out',
-  inbox: 'Questions and history',
-  inboxPaused: 'Questions · paused project',
-  inboxWithdrawn: 'Question withdrawn while replying',
-  maintenance: 'Project maintenance',
-  maintenanceError: 'Maintenance · save and read errors',
-  memoryConflict: 'Memory · newer assistant version',
-  archived: 'Archived project',
-  modelSources: 'Model sources',
+  normal: '正常',
+  streamingMarkdown: '流式 Markdown',
+  streamingProject: '流式项目过程',
+  downloads: '设备下载',
+  noDownloads: '没有设备下载',
+  empty: '空状态',
+  noChats: '没有对话',
+  offline: '离线',
+  waiting: '等待',
+  error: '错误',
+  conflict: '冲突',
+  signedOut: '已退出登录',
+  inbox: '问题和历史',
+  inboxPaused: '问题 · 项目已暂停',
+  inboxWithdrawn: '回复时问题被撤回',
+  maintenance: '项目维护',
+  maintenanceError: '项目维护 · 保存和读取失败',
+  memoryConflict: '记忆 · 助手版本已更新',
+  archived: '已归档项目',
+  modelSources: '模型来源',
 }
 
 export function isScenarioId(value: unknown): value is ScenarioId {
@@ -81,6 +81,19 @@ const codex: DeviceAgent = {
   reason: null,
   version: '0.98.0',
   models: ['gpt-6.1-sol', 'gpt-6.1-mini'],
+  modelThinking: Object.fromEntries(
+    ['gpt-6.1-sol', 'gpt-6.1-mini'].map((model) => [
+      model,
+      {
+        id: 'reasoningEffort',
+        options: [
+          { id: 'low', label: 'Low' },
+          { id: 'medium', label: 'Medium', is_default: true },
+          { id: 'high', label: 'High' },
+        ],
+      },
+    ]),
+  ),
   defaultModel: 'gpt-6.1-sol',
   abilities: allAbilities,
   account: 'ChatGPT',
@@ -105,6 +118,17 @@ const pi: DeviceAgent = {
   reason: null,
   version: '0.31.0',
   models: ['gpt-6.1-sol'],
+  modelThinking: {
+    'gpt-6.1-sol': {
+      id: 'thinking',
+      options: [
+        { id: 'off', label: 'Off' },
+        { id: 'low', label: 'Low' },
+        { id: 'medium', label: 'Medium' },
+        { id: 'high', label: 'High' },
+      ],
+    },
+  },
   defaultModel: 'gpt-6.1-sol',
   abilities: { ...allAbilities, switchModel: false },
   account: null,
@@ -179,7 +203,7 @@ function projects(now: number): Project[] {
       subscription: 'ChatGPT',
       model: 'gpt-6.1-sol',
       memoryEmbedding: null,
-      agent: { state: 'running', deviceId: 'dev-ubuntu', reason: null, activity: 'Planning the next step…' },
+      agent: { state: 'running', deviceId: 'dev-ubuntu', reason: null, activity: '正在规划下一步…' },
       createdAt: now - 14 * 24 * hour,
     },
     {
@@ -982,7 +1006,7 @@ export function createWorld(id: ScenarioId, now: number): World {
           note: '',
           actor: account.name,
           at: project.archivedAt,
-          reason: 'Project archived',
+          reason: '项目已归档',
           inputId: null,
         }
       }
@@ -1071,7 +1095,7 @@ export function createWorld(id: ScenarioId, now: number): World {
           project.agent = {
             state: 'waitingDevice',
             deviceId: null,
-            reason: 'An online device with ChatGPT signed in',
+            reason: '等待已登录 ChatGPT 的在线设备',
             activity: null,
           }
         }
@@ -1126,7 +1150,7 @@ export function createWorld(id: ScenarioId, now: number): World {
       docs.agent = {
         state: 'waitingDevice',
         deviceId: null,
-        reason: 'An online device with Claude signed in',
+        reason: '等待已登录 Claude 的在线设备',
         activity: null,
       }
       world.projectEntries.push({
@@ -1175,7 +1199,7 @@ export function createWorld(id: ScenarioId, now: number): World {
       baton.agent = {
         state: 'blocked',
         deviceId: 'dev-ubuntu',
-        reason: 'ChatGPT sign-in expired on Ubuntu Dev',
+        reason: 'Ubuntu Dev 上的 ChatGPT 登录已过期',
         activity: null,
       }
       // 第一次新建 Project 保存失败，重试成功。

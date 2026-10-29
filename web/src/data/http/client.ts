@@ -16,7 +16,7 @@ interface RuntimeReport {
     status: string
     reason?: string
     default_model: string
-    models: { id: string }[]
+    models: { id: string; thinking?: import('@baton/protocol').ThinkingCapability }[]
     capabilities: {
       create?: boolean
       queue: boolean
@@ -101,7 +101,7 @@ export function mapDevice(node: NodeDTO): Device {
     name: node.display_name,
     os,
     system: node.system,
-    batondVersion: node.batond_version ?? 'Not reported',
+    batondVersion: node.batond_version ?? '未报告',
     connection: online ? (node.synced ? 'online' : 'syncing') : 'offline',
     upgradeState: node.upgrade_state
       ? {
@@ -123,6 +123,9 @@ export function mapDevice(node: NodeDTO): Device {
         reason: agent.reason ?? null,
         version: agent.version === 'unknown' ? null : agent.version,
         models: (agent.models ?? []).map((model) => model.id),
+        modelThinking: Object.fromEntries(
+          (agent.models ?? []).flatMap((model) => (model.thinking ? [[model.id, model.thinking]] : [])),
+        ),
         defaultModel: agent.default_model || null,
         abilities: {
           create: agent.capabilities?.create === true,
@@ -163,8 +166,8 @@ export function mapDevice(node: NodeDTO): Device {
     repos: (report?.repos ?? []).map((repo) => repo.path),
     commandAccess: {
       enabled: !!report?.exec?.enabled,
-      shell: report?.exec?.shell ?? 'Not reported',
-      user: report?.exec?.user ?? 'Device user',
+      shell: report?.exec?.shell ?? '未报告',
+      user: report?.exec?.user ?? '设备用户',
     },
   }
 }
@@ -395,15 +398,14 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
         folders.push(...page.roots.map((root) => root.path))
         cursor = page.next_cursor
         if (cursor && (cursors.has(cursor) || !page.roots.length))
-          throw new ClientError('unavailable', "Couldn't load folders. Try again.")
+          throw new ClientError('unavailable', '无法加载文件夹，请重试。')
         if (cursor) cursors.add(cursor)
       } while (cursor)
       return folders
     },
     async getOperation(id) {
       const found = operations.get(id)
-      if (!found)
-        throw new ClientError('notFound', 'This operation is no longer available. Reload the thread to see its state.')
+      if (!found) throw new ClientError('notFound', '此操作已不可用，请重新加载对话查看状态。')
       if (found.refresh && !['done', 'failed', 'conflict', 'stopped'].includes(found.operation.phase))
         Object.assign(found.operation, await found.refresh(), { updatedAt: Date.now() })
       return { ...found.operation }
@@ -484,8 +486,7 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
         result = { status: node.revocation_status }
       }
       emit('devices', 'session', 'threads', 'projects', 'files')
-      if (result.status !== 'effective')
-        throw new ClientError('unavailable', 'Disconnect is still being confirmed. Try again.')
+      if (result.status !== 'effective') throw new ClientError('unavailable', '正在确认断开设备，请重试。')
     },
     async createEnrollment(nodeId) {
       const path = nodeId === undefined ? '/node-enrollments' : `/nodes/${apiPath(nodeId)}/reauth-enrollments`

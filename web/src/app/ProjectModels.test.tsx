@@ -54,8 +54,8 @@ function reportedModels(devices: Device[]) {
 }
 
 async function newProject(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByRole('button', { name: 'New project' }))
-  return screen.findByRole('dialog', { name: 'New project' })
+  await user.click(await screen.findByRole('button', { name: '新建项目' }))
+  return screen.findByRole('dialog', { name: '新建项目' })
 }
 
 beforeEach(() => localStorage.clear())
@@ -65,7 +65,7 @@ describe('device project model catalogs', () => {
     const user = userEvent.setup()
     const { createProject, router } = setup('/inbox', reportedModels)
     const dialog = await newProject(user)
-    const model = within(dialog).getByLabelText('Model')
+    const model = within(dialog).getByLabelText('模型')
     expect(model).toHaveValue('gpt-5.4')
     expect(
       within(model)
@@ -74,27 +74,27 @@ describe('device project model catalogs', () => {
     ).toEqual(['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex'])
     expect(within(dialog).queryByText('gpt-6.1-sol')).not.toBeInTheDocument()
     expect(within(dialog).queryByText('Claude subscription')).not.toBeInTheDocument()
-    await user.selectOptions(within(dialog).getByLabelText('Model source'), '|xAI')
+    await user.selectOptions(within(dialog).getByLabelText('模型来源'), '|xAI')
     expect(model).toHaveValue('grok-4')
     await user.selectOptions(model, 'grok-4-fast')
-    await user.type(within(dialog).getByLabelText('Name'), 'Runtime catalog')
-    await user.click(within(dialog).getByRole('button', { name: 'Create project' }))
+    await user.type(within(dialog).getByLabelText('名称'), 'Runtime catalog')
+    await user.click(within(dialog).getByRole('button', { name: '创建项目' }))
     await waitFor(() =>
       expect(createProject).toHaveBeenCalledWith(
         expect.objectContaining({ name: 'Runtime catalog', subscription: 'xAI', model: 'grok-4-fast' }),
       ),
     )
     await waitFor(() => expect(router.state.location.pathname).toBe('/projects/prj-catalog'))
-    expect(screen.queryByRole('dialog', { name: 'New project' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '新建项目' })).not.toBeInTheDocument()
   })
 
   it('includes the selected project emoji when creating a project', async () => {
     const user = userEvent.setup()
     const { createProject } = setup('/inbox', reportedModels)
     const dialog = await newProject(user)
-    await user.type(within(dialog).getByLabelText('Name'), 'Emoji project')
+    await user.type(within(dialog).getByLabelText('名称'), 'Emoji project')
     await user.click(within(dialog).getByRole('button', { name: '🚀' }))
-    await user.click(within(dialog).getByRole('button', { name: 'Create project' }))
+    await user.click(within(dialog).getByRole('button', { name: '创建项目' }))
     await waitFor(() => expect(createProject).toHaveBeenCalledWith(expect.objectContaining({ emoji: '🚀' })))
   })
 
@@ -102,21 +102,18 @@ describe('device project model catalogs', () => {
     const user = userEvent.setup()
     const { createProject } = setup('/inbox', (devices) => devices.splice(0))
     const dialog = await newProject(user)
-    expect(within(dialog).getByText(/No models from your devices/)).toBeInTheDocument()
-    expect(within(dialog).getByRole('link', { name: 'Connect a device' })).toHaveAttribute(
-      'href',
-      '/devices?connect=true',
-    )
-    expect(within(dialog).queryByLabelText('Model')).not.toBeInTheDocument()
+    expect(within(dialog).getByText(/设备上没有可用模型/)).toBeInTheDocument()
+    expect(within(dialog).getByRole('link', { name: '连接设备' })).toHaveAttribute('href', '/devices?connect=true')
+    expect(within(dialog).queryByLabelText('模型')).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('option')).not.toBeInTheDocument()
-    await user.type(within(dialog).getByLabelText('Name'), 'Manual model')
-    await user.click(within(dialog).getByRole('button', { name: 'Create project' }))
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Choose a provider and model')
+    await user.type(within(dialog).getByLabelText('名称'), 'Manual model')
+    await user.click(within(dialog).getByRole('button', { name: '创建项目' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('请选择或手动输入服务商和模型')
     expect(createProject).not.toHaveBeenCalled()
-    await user.click(within(dialog).getByRole('button', { name: 'Enter provider and model manually' }))
-    await user.type(within(dialog).getByLabelText('Model source'), 'openai-codex')
-    await user.type(within(dialog).getByLabelText('Model'), 'gpt-5.4')
-    await user.click(within(dialog).getByRole('button', { name: 'Try again' }))
+    await user.click(within(dialog).getByRole('button', { name: '手动输入服务商和模型' }))
+    await user.type(within(dialog).getByLabelText('模型来源'), 'openai-codex')
+    await user.type(within(dialog).getByLabelText('模型'), 'gpt-5.4')
+    await user.click(within(dialog).getByRole('button', { name: '重试' }))
     await waitFor(() =>
       expect(createProject).toHaveBeenCalledWith(
         expect.objectContaining({ subscription: 'openai-codex', model: 'gpt-5.4' }),
@@ -131,11 +128,11 @@ describe('device project model catalogs', () => {
       devices[0].subscriptions = [{ provider: 'ChatGPT', signedIn: true }]
     })
     const dialog = await newProject(user)
-    expect(within(dialog).getByText(/No models from your devices/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/设备上没有可用模型/)).toBeInTheDocument()
     expect(within(dialog).queryByRole('option')).not.toBeInTheDocument()
-    await user.click(within(dialog).getByRole('button', { name: 'Enter provider and model manually' }))
-    expect(within(dialog).getByLabelText('Model')).toHaveValue('')
-    expect(within(dialog).getByLabelText('Model source')).toHaveValue('')
+    await user.click(within(dialog).getByRole('button', { name: '手动输入服务商和模型' }))
+    expect(within(dialog).getByLabelText('模型')).toHaveValue('')
+    expect(within(dialog).getByLabelText('模型来源')).toHaveValue('')
   })
 
   it('allows reported models from signed-out devices and explains that messages will wait', async () => {
@@ -145,60 +142,60 @@ describe('device project model catalogs', () => {
       devices[0].subscriptions = [{ provider: 'xAI', signedIn: false, models: ['grok-4'] }]
     })
     const dialog = await newProject(user)
-    expect(within(dialog).getByLabelText('Model')).toHaveValue('grok-4')
-    expect(within(dialog).getByText(/No online device has xAI signed in/)).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('模型')).toHaveValue('grok-4')
+    expect(within(dialog).getByText(/在线设备均未登录 xAI/)).toBeInTheDocument()
   })
 
   it('saves a changed project emoji from settings', async () => {
     const user = userEvent.setup()
     const { updateProject } = setup('/projects/prj-baton?settings=true')
-    await screen.findByRole('heading', { name: 'Project settings' })
+    await screen.findByRole('heading', { name: '项目设置' })
     await user.click(screen.getByRole('button', { name: '🧪' }))
-    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await user.click(screen.getByRole('button', { name: '保存更改' }))
     await waitFor(() => expect(updateProject).toHaveBeenCalledWith({ projectId: 'prj-baton', patch: { emoji: '🧪' } }))
   })
 
   it('preserves an existing unreported model and lets settings switch to the reported catalog', async () => {
     const user = userEvent.setup()
     const { updateProject } = setup('/projects/prj-baton?settings=true', reportedModels)
-    await screen.findByRole('heading', { name: 'Project settings' })
-    expect(screen.getByLabelText('Project assistant model')).toHaveValue('gpt-6.1-sol')
-    expect(screen.getByLabelText('Project assistant model').tagName).toBe('INPUT')
-    await user.click(screen.getByRole('button', { name: 'Choose from device models' }))
-    await user.selectOptions(screen.getByLabelText('Model source'), '|xAI')
-    await user.selectOptions(screen.getByLabelText('Project assistant model'), 'grok-4-fast')
+    await screen.findByRole('heading', { name: '项目设置' })
+    expect(screen.getByLabelText('项目助手模型')).toHaveValue('gpt-6.1-sol')
+    expect(screen.getByLabelText('项目助手模型').tagName).toBe('INPUT')
+    await user.click(screen.getByRole('button', { name: '从设备模型中选择' }))
+    await user.selectOptions(screen.getByLabelText('模型来源'), '|xAI')
+    await user.selectOptions(screen.getByLabelText('项目助手模型'), 'grok-4-fast')
     expect(updateProject).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('button', { name: 'Save changes' }))
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Saved'))
+    await user.click(screen.getByRole('button', { name: '保存更改' }))
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('已保存'))
     expect(updateProject).toHaveBeenLastCalledWith({
       projectId: 'prj-baton',
       patch: { subscription: 'xAI', model: 'grok-4-fast' },
     })
-    expect(screen.getByText('Changes apply from the next run.')).toBeInTheDocument()
+    expect(screen.getByText('更改将在下次运行时生效。')).toBeInTheDocument()
   })
 
   it('keeps manual provider and model drafts together, rejects empty values and saves corrected values', async () => {
     const user = userEvent.setup()
     const { updateProject } = setup('/projects/prj-baton?settings=true')
-    await screen.findByRole('heading', { name: 'Project settings' })
-    await user.clear(screen.getByLabelText('Model source'))
-    await user.clear(screen.getByLabelText('Project assistant model'))
-    await user.click(screen.getByRole('button', { name: 'Back to project' }))
-    expect(await screen.findByLabelText('Message the project assistant')).toBeInTheDocument()
+    await screen.findByRole('heading', { name: '项目设置' })
+    await user.clear(screen.getByLabelText('模型来源'))
+    await user.clear(screen.getByLabelText('项目助手模型'))
+    await user.click(screen.getByRole('button', { name: '返回项目' }))
+    expect(await screen.findByLabelText('给项目助手发消息')).toBeInTheDocument()
     expect(updateProject).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('button', { name: 'Project actions' }))
-    await user.click(await screen.findByRole('menuitem', { name: 'Settings' }))
-    await screen.findByRole('heading', { name: 'Project settings' })
-    await user.click(screen.getByRole('button', { name: 'Enter provider and model manually' }))
-    expect(screen.getByLabelText('Model source')).toHaveValue('')
-    expect(screen.getByLabelText('Project assistant model')).toHaveValue('')
-    await user.click(screen.getByRole('button', { name: 'Save changes' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('Enter a provider and model.')
+    await user.click(screen.getByRole('button', { name: '项目操作' }))
+    await user.click(await screen.findByRole('menuitem', { name: '设置' }))
+    await screen.findByRole('heading', { name: '项目设置' })
+    await user.click(screen.getByRole('button', { name: '手动输入服务商和模型' }))
+    expect(screen.getByLabelText('模型来源')).toHaveValue('')
+    expect(screen.getByLabelText('项目助手模型')).toHaveValue('')
+    await user.click(screen.getByRole('button', { name: '保存更改' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('请输入服务商和模型。')
     expect(updateProject).not.toHaveBeenCalled()
-    await user.type(screen.getByLabelText('Model source'), 'openai-codex')
-    await user.type(screen.getByLabelText('Project assistant model'), 'gpt-5.4')
-    await user.click(screen.getByRole('button', { name: 'Save changes' }))
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Saved'))
+    await user.type(screen.getByLabelText('模型来源'), 'openai-codex')
+    await user.type(screen.getByLabelText('项目助手模型'), 'gpt-5.4')
+    await user.click(screen.getByRole('button', { name: '保存更改' }))
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('已保存'))
     expect(updateProject).toHaveBeenLastCalledWith({
       projectId: 'prj-baton',
       patch: { subscription: 'openai-codex', model: 'gpt-5.4' },

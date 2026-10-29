@@ -166,10 +166,10 @@ function NavRow({
 
 function ProjectTrailing({ project, pending }: { project: Project; pending: number }) {
   if (project.status === 'paused') return null
-  if (pending > 0) return <Count value={pending} label={`${pending} waiting for your reply`} />
-  if (project.agent.state === 'running') return <StatusDot tone="agent" label="Running" />
-  if (project.agent.state === 'stopping') return <StatusDot tone="agent" label="Stopping" />
-  if (project.agent.state === 'waitingDevice') return <span {...stylex.props(text.caption, text.faint)}>Waiting</span>
+  if (pending > 0) return <Count value={pending} label={`${pending} 个问题待回复`} />
+  if (project.agent.state === 'running') return <StatusDot tone="agent" label="运行中" />
+  if (project.agent.state === 'stopping') return <StatusDot tone="agent" label="正在停止" />
+  if (project.agent.state === 'waitingDevice') return <span {...stylex.props(text.caption, text.faint)}>等待设备</span>
   return null
 }
 
@@ -181,8 +181,8 @@ function ProjectRow({ project, pending }: { project: Project; pending: number })
       to="/projects/$projectId"
       params={{ projectId: project.id }}
       aria-current={active ? 'page' : undefined}
-      aria-label={project.status === 'paused' ? `${project.name}, Paused` : undefined}
-      title={project.status === 'paused' ? 'Paused' : undefined}
+      aria-label={project.status === 'paused' ? `${project.name}，已暂停` : undefined}
+      title={project.status === 'paused' ? '已暂停' : undefined}
       {...stylex.props(text.small, styles.row, styles.projectRow, active && styles.active, focusRing.ring)}
     >
       <Avatar name={project.name} hue={project.hue} emoji={project.emoji} small />
@@ -194,7 +194,7 @@ function ProjectRow({ project, pending }: { project: Project; pending: number })
   )
 }
 
-const themeLabels: Record<ThemeMode, string> = { system: 'Match system', light: 'Light', dark: 'Dark' }
+const themeLabels: Record<ThemeMode, string> = { system: '跟随系统', light: '浅色', dark: '深色' }
 
 export function Sidebar() {
   const navigate = useNavigate()
@@ -211,12 +211,12 @@ export function Sidebar() {
   const visibleProjects = (projects.data ?? []).filter((item) => item.status !== 'archived')
 
   return (
-    <nav aria-label="Workspace" {...stylex.props(styles.sidebar, collapsed && styles.sidebarCollapsed)}>
+    <nav aria-label="工作区" {...stylex.props(styles.sidebar, collapsed && styles.sidebarCollapsed)}>
       <div {...stylex.props(styles.header, collapsed && styles.headerCollapsed)}>
         <IconButton
           icon="sidebar"
           iconSize={18}
-          label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          label={collapsed ? '展开侧栏' : '收起侧栏'}
           aria-expanded={!collapsed}
           onClick={toggleSidebar}
         />
@@ -244,17 +244,17 @@ export function Sidebar() {
               </div>
             </div>
             <MenuRule />
-            <MenuHeading>Theme</MenuHeading>
+            <MenuHeading>外观</MenuHeading>
             {(['system', 'light', 'dark'] as const).map((value) => (
               <MenuOption key={value} selected={mode === value} onSelect={() => setMode(value)}>
                 {themeLabels[value]}
               </MenuOption>
             ))}
             <MenuRule />
-            <MenuOption onSelect={() => void navigate({ to: '/devices' })}>Devices</MenuOption>
-            <MenuOption onSelect={() => void navigate({ to: '/projects/archived' })}>Archived projects</MenuOption>
+            <MenuOption onSelect={() => void navigate({ to: '/devices' })}>设备</MenuOption>
+            <MenuOption onSelect={() => void navigate({ to: '/projects/archived' })}>已归档项目</MenuOption>
             <MenuRule />
-            <MenuOption onSelect={signOut}>{signingOut ? 'Signing out…' : 'Sign out'}</MenuOption>
+            <MenuOption onSelect={signOut}>{signingOut ? '正在退出…' : '退出登录'}</MenuOption>
           </Menu>
         )}
       </div>
@@ -262,20 +262,18 @@ export function Sidebar() {
         <NavRow
           to="/inbox"
           icon="inbox"
-          label="Inbox"
+          label="待处理"
           collapsed={collapsed}
-          trailing={
-            pending.length > 0 && <Count value={pending.length} label={`${pending.length} waiting for your reply`} />
-          }
+          trailing={pending.length > 0 && <Count value={pending.length} label={`${pending.length} 个问题待回复`} />}
         />
         <NavRow
           to="/threads"
           icon="threads"
-          label="Threads"
+          label="对话"
           collapsed={collapsed}
-          trailing={unread > 0 && <Count value={unread} label={`${unread} unread`} />}
+          trailing={unread > 0 && <Count value={unread} label={`${unread} 条未读`} />}
         />
-        <NavRow to="/devices" icon="laptop" label="Devices" collapsed={collapsed} />
+        <NavRow to="/devices" icon="laptop" label="设备" collapsed={collapsed} />
       </div>
 
       {collapsed ? (
@@ -306,11 +304,11 @@ function ProjectList({
         onMouseLeave={() => setHeaderHovered(false)}
         {...stylex.props(styles.sectionHead)}
       >
-        <span {...stylex.props(text.captionMedium)}>Projects</span>
+        <span {...stylex.props(text.captionMedium)}>项目</span>
         <button
           type="button"
-          aria-label="New project"
-          title="New project"
+          aria-label="新建项目"
+          title="新建项目"
           onClick={newProject}
           {...stylex.props(styles.addProject, headerHovered && styles.addProjectVisible, focusRing.ring)}
         >
@@ -318,8 +316,8 @@ function ProjectList({
         </button>
       </div>
       <div {...stylex.props(styles.projects)}>
-        {unavailable && <span {...stylex.props(text.caption, styles.empty)}>Projects unavailable</span>}
-        {loaded && projects.length === 0 && <span {...stylex.props(text.caption, styles.empty)}>No projects yet</span>}
+        {unavailable && <span {...stylex.props(text.caption, styles.empty)}>无法加载项目</span>}
+        {loaded && projects.length === 0 && <span {...stylex.props(text.caption, styles.empty)}>暂无项目</span>}
         {projects.map((project) => (
           <ProjectRow key={project.id} project={project} pending={pendingInbox(inbox.data ?? [], project.id).length} />
         ))}

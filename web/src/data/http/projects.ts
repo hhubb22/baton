@@ -112,9 +112,25 @@ const root = '/projects'
 const projectPath = (id: string) => `${root}/${apiPath(id)}`
 const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) })
 const subscription = (value: string) => ({ 'openai-codex': 'ChatGPT', xai: 'xAI', anthropic: 'Claude' })[value] ?? value
+const projectReasons: Record<string, string> = {
+  retry_backoff: '等待重试',
+  model_not_configured: '尚未配置模型',
+  all_devices_offline: '所有设备已离线',
+  waiting_sync: '等待设备同步',
+  runtime_missing: '设备未安装项目助手',
+  login_required: '需要登录模型账号',
+  capacity: '等待设备空闲',
+  scheduling: '正在分配设备',
+  device_unavailable: '设备不可用',
+  model_request_failed: '模型请求失败',
+  model_call_budget_exhausted: '模型调用次数已用完',
+  start_failed: '助手启动失败',
+}
+const projectReason = (value: string | null | undefined) =>
+  value ? (Object.hasOwn(projectReasons, value) ? projectReasons[value]! : value) : null
 function provider(value: string): string {
   const id = { ChatGPT: 'openai-codex', xAI: 'xai', Claude: 'anthropic' }[value] ?? value.trim()
-  if (!/^[a-z0-9-]{1,64}$/.test(id)) throw new ClientError('invalid', 'Enter a provider ID.')
+  if (!/^[a-z0-9-]{1,64}$/.test(id)) throw new ClientError('invalid', '请输入服务商 ID。')
   return id
 }
 
@@ -186,11 +202,11 @@ export function mapProject(p: ProjectDTO, status: StatusDTO): Project {
       deviceId: status.run?.node_id ?? null,
       reason:
         state === 'blocked'
-          ? (status.last_error ?? null)
+          ? projectReason(status.last_error)
           : state === 'waitingDevice'
             ? p.agent.source_node_id
-              ? 'Waiting for the selected API connection'
-              : (status.waiting_reason ?? status.last_error ?? null)
+              ? '等待所选 API 连接'
+              : projectReason(status.waiting_reason ?? status.last_error)
             : null,
       activity: null,
       lastSeq: status.last_seq,
@@ -376,7 +392,7 @@ export async function mapProjectEntries(
         if (block.type !== 'toolCall' || !block.id) continue
         const step: Extract<ProcessStep, { kind: 'tool' }> = {
           kind: 'tool',
-          name: block.name || 'Tool',
+          name: block.name || '工具',
           input: JSON.stringify(block.arguments ?? {}, null, 2),
           output: null,
           status: 'pending',
@@ -468,7 +484,7 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
       )
       revisions.push(...page.revisions)
       const next = page.next_after_revision ?? 0
-      if (next && next <= after) throw new ClientError('unavailable', 'Memory revision pagination did not advance')
+      if (next && next <= after) throw new ClientError('unavailable', '记忆版本分页未推进')
       after = next
     } while (after)
     return mapMemory(projectId, note, revisions)
@@ -496,7 +512,7 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
         )
         all.push(...(page.projects ?? []))
         const next = page.next_after_id ?? ''
-        if (next && next <= after) throw new ClientError('unavailable', 'Project pagination did not advance')
+        if (next && next <= after) throw new ClientError('unavailable', '项目分页未推进')
         after = next
       } while (after)
       return Promise.all(all.map(enrich))
@@ -511,7 +527,7 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
         )
         events.push(...page.events)
         more = page.has_more
-        if (more && page.next_after_seq <= seq) throw new ClientError('unavailable', 'Event pagination did not advance')
+        if (more && page.next_after_seq <= seq) throw new ClientError('unavailable', '事件分页未推进')
         seq = page.next_after_seq
       } while (more)
       const messages: MessageDTO[] = []
@@ -522,7 +538,7 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
         )
         messages.push(...page.messages)
         const next = page.next_after_id ?? 0
-        if (next && next <= after) throw new ClientError('unavailable', 'Message pagination did not advance')
+        if (next && next <= after) throw new ClientError('unavailable', '消息分页未推进')
         after = next
       } while (after)
       return mapProjectEntries(projectId, events, messages)
@@ -536,7 +552,7 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
         )
         notes.push(...(page.entries ?? []))
         const next = page.next_after_id ?? ''
-        if (next && next <= after) throw new ClientError('unavailable', 'Memory pagination did not advance')
+        if (next && next <= after) throw new ClientError('unavailable', '记忆分页未推进')
         after = next
       } while (after)
       return Promise.all(notes.map((note) => readMemory(projectId, note)))
@@ -609,7 +625,7 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
             .trim()
             .split('\n')[0]
             .replace(/\p{Cc}/gu, ' ')
-            .trim() || 'Memory',
+            .trim() || '记忆',
         )
           .slice(0, 200)
           .join('')
@@ -676,8 +692,7 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
             source = page
             text += page.text
             more = page.has_more
-            if (more && page.next_offset <= offset)
-              throw new ClientError('unavailable', 'Source pagination did not advance')
+            if (more && page.next_offset <= offset) throw new ClientError('unavailable', '来源分页未推进')
             offset = page.next_offset
           } while (more)
           return { ...source!, text }
@@ -696,7 +711,7 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
         )
         for (const item of page.requests) items.push(mapInboxItem(rememberItem(item)))
         cursor = page.next_cursor ?? ''
-        if (cursor && seen.has(cursor)) throw new ClientError('unavailable', 'Inbox pagination did not advance')
+        if (cursor && seen.has(cursor)) throw new ClientError('unavailable', '待处理事项分页未推进')
         seen.add(cursor)
       } while (cursor)
       return items
@@ -727,7 +742,7 @@ export function createProjectAPI(ctx: HttpContext): ProjectAPI {
           ? (item.options ?? []).filter((option) => option.label === decision.option)
           : []
       if (decision.kind === 'answer' && decision.option !== null && option.length !== 1)
-        throw new ClientError('invalid', 'The selected option is unavailable or ambiguous')
+        throw new ClientError('invalid', '所选选项不可用或不明确')
       const body = {
         expected_version: input.revision,
         client_request_id: clientRequestId,

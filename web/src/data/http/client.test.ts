@@ -102,13 +102,13 @@ it('reads notification baselines and decimal cursors without losing precision', 
 
 describe('HTTP account and devices', () => {
   it.each([
-    ['draining', 'neutral', 'Waiting for upgrade'],
-    ['ready', 'neutral', 'Waiting for upgrade'],
-    ['migrating', 'neutral', 'Upgrading'],
-    ['syncing', 'neutral', 'Upgrading'],
-    ['completed', 'success', 'Online'],
-    ['failed', 'attention', 'Upgrade paused'],
-    ['cancelled', 'success', 'Online'],
+    ['draining', 'neutral', '等待升级'],
+    ['ready', 'neutral', '等待升级'],
+    ['migrating', 'neutral', '正在升级'],
+    ['syncing', 'neutral', '正在升级'],
+    ['completed', 'success', '在线'],
+    ['failed', 'attention', '升级已暂停'],
+    ['cancelled', 'success', '在线'],
   ] as const)('preserves upgrade phase %s separately from the connection', (phase, tone, label) => {
     const device = mapDevice({
       id: 'desk',
@@ -152,7 +152,7 @@ describe('HTTP account and devices', () => {
       upgrade_state,
     })
     expect(device.upgradeState).toBeNull()
-    expect(deviceConnectionView(device, [], Date.now())).toEqual({ tone: 'success', label: 'Online' })
+    expect(deviceConnectionView(device, [], Date.now())).toEqual({ tone: 'success', label: '在线' })
   })
 
   it.each(['active', 'idle_expired', 'revoked'] as const)('maps device credentials in state %s', (state) => {
@@ -173,7 +173,7 @@ describe('HTTP account and devices', () => {
       connection: state === 'active' ? 'online' : 'offline',
     })
     if (state === 'idle_expired')
-      expect(deviceConnectionView(device, [], Date.now())).toEqual({ tone: 'attention', label: 'Needs sign-in' })
+      expect(deviceConnectionView(device, [], Date.now())).toEqual({ tone: 'attention', label: '需要登录' })
   })
 
   it.each([undefined, 'node/id'])('issues a setup code for %s and polls its existing enrollment', async (nodeId) => {
@@ -424,12 +424,12 @@ describe('HTTP account and devices', () => {
     }
     const device = mapDevice(node)
     expect(setupNeeded(device)).toBe(false)
-    expect(capabilityLines(device)).toContainEqual({ name: 'Project assistant', ok: true, detail: 'xAI signed in' })
+    expect(capabilityLines(device)).toContainEqual({ name: '项目助手', ok: true, detail: 'xAI 已登录' })
     node.runtime_report.project_runtime.providers[0].status = 'login_required'
     expect(capabilityLines(mapDevice(node))).toContainEqual({
-      name: 'Project assistant',
+      name: '项目助手',
       ok: false,
-      detail: 'Subscription sign-in needed',
+      detail: '需要登录订阅账号',
     })
   })
 
@@ -455,18 +455,18 @@ describe('HTTP account and devices', () => {
     expect(assistantBlock(device, 'ChatGPT')).toBeNull()
     expect(setupNeeded(device)).toBe(false)
     expect(capabilityLines(device)).toContainEqual({
-      name: 'Project assistant',
+      name: '项目助手',
       ok: true,
-      detail: 'ChatGPT sign-in check unavailable · can try',
+      detail: 'ChatGPT 无法检查登录状态 · 可以尝试',
     })
     for (const [reason, detail] of Object.entries({
-      credential_permissions_invalid: 'Credential file permissions are unsafe',
-      credential_owner_invalid: 'The credential file belongs to another user',
-      credential_path_invalid: 'The credential path is invalid',
-      credential_private_file_failed: 'The credential file could not be opened securely',
+      credential_permissions_invalid: '凭据文件权限不安全',
+      credential_owner_invalid: '凭据文件属于其他用户',
+      credential_path_invalid: '凭据路径无效',
+      credential_private_file_failed: '无法安全地打开凭据文件',
     })) {
       device.subscriptions = [{ provider: 'ChatGPT', signedIn: false, status: 'unknown', reason }]
-      expect(capabilityLines(device).find((line) => line.name === 'Project assistant')?.detail).toContain(detail)
+      expect(capabilityLines(device).find((line) => line.name === '项目助手')?.detail).toContain(detail)
       expect(setupSteps(device)).toContain(detail)
       expect(setupNeeded(device)).toBe(true)
     }

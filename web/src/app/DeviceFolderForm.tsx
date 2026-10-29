@@ -29,7 +29,7 @@ export function DeviceFolderForm({
   const [empty, setEmpty] = useState(false)
   return (
     <form
-      aria-label="Add folder"
+      aria-label="添加文件夹"
       {...stylex.props(styles.form)}
       onSubmit={(event) => {
         event.preventDefault()
@@ -53,8 +53,8 @@ export function DeviceFolderForm({
     >
       <div {...stylex.props(styles.row)}>
         <Input
-          aria-label="Folder path"
-          placeholder="Or type a path, e.g. ~/work/app"
+          aria-label="文件夹路径"
+          placeholder="或输入路径，例如 ~/work/app"
           value={path}
           style={styles.input}
           onChange={(event) => {
@@ -64,15 +64,15 @@ export function DeviceFolderForm({
           }}
         />
         <Button type="submit" aria-disabled={add.isPending || undefined}>
-          {add.isPending ? 'Adding…' : 'Add and select'}
+          {add.isPending ? '正在添加…' : '添加并选择'}
         </Button>
       </div>
       {empty || add.isError ? (
         <p role="alert" {...stylex.props(text.caption, styles.error)}>
-          {empty ? 'Enter a folder path.' : "Couldn't add the folder. Check the path and try again."}
+          {empty ? '请输入文件夹路径。' : '无法添加文件夹，请检查路径后重试。'}
         </p>
       ) : (
-        path.trim() && <p {...stylex.props(text.caption, styles.hint)}>Adds this folder to {deviceName}.</p>
+        path.trim() && <p {...stylex.props(text.caption, styles.hint)}>将此文件夹添加到 {deviceName}。</p>
       )}
     </form>
   )

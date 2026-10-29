@@ -89,7 +89,7 @@ describe('live output subscription', () => {
     api.subscribeOutput('one', listener)
     api.setConnection(send)
     api.receive('one', { ok: false, code: 'node_offline' })
-    await expect(api.readOutput('one')).rejects.toThrow('offline')
+    await expect(api.readOutput('one')).rejects.toThrow('离线')
     api.receive('one', chunk('recovered', 'epoch:9'))
     expect((await api.readOutput('one')).chunks).toEqual([{ kind: 'text', text: 'recovered' }])
   })

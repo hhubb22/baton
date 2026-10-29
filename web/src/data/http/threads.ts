@@ -30,6 +30,7 @@ type ThreadDTO = {
   model: string
   execution_timeout_seconds: number
   next_model?: string
+  next_thinking?: import('@baton/protocol').ThinkingSelection | null
   working_directory: string
   project_id?: string
   status: string
@@ -226,6 +227,7 @@ function mapThread(t: ThreadDTO, events: EventDTO[]): Thread {
     folder: t.working_directory,
     agent: t.agent_type === 'shell' ? null : t.agent_type,
     model: t.next_model || t.model,
+    thinking: t.next_thinking ?? null,
     executionTimeoutSeconds: t.execution_timeout_seconds,
     projectId: t.project_id || null,
     status: statuses[t.status] ?? 'unknown',
@@ -297,7 +299,7 @@ export function createThreadAPI(
       )
       events.push(...page.events)
       cursor = page.next_cursor ?? ''
-      if (cursor && cursors.has(cursor)) unavailable('The timeline cursor did not advance.')
+      if (cursor && cursors.has(cursor)) unavailable('执行记录分页未推进。')
       cursors.add(cursor)
     } while (cursor)
     return events
@@ -306,7 +308,7 @@ export function createThreadAPI(
   async function agentFor(t: Pick<ThreadDTO, 'node_id' | 'agent_type'>) {
     const device = (await ctx.devices()).find((device) => device.id === t.node_id)
     const agent = device?.agents.find((agent) => agent.kind === t.agent_type)
-    if (!agent) throw new ClientError('invalid', 'The device has not reported this agent as available.')
+    if (!agent) throw new ClientError('invalid', '设备尚未报告此助手可用。')
     if (agent.status !== 'available' || agent.problem) throw new ClientError('invalid', agentUnavailableReason(agent))
     return agent
   }
@@ -342,7 +344,7 @@ export function createThreadAPI(
       .map((root) => ({ ...root, normalized: normalizeFilePath(root.path).replace(/\/$/, '') }))
       .sort((a, b) => b.normalized.length - a.normalized.length)
       .find((root) => insideFileFolder(path, root.path))
-    if (!found && result.scanLimited) unavailable('The device could not list all allowed folders.')
+    if (!found && result.scanLimited) unavailable('设备无法列出全部允许访问的文件夹。')
     return found
   }
   async function browse(deviceId: string, path: string, cursor = '', continuation?: FileReadOptions) {
@@ -497,9 +499,7 @@ export function createThreadAPI(
     if (m.status === 'withdrawn' || m.status === 'unknown')
       return {
         phase: 'failed',
-        detail:
-          m.status_reason ||
-          (m.status === 'unknown' ? 'The device could not confirm delivery.' : 'The message was withdrawn.'),
+        detail: m.status_reason || (m.status === 'unknown' ? '设备无法确认消息是否送达。' : '消息已撤回。'),
       }
     if (m.status === 'accepted') return { phase: !t.node_online || !t.node_synced ? 'waitingDevice' : 'saved' }
     if (m.status === 'queued') return { phase: 'queued' }
@@ -513,8 +513,7 @@ export function createThreadAPI(
         detail:
           ended.payload.reason === 'failed' ? ended.payload.content || ended.payload.reason : ended.payload.reason,
       }
-    if (t.status === 'unknown')
-      return { phase: 'failed', detail: t.status_reason || 'The device could not confirm execution.' }
+    if (t.status === 'unknown') return { phase: 'failed', detail: t.status_reason || '设备无法确认执行状态。' }
     if (t.status === 'stopped')
       return { phase: t.stop_confirmed_at ? 'stopped' : 'failed', detail: t.status_reason || null }
     return { phase: 'running' }
@@ -523,14 +522,12 @@ export function createThreadAPI(
     const [t, events] = await Promise.all([view(threadId), timeline(threadId)])
     await readMessages(t, events)
     const m = [...messages.values()].find((m) => m.thread_id === threadId && m.client_message_id === clientMessageId)
-    if (t.status === 'stopped' && !t.opened_at)
-      return { phase: 'failed', detail: t.status_reason || 'The agent could not start.' }
+    if (t.status === 'stopped' && !t.opened_at) return { phase: 'failed', detail: t.status_reason || '助手无法启动。' }
     return m ? messagePhase(m, t, events) : { phase: 'saved' }
   }
   function actionPhase(kind: 'stopThread' | 'archiveThread', t: ThreadDTO): Phase {
     if (kind === 'archiveThread' && t.status === 'archived') return { phase: 'done' }
-    if (t.status === 'unknown')
-      return { phase: 'failed', detail: t.status_reason || 'The device could not confirm the action.' }
+    if (t.status === 'unknown') return { phase: 'failed', detail: t.status_reason || '设备无法确认操作结果。' }
     if (kind === 'stopThread' && t.stop_confirmed_at) return { phase: 'stopped', detail: t.status_reason || null }
     if (t.stop_failure) return { phase: 'failed', detail: "The device didn't stop it." }
     return { phase: !t.node_online || !t.node_synced ? 'waitingDevice' : 'stopping', detail: t.status_reason || null }
@@ -554,12 +551,12 @@ export function createThreadAPI(
       if (failure)
         return {
           phase: 'failed',
-          detail: failure.payload.reason || current.status_reason || 'The agent could not resume.',
+          detail: failure.payload.reason || current.status_reason || '助手无法恢复。',
         }
       if (current.resume_pending === false) {
         if (current.opened_at && ['idle', 'running'].includes(current.status)) return { phase: 'done' }
         if (['stopped', 'unknown', 'archived'].includes(current.status))
-          return { phase: 'failed', detail: current.status_reason || 'The thread did not resume.' }
+          return { phase: 'failed', detail: current.status_reason || '对话未恢复。' }
       }
       return { phase: !current.node_online || !current.node_synced ? 'waitingDevice' : 'saved' }
     })
@@ -597,7 +594,7 @@ export function createThreadAPI(
         const page = await ctx.request<{ threads: ThreadDTO[]; next_cursor?: string }>(`${base}?${query}`)
         all.push(...page.threads)
         cursor = page.next_cursor ?? ''
-        if (cursor && cursors.has(cursor)) unavailable('The thread cursor did not advance.')
+        if (cursor && cursors.has(cursor)) unavailable('对话分页未推进。')
         cursors.add(cursor)
       } while (cursor)
       return all.map((t) => mapThread(t, []))
@@ -623,26 +620,34 @@ export function createThreadAPI(
           model: input.model,
           execution_timeout_seconds: input.executionTimeoutSeconds,
           working_directory: input.folder,
-          message: { client_message_id: messageId, content: input.body },
+          message: {
+            client_message_id: messageId,
+            content: input.body,
+            ...(input.thinking ? { thinking: input.thinking } : {}),
+          },
         }),
       )
       const refresh = () => executionPhase(t.id, messageId)
       ctx.emit('threads', 'messages', 'operations')
       const phase: Phase =
         t.status === 'unknown' || (t.status === 'stopped' && !t.opened_at)
-          ? { phase: 'failed', detail: t.status_reason || 'The agent could not start.' }
+          ? { phase: 'failed', detail: t.status_reason || '助手无法启动。' }
           : { phase: !t.node_online || !t.node_synced ? 'waitingDevice' : 'saved' }
       return ctx.operation('createThread', t.id, phase.phase, phase.detail, refresh)
     },
     async sendMessage(input) {
       const t = await view(input.threadId)
       const agent = await agentFor(t)
-      if (input.mode === 'now' && !agent.abilities.steer)
-        throw new ClientError('invalid', 'This agent does not support inserting messages.')
+      if (input.mode === 'now' && !agent.abilities.steer) throw new ClientError('invalid', '此助手不支持立即插话。')
       const clientId = uuid(`message:${input.threadId}`, input.clientId)
       const m = await ctx.request<MessageDTO>(
         `${threadPath(input.threadId)}/messages`,
-        post({ client_message_id: clientId, content: input.body, mode: input.mode === 'now' ? 'steer' : 'queue' }),
+        post({
+          client_message_id: clientId,
+          content: input.body,
+          mode: input.mode === 'now' ? 'steer' : 'queue',
+          ...(input.mode !== 'now' && input.thinking ? { thinking: input.thinking } : {}),
+        }),
       )
       messages.set(m.id, m)
       const phase = messagePhase(m, t, [])
@@ -658,16 +663,16 @@ export function createThreadAPI(
           if (message) break
         }
       }
-      if (!message) throw new ClientError('notFound', 'The message was not found.')
+      if (!message) throw new ClientError('notFound', '找不到消息。')
       await ctx.request(`${threadPath(message.thread_id)}/messages/${apiPath(messageId)}/withdraw`, post({}))
       ctx.emit('threads', 'messages')
       const updated = (await api.listMessages(message.thread_id)).find((item) => item.id === messageId)
-      return updated ?? unavailable('The device has not confirmed the message state.')
+      return updated ?? unavailable('设备尚未确认消息状态。')
     },
     async setThreadModel({ threadId, model }) {
       const t = await view(threadId)
       const agent = await agentFor(t)
-      if (!agent.abilities.switchModel) throw new ClientError('invalid', 'This agent does not support changing models.')
+      if (!agent.abilities.switchModel) throw new ClientError('invalid', '此助手不支持切换模型。')
       const updated = await ctx.request<ThreadDTO>(`${threadPath(threadId)}/model`, post({ model }))
       ctx.emit('threads')
       return mapThread(updated, await timeline(threadId))
@@ -684,8 +689,7 @@ export function createThreadAPI(
     archiveThread: (id) => action('archiveThread', id),
     async resumeThread(id) {
       const t = await view(id)
-      if (!(await agentFor(t)).abilities.resume)
-        throw new ClientError('invalid', 'This agent does not support resuming conversations.')
+      if (!(await agentFor(t)).abilities.resume) throw new ClientError('invalid', '此助手不支持恢复对话。')
       return action('resumeThread', id)
     },
     async readTrace(messageId, cursor): Promise<Trace> {
@@ -695,7 +699,7 @@ export function createThreadAPI(
         if (['reply', 'turn-activity', 'turn-failed'].includes(parts[0]) && parts[1]) await api.listMessages(parts[1])
         reply = replies.get(messageId)
       }
-      if (!reply) throw new ClientError('notFound', 'The reply was not found.')
+      if (!reply) throw new ClientError('notFound', '找不到回复。')
       const trace = await api.readTurnTrace!(reply.threadId, reply.seq, cursor)
       return { ...trace, messageId }
     },
@@ -708,7 +712,7 @@ export function createThreadAPI(
         if (result.code === 'trace_missing') return { state: 'unavailable', messageId, reason: 'missing' }
         unavailable("Couldn't load this activity. Try again.")
       }
-      const steps = result.steps ?? unavailable('The activity record is incomplete. Try again.')
+      const steps = result.steps ?? unavailable('执行记录不完整，请重试。')
       if (result.next_cursor !== undefined && (!result.next_cursor || result.next_cursor === cursor))
         unavailable("Couldn't load more activity. Try again.")
       return { state: 'ready', messageId, steps: [...steps], nextCursor: result.next_cursor }
@@ -779,22 +783,22 @@ export function createThreadAPI(
           continuation &&
           (!Number.isSafeInteger(continuation.offset) || continuation.offset < 0 || !continuation.version)
         )
-          throw new ClientError('invalid', 'Continue reading with a valid offset and file version.')
+          throw new ClientError('invalid', '请使用有效的偏移量和文件版本继续读取。')
         const result = await browse(deviceId, path, '', continuation)
         if (!result) return { state: 'unavailable', deviceId, path, reason: 'outsideFolders', size: null }
         if (result.kind !== 'file')
           return { state: 'unavailable', deviceId, path, reason: 'missing', size: result.size ?? null }
         if (result.size == null || result.content == null || result.offset == null || !result.version)
-          return unavailable('The device returned an incomplete file preview.')
+          return unavailable('设备返回的文件预览不完整。')
         if (continuation && result.version !== continuation.version)
-          throw new ClientError('conflict', 'The file changed. Reload it to continue reading.')
+          throw new ClientError('conflict', '文件已更改，请重新加载后继续阅读。')
         const bytes = new TextEncoder().encode(result.content).length
         if (
           result.offset !== (continuation?.offset ?? 0) ||
           bytes > previewLimit ||
           (result.next_offset != null && (bytes === 0 || result.next_offset !== result.offset + bytes))
         )
-          return unavailable('The device returned an invalid file fragment.')
+          return unavailable('设备返回的文件片段无效。')
         return {
           state: 'ready',
           deviceId,
@@ -808,8 +812,7 @@ export function createThreadAPI(
         }
       } catch (error) {
         const reason = fileReason(error)
-        if (errorCode(error) === 'file_changed')
-          throw new ClientError('conflict', 'The file changed. Reload it to continue reading.')
+        if (errorCode(error) === 'file_changed') throw new ClientError('conflict', '文件已更改，请重新加载后继续阅读。')
         if (reason) return { state: 'unavailable', deviceId, path, reason, size: null }
         throw error
       }

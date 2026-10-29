@@ -211,7 +211,7 @@ export function FilePreview({
       : current
   const preview = useFile(deviceId, file)
   const size = file && preview.data ? preview.data.size : null
-  const meta = [device?.name ?? 'Removed device', fileRoot, size !== null ? fileSize(size) : null].filter(Boolean)
+  const meta = [device?.name ?? '已移除的设备', fileRoot, size !== null ? fileSize(size) : null].filter(Boolean)
   const [copied, setCopied] = useState(false)
 
   return (
@@ -228,14 +228,14 @@ export function FilePreview({
             </div>
             <IconButton
               icon={copied ? 'check' : 'copy'}
-              label={copied ? 'Path copied' : 'Copy path'}
+              label={copied ? '路径已复制' : '复制路径'}
               onClick={() => void copyText(current).then(() => setCopied(true))}
             />
-            <BaseDialog.Close render={<IconButton icon="close" label="Close preview" />} />
+            <BaseDialog.Close render={<IconButton icon="close" label="关闭预览" />} />
           </div>
           <div {...stylex.props(styles.split)}>
             <ResizablePane
-              label="Resize file list"
+              label="调整文件列表宽度"
               storageKey="baton.width.file-list"
               defaultWidth={240}
               min={160}
@@ -270,7 +270,7 @@ export function FilePreview({
               />
             ) : (
               <div {...stylex.props(styles.content)}>
-                <State icon="folder" title="Choose a file" detail="Select a file on the left to preview it." />
+                <State icon="folder" title="选择文件" detail="选择左侧文件以预览。" />
               </div>
             )}
           </div>
@@ -297,7 +297,7 @@ function FolderPane({
 }) {
   // 不在允许目录里时列出允许的目录，从那里重新进入。
   const listing = useFolders(deviceId, root ? dir : null)
-  const crumbs: { label: string; path: string | null }[] = [{ label: 'Folders', path: null }]
+  const crumbs: { label: string; path: string | null }[] = [{ label: '文件夹', path: null }]
   if (root && dir) {
     crumbs.splice(0, 1, { label: folderName(root), path: root })
     const rest = normalizeFilePath(dir, root).slice(normalizeFilePath(root).length).split('/').filter(Boolean)
@@ -310,7 +310,7 @@ function FolderPane({
   const data = listing.data
 
   return (
-    <nav aria-label="Folders" {...stylex.props(styles.nav)}>
+    <nav aria-label="文件夹" {...stylex.props(styles.nav)}>
       <div {...stylex.props(text.caption, styles.crumbs)}>
         {crumbs.map((crumb, index) => {
           const last = index === crumbs.length - 1
@@ -338,7 +338,7 @@ function FolderPane({
         {root && dir && dir !== root && (
           <button
             type="button"
-            aria-label="Parent folder"
+            aria-label="上一级文件夹"
             onClick={() => onDir(parentFolder(dir))}
             {...stylex.props(text.small, styles.row, focusRing.ring)}
           >
@@ -348,20 +348,20 @@ function FolderPane({
             ..
           </button>
         )}
-        {listing.isPending && <p {...stylex.props(text.caption, styles.navNote)}>Loading folder…</p>}
+        {listing.isPending && <p {...stylex.props(text.caption, styles.navNote)}>正在加载文件夹…</p>}
         {listing.isError && (
           <p {...stylex.props(text.caption, styles.navNote)}>
-            Couldn't list this folder.{' '}
+            无法列出文件夹内容。{' '}
             <button
               type="button"
               onClick={() => void listing.refetch()}
               {...stylex.props(text.caption, styles.crumb, focusRing.ring)}
             >
-              Retry
+              重试
             </button>
           </p>
         )}
-        {data?.state === 'unavailable' && <p {...stylex.props(text.caption, styles.navNote)}>Folder unavailable</p>}
+        {data?.state === 'unavailable' && <p {...stylex.props(text.caption, styles.navNote)}>文件夹不可用</p>}
         {data?.state === 'ready' && (
           <>
             {data.folders.map((folder) => (
@@ -396,18 +396,18 @@ function FolderPane({
             ))}
             {data.scanLimited && (
               <p role="status" {...stylex.props(text.caption, styles.navNote)}>
-                Folder scan limited. Some entries may be missing.{' '}
+                文件夹扫描受到限制，部分内容可能未显示。{' '}
                 <button
                   type="button"
                   onClick={() => void listing.refetch()}
                   {...stylex.props(text.caption, styles.crumb, focusRing.ring)}
                 >
-                  Retry
+                  重试
                 </button>
               </p>
             )}
             {!data.scanLimited && data.folders.length === 0 && data.files.length === 0 && (
-              <p {...stylex.props(text.caption, styles.navNote)}>This folder is empty</p>
+              <p {...stylex.props(text.caption, styles.navNote)}>文件夹为空</p>
             )}
           </>
         )}
@@ -476,10 +476,8 @@ function FileContent({
     mutationFn: async (options: FileReadOptions) => {
       const next = await client.readFile(deviceId, path, options)
       if (next.state !== 'ready' || current?.state !== 'ready') return next
-      if (next.version !== current.version)
-        throw new ClientError('conflict', 'The file changed. Reload it to continue reading.')
-      if (next.offset !== options.offset)
-        throw new ClientError('unavailable', 'The device returned an invalid file fragment.')
+      if (next.version !== current.version) throw new ClientError('conflict', '文件已更改，请重新加载后继续阅读。')
+      if (next.offset !== options.offset) throw new ClientError('unavailable', '设备返回了无效的文件片段。')
       return { ...next, offset: 0, content: current.content + next.content }
     },
     onSuccess: setAppended,
@@ -493,11 +491,11 @@ function FileContent({
       action={
         view.action === 'retry' ? (
           <Button small onClick={() => void preview.refetch()}>
-            Retry
+            重试
           </Button>
         ) : (
           <Button small onClick={onBack}>
-            Go back
+            返回
           </Button>
         )
       }
@@ -515,18 +513,18 @@ function FileContent({
     const problem = previewProblem({ state: 'unavailable', deviceId, path, reason, size: null }, device)
     body = problem && failed(problem, problemIcons[reason])
   } else if (preview.isPending) {
-    body = <State icon="file" title={`Loading ${baseName(path)}…`} />
+    body = <State icon="file" title={`正在加载 ${baseName(path)}…`} />
   } else if (preview.isError) {
     body = failed(readFailure(), 'alert')
   } else if (continuation.error instanceof ClientError && continuation.error.code === 'conflict') {
     body = (
       <State
         icon="alert"
-        title="File changed"
-        detail="Reload this file to continue reading its latest version."
+        title="文件已更改"
+        detail="重新加载文件以继续查看最新内容。"
         action={
           <Button small onClick={() => void preview.refetch()}>
-            Reload file
+            重新加载文件
           </Button>
         }
       />
@@ -567,14 +565,14 @@ function FileContent({
     body = (
       <>
         <SelectionArea
-          label={canAsk ? 'Ask project assistant' : 'Copy selection'}
+          label={canAsk ? '询问项目助手' : '复制所选内容'}
           icon={canAsk ? 'reply' : 'copy'}
           describe={describe}
           onHide={() => setSelected(null)}
           style={styles.scroll}
         >
           <div
-            aria-label={`Contents of ${baseName(path)}`}
+            aria-label={`${baseName(path)} 的内容`}
             role="region"
             tabIndex={0}
             {...stylex.props(styles.lines, focusRing.ring)}
@@ -596,12 +594,12 @@ function FileContent({
           </div>
           {data.truncated && (
             <div {...stylex.props(text.caption, styles.divider)}>
-              Showing first {fileSize(new TextEncoder().encode(data.content).length)}
+              已显示前 {fileSize(new TextEncoder().encode(data.content).length)}
             </div>
           )}
           {continuation.isError && (
             <p role="alert" {...stylex.props(text.caption, styles.navNote)}>
-              Couldn't read more of this file. Try again.
+              无法继续读取文件，请重试。
             </p>
           )}
           {data.nextOffset != null && (
@@ -613,13 +611,13 @@ function FileContent({
                   continuation.mutate({ offset: data.nextOffset, version: data.version })
               }}
             >
-              {continuation.isPending ? 'Reading…' : 'Continue reading'}
+              {continuation.isPending ? '正在读取…' : '继续阅读'}
             </Button>
           )}
         </SelectionArea>
         {selected && (
           <span {...stylex.props(text.caption, styles.selectionNote)}>
-            {selected.from === selected.to ? `Line ${selected.from}` : `Lines ${selected.from}—${selected.to}`} selected
+            已选择{selected.from === selected.to ? `第 ${selected.from} 行` : `第 ${selected.from}—${selected.to} 行`}
           </span>
         )}
       </>

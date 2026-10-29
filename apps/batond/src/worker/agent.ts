@@ -21,6 +21,7 @@ export interface AgentMessage {
   readonly operationId: string
   readonly mode: 'queue' | 'steer'
   readonly model?: string
+  readonly thinking?: import('@baton/protocol').ThinkingSelection
   readonly targetTurn?: number
 }
 

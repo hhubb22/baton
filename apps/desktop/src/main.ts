@@ -155,18 +155,18 @@ async function start() {
   const editor = await editorPreferences(userData)
   async function showSettings() {
     const selected = await dialog.showMessageBox({
-      title: 'Baton settings',
-      message: 'Editor',
-      detail: editor.get() ?? 'System default',
-      buttons: ['Close', 'Choose editor', 'Use system default', 'Notification settings'],
+      title: 'Baton 设置',
+      message: '编辑器',
+      detail: editor.get() ?? '系统默认',
+      buttons: ['关闭', '选择编辑器', '使用系统默认', '通知设置'],
       cancelId: 0,
       noLink: true,
     })
     if (selected.response === 1) {
       const choice = await dialog.showOpenDialog({
-        title: 'Choose editor',
+        title: '选择编辑器',
         properties: ['openFile'],
-        filters: [{ name: 'Application', extensions: [process.platform === 'darwin' ? 'app' : 'exe'] }],
+        filters: [{ name: '应用程序', extensions: [process.platform === 'darwin' ? 'app' : 'exe'] }],
       })
       if (!choice.canceled && choice.filePaths[0]) await editor.set(choice.filePaths[0])
     } else if (selected.response === 2) await editor.set(null)
@@ -322,7 +322,24 @@ async function start() {
     if (window && !window.isDestroyed()) window.setTitle(`Baton · ${label}`)
     Menu.setApplicationMenu(
       Menu.buildFromTemplate([
-        ...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
+        ...(process.platform === 'darwin'
+          ? [
+              {
+                label: 'Baton',
+                submenu: [
+                  { role: 'about' as const, label: '关于 Baton' },
+                  { type: 'separator' as const },
+                  { role: 'services' as const, label: '服务' },
+                  { type: 'separator' as const },
+                  { role: 'hide' as const, label: '隐藏 Baton' },
+                  { role: 'hideOthers' as const, label: '隐藏其他应用' },
+                  { role: 'unhide' as const, label: '显示所有应用' },
+                  { type: 'separator' as const },
+                  { role: 'quit' as const, label: '退出 Baton' },
+                ],
+              },
+            ]
+          : []),
         {
           label: 'Baton',
           submenu: [
@@ -333,7 +350,7 @@ async function start() {
               },
             },
             {
-              label: 'Settings…',
+              label: '设置…',
               click: () => {
                 void showSettings().catch(reportError)
               },
@@ -346,9 +363,40 @@ async function start() {
             },
           ],
         },
-        { role: 'editMenu' },
-        { role: 'viewMenu' },
-        { role: 'windowMenu' },
+        {
+          label: '编辑',
+          submenu: [
+            { role: 'undo', label: '撤销' },
+            { role: 'redo', label: '重做' },
+            { type: 'separator' },
+            { role: 'cut', label: '剪切' },
+            { role: 'copy', label: '复制' },
+            { role: 'paste', label: '粘贴' },
+            { role: 'selectAll', label: '全选' },
+          ],
+        },
+        {
+          label: '显示',
+          submenu: [
+            { role: 'reload', label: '重新加载' },
+            { role: 'forceReload', label: '强制重新加载' },
+            { role: 'toggleDevTools', label: '开发者工具' },
+            { type: 'separator' },
+            { role: 'resetZoom', label: '实际大小' },
+            { role: 'zoomIn', label: '放大' },
+            { role: 'zoomOut', label: '缩小' },
+            { type: 'separator' },
+            { role: 'togglefullscreen', label: '切换全屏' },
+          ],
+        },
+        {
+          label: '窗口',
+          submenu: [
+            { role: 'minimize', label: '最小化' },
+            { role: 'zoom', label: '缩放' },
+            { role: 'close', label: '关闭窗口' },
+          ],
+        },
       ]),
     )
   }
@@ -371,7 +419,7 @@ async function start() {
             {
               event_id: key,
               title: identity.display_name,
-              body: `Connection rejected: ${rejection.message ?? rejection.code}`,
+              body: `连接被拒绝：${rejection.message ?? rejection.code}`,
               node_id: identity.node_id,
             },
           ],
@@ -449,7 +497,7 @@ async function start() {
     )
   }
   async function centerJSON(path: string) {
-    if (!configuration) throw new Error('Connect this computer first.')
+    if (!configuration) throw new Error('请先连接此电脑。')
     const response = await session.defaultSession.fetch(`${configuration.coordinator_url}${path}`, {
       credentials: 'include',
       redirect: 'error',
@@ -459,7 +507,7 @@ async function start() {
   }
   async function localIdentity() {
     const saved = await batond.identity()
-    if (!configuration || !saved.registered || !saved.employee_id) throw new Error('Connect this computer first.')
+    if (!configuration || !saved.registered || !saved.employee_id) throw new Error('请先连接此电脑。')
     assertIdentityOrigin(saved, configuration.coordinator_url)
     const current = Schema.decodeUnknownSync(Schema.Struct({ employee: Schema.Struct({ id: Schema.String }) }))(
       await centerJSON('/api/v1/me'),
@@ -495,22 +543,22 @@ async function start() {
       if (useEditor && selected) await launchEditor(selected, path)
       else {
         const error = await shell.openPath(path)
-        if (error) throw new Error('Could not open this folder.')
+        if (error) throw new Error('无法打开此文件夹。')
       }
     },
     pickDirectory: async () => {
-      const selected = await dialog.showOpenDialog({ title: 'Choose local folder', properties: ['openDirectory'] })
+      const selected = await dialog.showOpenDialog({ title: '选择本地文件夹', properties: ['openDirectory'] })
       return selected.canceled ? null : (selected.filePaths[0] ?? null)
     },
     diagnostics: localDiagnostics,
     restart: () =>
       serialize(async () => {
-        if (!(await localDiagnostics()).canRestart) throw new Error('The device service cannot be restarted now.')
+        if (!(await localDiagnostics()).canRestart) throw new Error('当前无法重启设备服务。')
         await reconcile(true)
       }),
     openLogs: async () => {
       const error = await shell.openPath(join(dataDirectory, 'logs'))
-      if (error) throw new Error('Could not open the logs folder.')
+      if (error) throw new Error('无法打开日志文件夹。')
     },
     copyDiagnostics: async () => {
       await log.flush()

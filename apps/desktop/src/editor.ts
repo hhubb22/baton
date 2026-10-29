@@ -10,15 +10,14 @@ export async function editorPreferences(userData: string) {
   let editor: string | null = null
   try {
     editor = Schema.decodeUnknownSync(Preferences)(JSON.parse(await readFile(file, 'utf8'))).editor
-    if (editor !== null && !isAbsolute(editor)) throw new Error('Invalid editor')
+    if (editor !== null && !isAbsolute(editor)) throw new Error('编辑器无效')
   } catch (error) {
-    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT'))
-      throw new Error('Could not read editor settings.')
+    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw new Error('无法读取编辑器设置。')
   }
   return {
     get: () => editor,
     async set(path: string | null) {
-      if (path !== null && !isAbsolute(path)) throw new Error('Choose an editor application.')
+      if (path !== null && !isAbsolute(path)) throw new Error('请选择编辑器应用。')
       await writeFile(file + '.tmp', JSON.stringify({ editor: path }), { mode: 0o600 })
       await rename(file + '.tmp', file)
       editor = path
@@ -29,7 +28,7 @@ export async function editorPreferences(userData: string) {
 // 编辑器路径只能由客户端原生设置选择，网页不能指定程序或参数。
 export function launchEditor(editor: string, directory: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const failed = () => reject(new Error('Could not open the editor. Choose it again in desktop settings.'))
+    const failed = () => reject(new Error('无法打开编辑器，请在桌面设置中重新选择。'))
     if (process.platform === 'darwin') {
       execFile('/usr/bin/open', ['-a', editor, '--', directory], (error) => {
         if (error) failed()

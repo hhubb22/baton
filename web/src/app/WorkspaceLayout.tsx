@@ -59,12 +59,12 @@ function saveCollapsed(collapsed: boolean) {
 // 中心确认退出前浏览器可能仍在登录状态，所以退出失败时不跳走，留在原页面重试。
 function SignOutFailed({ onRetry }: { onRetry: () => void }) {
   return (
-    <Page title="Workspace">
+    <Page title="工作区">
       <div {...stylex.props(styles.problem)}>
-        <h2 {...stylex.props(text.title)}>Couldn't sign out</h2>
-        <p {...stylex.props(text.small, text.muted, styles.detail)}>You may still be signed in on this browser.</p>
+        <h2 {...stylex.props(text.title)}>无法退出登录</h2>
+        <p {...stylex.props(text.small, text.muted, styles.detail)}>此浏览器可能仍保持登录。</p>
         <Button variant="primary" onClick={onRetry}>
-          Retry sign-out
+          重试退出登录
         </Button>
       </div>
     </Page>
@@ -161,7 +161,7 @@ export function WorkspaceLayout() {
           <ResizablePane
             acrossGutter
             animateCollapse
-            label="Resize sidebar"
+            label="调整侧栏宽度"
             storageKey="baton.width.sidebar"
             defaultWidth={228}
             min={200}

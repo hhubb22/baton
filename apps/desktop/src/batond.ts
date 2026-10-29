@@ -125,9 +125,7 @@ export class Batond {
       )
     } catch (error) {
       const code = error instanceof Error && 'code' in error ? error.code : undefined
-      throw new Error(
-        code === 'directory_missing' ? 'This folder no longer exists.' : 'This thread folder is unavailable.',
-      )
+      throw new Error(code === 'directory_missing' ? '此文件夹已不存在。' : '此对话的文件夹不可用。')
     }
   }
 

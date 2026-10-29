@@ -8,6 +8,7 @@ import { AppError } from '../errors.ts'
 import type { DatabaseEffect } from '../database.ts'
 import { recordThreadNotification } from '../desktop-notifications.ts'
 import { directoryAllowed } from '../directories.ts'
+import { canonical } from '../json.ts'
 
 export type DB<A> = DatabaseEffect<A>
 export const failure = (code = 'thread_conflict', status = 409) => new AppError(status, code)
@@ -39,7 +40,9 @@ export const readThread = (employee: string, id: string, lock = false, projectId
       value: Thread
     }>`SELECT jsonb_strip_nulls(to_jsonb(t)-'request_hash'-'exec_wait_until') || jsonb_build_object(
     'node_online',COALESCE(p.online,false),'node_synced',COALESCE(p.synced,false),'node_last_contact_at',p.last_contact_at,
-    'stop_failure',${sql.literal(stopFailure)}) AS value
+    'stop_failure',${sql.literal(stopFailure)},
+    'next_thinking',(SELECT CASE WHEN COALESCE(NULLIF(m.model,''),t.model)=COALESCE(NULLIF(t.next_model,''),t.model) THEN m.thinking END
+      FROM thread_messages m WHERE m.thread_id=t.id AND m.mode='queue' ORDER BY m.created_at DESC,m.id DESC LIMIT 1)) AS value
     FROM threads t LEFT JOIN node_presence p ON p.node_id=t.node_id AND p.employee_id=t.employee_id
     WHERE t.employee_id=${employee} AND t.id=${id} AND (${projectId ?? null}::uuid IS NULL OR t.project_id=${projectId ?? null})`
     if (!rows.length) return yield* Effect.fail(failure('not_found', 404))
@@ -115,8 +118,14 @@ export const normalizeMessage = (input: ThreadMessageInput) =>
   Effect.gen(function* () {
     const mode = input.mode || 'queue'
     const model = input.model || ''
-    if (mode === 'steer' && model) return yield* Effect.fail(failure('model_with_steer', 422))
-    const normalized = { client_message_id: input.client_message_id, content: input.content, mode, model } as const
+    if (mode === 'steer' && (model || input.thinking)) return yield* Effect.fail(failure('model_with_steer', 422))
+    const normalized = {
+      client_message_id: input.client_message_id,
+      content: input.content,
+      mode,
+      model,
+      ...(input.thinking ? { thinking: input.thinking } : {}),
+    } as const
     const body = {
       type: 'thread.command',
       trace_context: { traceparent: `00-${'f'.repeat(32)}-${'f'.repeat(16)}-01`, tracestate: '\\'.repeat(512) },
@@ -159,7 +168,12 @@ export const insertMessage = (t: Thread, input: ThreadMessageInput, source?: Pro
     }>`SELECT jsonb_strip_nulls(to_jsonb(m)-'employee_id') AS value FROM thread_messages m WHERE employee_id=${t.employee_id} AND thread_id=${t.id} AND client_message_id=${m.client_message_id}`
     if (old.length) {
       const saved = old[0]!.value
-      if (saved.content !== m.content || saved.mode !== m.mode || (saved.requested_model || '') !== m.model)
+      if (
+        saved.content !== m.content ||
+        saved.mode !== m.mode ||
+        (saved.requested_model || '') !== m.model ||
+        canonical(saved.thinking ?? null) !== canonical(m.thinking ?? null)
+      )
         return yield* Effect.fail(failure())
       return saved
     }
@@ -171,9 +185,23 @@ export const insertMessage = (t: Thread, input: ThreadMessageInput, source?: Pro
     }
     const selected = m.model || t.next_model || ''
     yield* admission(t.employee_id, t.node_id, t.agent_type, t.working_directory, selected, m.mode)
+    if (m.thinking) {
+      const reports = yield* sql<{ report: RuntimeReport }>`SELECT report FROM node_runtime_reports
+        WHERE employee_id=${t.employee_id} AND node_id=${t.node_id}`
+      const model = reports[0]?.report.agents
+        ?.find((agent) => agent.agent_type === t.agent_type)
+        ?.models?.find((item) => item.id === (selected || t.model))
+      const capability = model?.thinking
+      if (
+        !capability ||
+        capability.id !== m.thinking.id ||
+        !capability.options.some((option) => option.id === m.thinking!.value)
+      )
+        return yield* Effect.fail(failure('thinking_unavailable', 422))
+    }
     const rows = yield* sql<{
       value: ThreadMessage
-    }>`INSERT INTO thread_messages(id,employee_id,thread_id,client_message_id,sender,origin_tool_call_id,content,mode,model,requested_model) VALUES(${uuid()},${t.employee_id},${t.id},${m.client_message_id},${source ? 'project_agent' : 'employee'},${source?.toolCallId ?? null},${m.content},${m.mode},${selected},${m.model}) RETURNING jsonb_strip_nulls(to_jsonb(thread_messages)-'employee_id') AS value`
+    }>`INSERT INTO thread_messages(id,employee_id,thread_id,client_message_id,sender,origin_tool_call_id,content,mode,model,requested_model,thinking) VALUES(${uuid()},${t.employee_id},${t.id},${m.client_message_id},${source ? 'project_agent' : 'employee'},${source?.toolCallId ?? null},${m.content},${m.mode},${selected},${m.model},${m.thinking ? JSON.stringify(m.thinking) : null}::jsonb) RETURNING jsonb_strip_nulls(to_jsonb(thread_messages)-'employee_id') AS value`
     yield* enqueue(t, 'message', { client_message_id: m.client_message_id })
     yield* audit(
       t,

@@ -8,6 +8,7 @@ import type { ThreadsSearch } from '../app/router'
 import { ThreadAccessMenu } from '../app/ThreadAccessMenu'
 import { ThreadDetail, type RecoverAction } from '../app/ThreadDetail'
 import { ThreadModelMenu, type ThreadModelChoice } from '../app/ThreadModelMenu'
+import { modelThinking, ThinkingMenu } from '../app/ThinkingMenu'
 import { ResizablePane } from '../ui/ResizablePane'
 import { useNow } from '../app/useNow'
 import { ClientError } from '../data/client'
@@ -214,16 +215,16 @@ function LocationMenus({
       <Menu
         side="bottom"
         trigger={
-          <Chip icon="device" composer aria-label={device ? `Device: ${device.name}` : 'Choose device'}>
-            {device?.name ?? 'Choose device'}
+          <Chip icon="device" composer aria-label={device ? `设备：${device.name}` : '选择设备'}>
+            {device?.name ?? '选择设备'}
           </Chip>
         }
       >
-        <MenuHeading>Device</MenuHeading>
+        <MenuHeading>设备</MenuHeading>
         {devices.map((entry) => (
           <MenuOption
             key={entry.id}
-            note={entry.connection === 'offline' ? 'Offline' : entry.connection === 'syncing' ? 'Syncing' : undefined}
+            note={entry.connection === 'offline' ? '离线' : entry.connection === 'syncing' ? '正在同步' : undefined}
             selected={entry.id === device?.id}
             onSelect={() => {
               if (entry.id === location?.deviceId) return
@@ -244,16 +245,16 @@ function LocationMenus({
           <Chip
             icon="folder"
             composer
-            aria-label={location?.folder ? `Folder: ${folderName(location.folder)}` : 'Choose folder'}
+            aria-label={location?.folder ? `文件夹：${folderName(location.folder)}` : '选择文件夹'}
           >
-            {location?.folder ? folderName(location.folder) : 'Choose folder'}
+            {location?.folder ? folderName(location.folder) : '选择文件夹'}
           </Chip>
         }
       >
         <input
           autoFocus
-          aria-label="Search folders"
-          placeholder="Search folders…"
+          aria-label="搜索文件夹"
+          placeholder="搜索文件夹…"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           onKeyDown={(event) => {
@@ -261,7 +262,7 @@ function LocationMenus({
           }}
           {...stylex.props(text.small, styles.locationSearch)}
         />
-        {folders.length === 0 && <p {...stylex.props(text.caption, styles.locationEmpty)}>No matching folders</p>}
+        {folders.length === 0 && <p {...stylex.props(text.caption, styles.locationEmpty)}>没有匹配的文件夹</p>}
         {folders.map((folder) => (
           <MenuOption
             key={folder}
@@ -280,7 +281,7 @@ function LocationMenus({
         ))}
         <MenuRule />
         {local.available && <MenuOption onSelect={() => void local.pick()}>{local.label}</MenuOption>}
-        <MenuOption onSelect={onBrowse}>Choose another folder…</MenuOption>
+        <MenuOption onSelect={onBrowse}>选择其他文件夹…</MenuOption>
       </Menu>
     </>
   )
@@ -297,7 +298,7 @@ function ModelMenu({
   onSelect: (choice: AgentChoice) => void
   onUnavailable: (message: string) => void
 }) {
-  const label = choice ? choice.model || 'Default model' : 'No agent'
+  const label = choice ? choice.model || '默认模型' : '没有可用的助手'
   return (
     <ThreadModelMenu
       agents={device?.agents ?? []}
@@ -326,7 +327,7 @@ function ThreadListRow({
   const timer = group.live && thread.runStartedAt !== null ? runTimer(thread.runStartedAt, now) : null
   const statusIcon =
     group.group === 'attention'
-      ? group.status.label === 'Stopped'
+      ? thread.status === 'stopped'
         ? 'stop'
         : 'alert'
       : group.group === 'waiting' || group.group === 'stopRequested'
@@ -339,7 +340,7 @@ function ThreadListRow({
       to="/threads"
       search={(prev: ThreadsSearch) => ({ ...prev, thread: thread.id })}
       aria-current={selected ? 'true' : undefined}
-      aria-label={`${thread.title}, ${group.status.label}, ${project?.name ?? 'No project'}${thread.unread ? ', Unread' : ''}${timer ? `, Running time ${timer}` : ''}, Last activity ${relativeTime(thread.updatedAt, now)}`}
+      aria-label={`${thread.title}, ${group.status.label}, ${project?.name ?? '无项目'}${thread.unread ? '，未读' : ''}${timer ? `，运行时间 ${timer}` : ''}，最近活动 ${relativeTime(thread.updatedAt, now)}`}
       {...stylex.props(text.small, styles.row, selected && styles.rowSelected, focusRing.ring)}
     >
       <span {...stylex.props(styles.unreadSlot)}>{thread.unread && <UnreadDot />}</span>
@@ -347,7 +348,7 @@ function ThreadListRow({
         title={group.status.label}
         {...stylex.props(
           styles.rowIcon,
-          group.group === 'attention' && group.status.label !== 'Stopped' && styles.rowIconAttention,
+          group.group === 'attention' && thread.status !== 'stopped' && styles.rowIconAttention,
           group.group === 'running' && styles.rowIconRunning,
         )}
       >
@@ -356,7 +357,7 @@ function ThreadListRow({
       <span {...stylex.props(styles.title)}>
         <span {...stylex.props(styles.titleText, text.truncate)}>{thread.title}</span>
         {timer && (
-          <span title={`Running time: ${timer}`} {...stylex.props(text.caption, styles.timer)}>
+          <span title={`运行时间：${timer}`} {...stylex.props(text.caption, styles.timer)}>
             <Icon name="clock" size={12} />
             {timer}
           </span>
@@ -365,7 +366,7 @@ function ThreadListRow({
       <span title={project?.name} {...stylex.props(styles.project)}>
         {project && <Avatar name={project.name} hue={project.hue} emoji={project.emoji} />}
       </span>
-      <span title="Last activity" {...stylex.props(text.caption, styles.time)}>
+      <span title="最近活动" {...stylex.props(text.caption, styles.time)}>
         {relativeTime(thread.updatedAt, now)}
       </span>
     </Link>
@@ -386,6 +387,10 @@ export function ThreadsPage() {
   const [error, setError] = useState<string | null>(null)
   const [location, setLocation] = useState<Location | null>(null)
   const [agentChoice, setAgentChoice] = useState<AgentChoice | null>(null)
+  const [thinkingChoice, setThinkingChoice] = useState<{
+    key: string
+    value: import('@baton/protocol').ThinkingSelection | null
+  } | null>(null)
   const [browseDevice, setBrowseDevice] = useState<string | null>(null)
   const [collapsedGroups, setCollapsedGroups] = useState<ThreadGroup[]>([])
 
@@ -394,6 +399,17 @@ export function ThreadsPage() {
   const current = location ?? defaultLocation(allThreads, allDevices, session.data?.defaultDeviceId ?? null)
   const device = allDevices.find((item) => item.id === current?.deviceId)
   const choice = resolveAgent(device, agentChoice)
+  const chosenAgent = device?.agents.find((agent) => agent.kind === choice?.agent)
+  const model = choice?.model || chosenAgent?.defaultModel || ''
+  const thinking = modelThinking(chosenAgent, model)
+  const thinkingKey = JSON.stringify([device?.id, choice?.agent, model])
+  const selectedThinking = thinkingChoice?.key === thinkingKey ? thinkingChoice.value : null
+  const validThinking =
+    thinking &&
+    selectedThinking?.id === thinking.id &&
+    thinking.options.some((option) => option.id === selectedThinking.value)
+      ? selectedThinking
+      : undefined
   const now = useNow(allThreads.some((item) => item.status === 'running') ? 1000 : 60_000)
 
   const setSearch = (patch: Partial<ThreadsSearch>, replace = false) =>
@@ -440,11 +456,11 @@ export function ThreadsPage() {
     const body = draft.trim()
     if (!body || create.isPending) return
     if (!current?.folder || !device) {
-      setError('Choose a folder first.')
+      setError('请先选择文件夹。')
       return
     }
     if (!choice) {
-      setError(`No agent is ready on ${device.name}. Set one up on the device, or choose another folder.`)
+      setError(`${device.name} 上没有可用的助手。请在设备上设置，或选择其他文件夹。`)
       return
     }
     setError(null)
@@ -454,6 +470,7 @@ export function ThreadsPage() {
         folder: current.folder,
         agent: choice.agent,
         model: choice.model,
+        ...(validThinking ? { thinking: validThinking } : {}),
         body,
         clientId: newClientId(),
       },
@@ -462,8 +479,7 @@ export function ThreadsPage() {
           setDraft('')
           setSearch({ thread: operation.targetId, archived: undefined })
         },
-        onError: (cause) =>
-          setError(cause instanceof ClientError ? cause.message : "Couldn't start the thread. Try again."),
+        onError: (cause) => setError(cause instanceof ClientError ? cause.message : '无法开始对话，请重试。'),
       },
     )
   }
@@ -495,19 +511,19 @@ export function ThreadsPage() {
   const filterDevice = allDevices.find((item) => item.id === search.device)
   const filterProject = projects.data?.find((item) => item.id === search.project)
   const filtering = search.device !== undefined || search.project !== undefined || archived
-  const statusLine = error ?? (create.isPending ? 'Saving thread…' : null)
+  const statusLine = error ?? (create.isPending ? '正在保存对话…' : null)
 
   let list
   if (threads.isPending) {
-    list = <p {...stylex.props(text.caption, styles.muted)}>Loading threads…</p>
+    list = <p {...stylex.props(text.caption, styles.muted)}>正在加载对话…</p>
   } else if (threads.isError) {
     list = (
       <Banner
         icon="alert"
-        title="Couldn't load threads"
+        title="无法加载对话"
         action={
           <Button small onClick={() => void threads.refetch()}>
-            Retry
+            重试
           </Button>
         }
       />
@@ -515,18 +531,18 @@ export function ThreadsPage() {
   } else if (allThreads.length === 0) {
     list = (
       <div {...stylex.props(styles.empty)}>
-        <span {...stylex.props(text.bodyMedium)}>No threads yet</span>
+        <span {...stylex.props(text.bodyMedium)}>暂无对话</span>
         <Button small onClick={() => inputRef.current?.focus()}>
-          Write first message
+          发送第一条消息
         </Button>
       </div>
     )
   } else if (groups.length === 0) {
     list = (
       <div {...stylex.props(styles.empty)}>
-        <span {...stylex.props(text.bodyMedium)}>No matching threads</span>
+        <span {...stylex.props(text.bodyMedium)}>没有匹配的对话</span>
         <Button small onClick={() => setSearch({ device: undefined, project: undefined, archived: undefined })}>
-          Clear filters
+          清除筛选
         </Button>
       </div>
     )
@@ -569,30 +585,30 @@ export function ThreadsPage() {
 
   return (
     <div {...stylex.props(styles.layout)}>
-      <Page title="Threads" sizedBody bottomFade>
+      <Page title="对话" sizedBody bottomFade>
         <div {...stylex.props(styles.content)}>
           {devices.isError ? (
             <Banner
               icon="alert"
-              title="Couldn't load devices"
+              title="无法加载设备"
               action={
                 <Button small onClick={() => void devices.refetch()}>
-                  Retry
+                  重试
                 </Button>
               }
             />
           ) : devices.data && allDevices.length === 0 ? (
             <Banner
               icon="device"
-              title="Connect a device first"
-              detail="Threads run on one of your devices. Connect one to start."
+              title="请先连接设备"
+              detail="对话在你的设备上运行。连接设备后即可开始。"
               action={
                 <Button
                   small
                   variant="primary"
                   onClick={() => void navigate({ to: '/devices', search: { connect: true } })}
                 >
-                  Connect device
+                  连接设备
                 </Button>
               }
             />
@@ -602,14 +618,12 @@ export function ThreadsPage() {
                 <div {...stylex.props(styles.composerFrame)}>
                   <Composer
                     roomy
-                    label="New thread message"
+                    label="新对话消息"
                     inputRef={inputRef}
                     value={draft}
                     onChange={setDraft}
                     onSend={onSend}
-                    placeholder={
-                      choice && device ? `Message ${agentNames[choice.agent]}…` : 'Choose a folder and model to start'
-                    }
+                    placeholder={choice && device ? `给 ${agentNames[choice.agent]} 发消息…` : '选择文件夹和模型后开始'}
                     chips={
                       <>
                         <ModelMenu
@@ -621,16 +635,11 @@ export function ThreadsPage() {
                           }}
                           onUnavailable={setError}
                         />
-                        <Chip
-                          icon="reasoning"
-                          composer
-                          caret={false}
-                          disabled
-                          aria-label="Reasoning: agent default"
-                          title="Reasoning uses the agent's default setting"
-                        >
-                          Default
-                        </Chip>
+                        <ThinkingMenu
+                          capability={thinking}
+                          selection={validThinking}
+                          onSelect={(value) => setThinkingChoice({ key: thinkingKey, value })}
+                        />
                         {choice && device && <ThreadAccessMenu agent={choice.agent} user={device.commandAccess.user} />}
                       </>
                     }
@@ -657,9 +666,9 @@ export function ThreadsPage() {
           )}
           <div {...stylex.props(styles.threadList)}>
             <div {...stylex.props(styles.filters)}>
-              <Menu trigger={<Chip icon="laptop">{filterDevice?.name ?? 'All devices'}</Chip>}>
+              <Menu trigger={<Chip icon="laptop">{filterDevice?.name ?? '所有设备'}</Chip>}>
                 <MenuOption selected={!search.device} onSelect={() => setSearch({ device: undefined })}>
-                  All devices
+                  所有设备
                 </MenuOption>
                 {allDevices.map((item) => (
                   <MenuOption
@@ -672,20 +681,20 @@ export function ThreadsPage() {
                 ))}
               </Menu>
               {projects.isError ? (
-                <span {...stylex.props(text.caption, styles.muted)}>Projects unavailable</span>
+                <span {...stylex.props(text.caption, styles.muted)}>无法加载项目</span>
               ) : (
                 <Menu
                   trigger={
                     <Chip icon="projects">
-                      {search.project === 'none' ? 'No project' : (filterProject?.name ?? 'All projects')}
+                      {search.project === 'none' ? '未关联项目' : (filterProject?.name ?? '所有项目')}
                     </Chip>
                   }
                 >
                   <MenuOption selected={!search.project} onSelect={() => setSearch({ project: undefined })}>
-                    All projects
+                    所有项目
                   </MenuOption>
                   <MenuOption selected={search.project === 'none'} onSelect={() => setSearch({ project: 'none' })}>
-                    No project
+                    未关联项目
                   </MenuOption>
                   {projects.data?.map((item) => (
                     <MenuOption
@@ -698,18 +707,17 @@ export function ThreadsPage() {
                   ))}
                 </Menu>
               )}
-              <Menu trigger={<Chip icon="archive">{archived ? 'Archived' : 'Active'}</Chip>}>
+              <Menu trigger={<Chip icon="archive">{archived ? '已归档' : '进行中'}</Chip>}>
                 <MenuOption selected={!archived} onSelect={() => setSearch({ archived: undefined })}>
-                  Active
+                  进行中
                 </MenuOption>
                 <MenuOption selected={archived} onSelect={() => setSearch({ archived: true })}>
-                  Archived
+                  已归档
                 </MenuOption>
               </Menu>
               {threads.data && (
                 <span {...stylex.props(text.caption, styles.count)}>
-                  {filtered.length === 1 ? '1 thread' : `${filtered.length} threads`}
-                  {filtering && ' shown'}
+                  {filtering ? `显示 ${filtered.length} 条对话` : `${filtered.length} 条对话`}
                 </span>
               )}
             </div>
@@ -719,7 +727,7 @@ export function ThreadsPage() {
       </Page>
       {search.thread && (
         <ResizablePane
-          label="Resize thread panel"
+          label="调整对话面板宽度"
           storageKey="baton.width.thread-panel"
           defaultWidth={440}
           min={280}

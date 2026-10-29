@@ -13,14 +13,14 @@ interface ThreadAccess {
 export function threadAccess(agent: AgentKind, user: string): ThreadAccess {
   switch (agent) {
     case 'codex':
-      return { label: 'Sandboxed', detail: 'Edits files in this folder. No network.' }
+      return { label: '沙箱', detail: '可以修改此文件夹内的文件，不能联网。' }
     case 'cursor':
-      return { label: 'Sandboxed', detail: "Runs commands in Cursor's sandbox." }
+      return { label: '沙箱', detail: '在 Cursor 沙箱中运行命令。' }
     case 'pi':
     case 'kiro':
       return {
-        label: 'No sandbox',
-        detail: `${agentNames[agent]} runs commands as ${user || 'your user'} and can reach files outside this folder.`,
+        label: '无沙箱',
+        detail: `${agentNames[agent]} 以${user ? ` ${user} ` : '当前用户'}身份运行命令，可以访问此文件夹以外的文件。`,
       }
   }
 }

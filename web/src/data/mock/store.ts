@@ -362,25 +362,25 @@ export class MockStore {
 
   device(id: ID): Device {
     const device = this.world.devices.find((item) => item.id === id)
-    if (!device) throw new ClientError('notFound', `Device ${id} not found`)
+    if (!device) throw new ClientError('notFound', `找不到设备 ${id}`)
     return device
   }
 
   thread(id: ID): Thread {
     const thread = this.world.threads.find((item) => item.id === id)
-    if (!thread) throw new ClientError('notFound', `Thread ${id} not found`)
+    if (!thread) throw new ClientError('notFound', `找不到对话 ${id}`)
     return thread
   }
 
   operation(id: ID): Operation {
     const operation = this.world.operations.find((item) => item.id === id)
-    if (!operation) throw new ClientError('notFound', `Operation ${id} not found`)
+    if (!operation) throw new ClientError('notFound', `找不到操作 ${id}`)
     return operation
   }
 
   project(id: ID): Project {
     const project = this.world.projects.find((item) => item.id === id)
-    if (!project) throw new ClientError('notFound', `Project ${id} not found`)
+    if (!project) throw new ClientError('notFound', `找不到项目 ${id}`)
     return project
   }
 
@@ -393,7 +393,7 @@ export class MockStore {
   signIn(username: string, password: string) {
     // 模拟登录接受任意非空用户名和密码，密码 `wrong` 用来演示登录失败。
     if (username.trim() === '' || password === '' || password === 'wrong') {
-      throw new ClientError('unauthorized', 'Invalid username or password')
+      throw new ClientError('unauthorized', '用户名或密码错误')
     }
     this.world.session.account = { id: 'emp-kaken', name: 'Kaken He', username: username.trim() }
     this.world.session.ended = null
@@ -448,7 +448,7 @@ export class MockStore {
   private repeated(clientId: string, body: string) {
     const existing = this.clientIds.get(clientId)
     if (!existing) return null
-    if (existing.body !== body) throw new ClientError('conflict', 'This message was already sent with different text')
+    if (existing.body !== body) throw new ClientError('conflict', '此消息已使用不同内容发送')
     return this.operation(existing.opId)
   }
 
@@ -474,6 +474,7 @@ export class MockStore {
       folder: string
       agent: AgentKind
       model: string
+      thinking?: import('@baton/protocol').ThinkingSelection
       executionTimeoutSeconds?: number
       body: string
     },
@@ -484,14 +485,12 @@ export class MockStore {
     if (repeated) return repeated
     const device = this.device(deviceId)
     const agent = device.agents.find((item) => item.kind === kind)
-    if (body.trim() === '') throw new ClientError('invalid', 'Message is empty')
+    if (body.trim() === '') throw new ClientError('invalid', '消息不能为空')
     if (!device.folders.some((root) => insideFolder(folder, root))) {
-      throw new ClientError('invalid', `${folder} is outside the allowed folders on ${device.name}`)
+      throw new ClientError('invalid', `${folder} 不在 ${device.name} 允许访问的文件夹内`)
     }
-    if (!agent || agent.problem)
-      throw new ClientError('invalid', `${agentNames[kind]} is not available on ${device.name}`)
-    if (!agent.models.includes(model))
-      throw new ClientError('invalid', `${model} is not available for ${agentNames[kind]}`)
+    if (!agent || agent.problem) throw new ClientError('invalid', `${device.name} 上的 ${agentNames[kind]} 不可用`)
+    if (!agent.models.includes(model)) throw new ClientError('invalid', `${agentNames[kind]} 无法使用 ${model}`)
 
     const now = this.scheduler.now()
     const thread: Thread = {
@@ -501,6 +500,7 @@ export class MockStore {
       folder,
       agent: kind,
       model,
+      thinking: input.thinking ?? null,
       executionTimeoutSeconds: input.executionTimeoutSeconds ?? 7200,
       projectId: null,
       status: 'idle',
@@ -529,30 +529,37 @@ export class MockStore {
 
   // 停止、归档或无法继续的 Thread 不再接收消息，返回给页面的原因和恢复办法一致。
   private ensureWritable(thread: Thread) {
-    if (thread.status === 'archived') throw new ClientError('invalid', "Archived threads can't receive messages")
-    if (thread.pending === 'archive') throw new ClientError('invalid', 'This thread is being archived')
+    if (thread.status === 'archived') throw new ClientError('invalid', '已归档的对话无法接收消息')
+    if (thread.pending === 'archive') throw new ClientError('invalid', '对话正在归档')
     if (thread.status !== 'stopped' || !thread.stop) return
     const ended =
       thread.stop.kind === 'historyLost' || thread.stop.kind === 'folderMissing' || thread.stop.kind === 'startFailed'
     if (ended || (thread.stop.kind === 'interrupted' && !this.agentOf(thread)?.abilities.resume)) {
-      throw new ClientError('invalid', "This thread can't continue. Start a new thread.")
+      throw new ClientError('invalid', '此对话无法继续，请新建对话。')
     }
   }
 
-  sendMessage(threadId: ID, body: string, clientId: string, mode: SendMode = 'next'): Operation {
+  sendMessage(
+    threadId: ID,
+    body: string,
+    clientId: string,
+    mode: SendMode = 'next',
+    thinking?: import('@baton/protocol').ThinkingSelection,
+  ): Operation {
     const repeated = this.repeated(clientId, body)
     if (repeated) return repeated
     const thread = this.thread(threadId)
     this.ensureWritable(thread)
-    if (body.trim() === '') throw new ClientError('invalid', 'Message is empty')
+    if (body.trim() === '') throw new ClientError('invalid', '消息不能为空')
     if (mode === 'now' && !this.agentOf(thread)?.abilities.steer) {
       throw new ClientError(
         'invalid',
-        `${thread.agent ? agentNames[thread.agent] : 'Command'} can't read messages during a reply. Send it next.`,
+        `${thread.agent ? agentNames[thread.agent] : '命令'} 回复时无法读取消息，请选择下一条发送。`,
       )
     }
 
     const message = this.userMessage(threadId, body)
+    if (mode !== 'now') thread.thinking = thinking ?? null
     const operation = this.createOperation('sendMessage', threadId, message.id)
     this.clientIds.set(clientId, { opId: operation.id, body })
     this.emit('messages', 'operations')
@@ -737,10 +744,10 @@ export class MockStore {
 
   cancelMessage(messageId: ID): Message {
     const message = this.world.messages.find((item) => item.id === messageId)
-    if (!message || message.role !== 'user') throw new ClientError('notFound', `Message ${messageId} not found`)
+    if (!message || message.role !== 'user') throw new ClientError('notFound', `找不到消息 ${messageId}`)
     if (message.delivery === 'withdrawn') return message
     if (message.delivery !== 'queued' && message.delivery !== 'waitingDevice') {
-      throw new ClientError('conflict', 'This message was already sent')
+      throw new ClientError('conflict', '此消息已发送')
     }
     const thread = this.thread(message.threadId)
     message.delivery = 'withdrawn'
@@ -758,7 +765,7 @@ export class MockStore {
       thread.pending ||
       !thread.pendingQuestions?.some((item) => item.request_id === answer.request_id)
     )
-      throw new ClientError('conflict', 'This question is closed.')
+      throw new ClientError('conflict', '问题已关闭。')
     thread.pendingQuestions = thread.pendingQuestions.filter((item) => item.request_id !== answer.request_id)
     this.emit('threads')
     return thread
@@ -772,7 +779,7 @@ export class MockStore {
       executionTimeoutSeconds <= 0 ||
       executionTimeoutSeconds > 2147483647
     )
-      throw new ClientError('invalid', 'Enter a whole number from 1 to 2147483647.')
+      throw new ClientError('invalid', '请输入 1 至 2147483647 之间的整数。')
     thread.executionTimeoutSeconds = executionTimeoutSeconds
     thread.updatedAt = this.scheduler.now()
     this.emit('threads')
@@ -786,13 +793,11 @@ export class MockStore {
     const name = thread.agent ? agentNames[thread.agent] : 'Command'
     if (thread.model === model) return thread
     if (!agent?.abilities.switchModel) {
-      throw new ClientError(
-        'invalid',
-        `${name} cannot switch models in this thread. Start a new thread to choose another.`,
-      )
+      throw new ClientError('invalid', `${name} 无法在此对话中切换模型，请新建对话。`)
     }
-    if (!agent.models.includes(model)) throw new ClientError('invalid', `${model} is not available for ${name}`)
+    if (!agent.models.includes(model)) throw new ClientError('invalid', `${name} 无法使用 ${model}`)
     thread.model = model
+    thread.thinking = null
     thread.updatedAt = this.scheduler.now()
     this.emit('threads')
     return thread
@@ -800,12 +805,9 @@ export class MockStore {
 
   stopThread(threadId: ID): Operation {
     const thread = this.thread(threadId)
-    if (thread.status === 'archived') throw new ClientError('invalid', 'This thread is archived')
+    if (thread.status === 'archived') throw new ClientError('invalid', '对话已归档')
     if (thread.status === 'running' && !this.agentOf(thread)?.abilities.stop) {
-      throw new ClientError(
-        'invalid',
-        `${thread.agent ? agentNames[thread.agent] : 'Command'} does not support stopping from Baton`,
-      )
+      throw new ClientError('invalid', `无法从 Baton 停止 ${thread.agent ? agentNames[thread.agent] : '命令'}`)
     }
     const existing = this.pendingEnd(thread)
     if (existing) return existing
@@ -831,12 +833,9 @@ export class MockStore {
 
   archiveThread(threadId: ID): Operation {
     const thread = this.thread(threadId)
-    if (thread.status === 'archived') throw new ClientError('invalid', 'This thread is already archived')
+    if (thread.status === 'archived') throw new ClientError('invalid', '对话已归档')
     if (thread.status === 'running' && !this.agentOf(thread)?.abilities.stop) {
-      throw new ClientError(
-        'invalid',
-        `Wait for ${thread.agent ? agentNames[thread.agent] : 'Command'} to finish, then archive this thread`,
-      )
+      throw new ClientError('invalid', `请等待 ${thread.agent ? agentNames[thread.agent] : '命令'} 完成后归档对话`)
     }
     const operation = this.createOperation('archiveThread', threadId)
     this.emit('operations')
@@ -928,15 +927,15 @@ export class MockStore {
     const thread = this.thread(threadId)
     const device = this.device(thread.deviceId)
     if (thread.status !== 'stopped' || thread.stop?.kind !== 'interrupted') {
-      throw new ClientError('invalid', 'This thread does not need resuming')
+      throw new ClientError('invalid', '此对话无需恢复')
     }
     if (!this.agentOf(thread)?.abilities.resume) {
       throw new ClientError(
         'invalid',
-        `${thread.agent ? agentNames[thread.agent] : 'Command'} on ${device.name} does not support resuming`,
+        `${device.name} 上的 ${thread.agent ? agentNames[thread.agent] : '命令'} 不支持恢复`,
       )
     }
-    if (!this.online(device.id)) throw new ClientError('invalid', `Reconnect ${device.name} to resume this thread`)
+    if (!this.online(device.id)) throw new ClientError('invalid', `请重新连接 ${device.name} 后恢复对话`)
     const operation = this.createOperation('resumeThread', threadId)
     this.emit('operations')
 
@@ -957,7 +956,7 @@ export class MockStore {
 
   handleItem(itemId: ID, decision: ItemDecision, revision: number): Operation {
     const item = this.world.inbox.find((entry) => entry.id === itemId)
-    if (!item) throw new ClientError('notFound', 'This question is no longer available.')
+    if (!item) throw new ClientError('notFound', '此问题已不可用。')
     const project = this.project(item.projectId)
     const elsewhere = this.world.answeredElsewhere[itemId]
     if (elsewhere !== undefined && item.status === 'pending') {
@@ -979,21 +978,21 @@ export class MockStore {
       this.emit('inbox', 'projects', 'operations')
       return operation
     }
-    if (project.status === 'archived') throw new ClientError('invalid', 'This project is archived.')
+    if (project.status === 'archived') throw new ClientError('invalid', '项目已归档。')
     if (decision.kind === 'answer') {
-      if (item.kind === 'system') throw new ClientError('invalid', 'Go to the project to retry.')
+      if (item.kind === 'system') throw new ClientError('invalid', '请前往项目重试。')
       if (decision.option !== null && !item.options.includes(decision.option)) {
-        throw new ClientError('invalid', 'Choose one of the available options.')
+        throw new ClientError('invalid', '请选择一个可用选项。')
       }
-      if (decision.option === null && !item.allowText) throw new ClientError('invalid', 'Choose an option to reply.')
-      if (decision.option === null && !decision.note.trim()) throw new ClientError('invalid', 'Enter a reply.')
+      if (decision.option === null && !item.allowText) throw new ClientError('invalid', '请选择一个选项。')
+      if (decision.option === null && !decision.note.trim()) throw new ClientError('invalid', '请输入回复。')
       if (new TextEncoder().encode(decision.note).length > 4096) {
-        throw new ClientError('invalid', 'Keep your reply within 4 KB of text.')
+        throw new ClientError('invalid', '回复不能超过 4 KB。')
       }
     }
     if (this.world.failItemSaves > 0) {
       this.world.failItemSaves -= 1
-      throw new ClientError('unavailable', 'Your reply could not be saved. Your choice and note are kept. Try again.')
+      throw new ClientError('unavailable', '无法保存回复，选择和备注已保留。请重试。')
     }
     this.saveDecision(item, decision)
     const operation = this.createOperation('answerItem', itemId)
@@ -1050,13 +1049,10 @@ ${response}`,
 
   retryProject(projectId: ID) {
     const project = this.project(projectId)
-    if (project.status !== 'active') throw new ClientError('invalid', 'Resume this project before retrying.')
+    if (project.status !== 'active') throw new ClientError('invalid', '请先恢复项目，再重试。')
     if (project.agent.state !== 'blocked') return project
     if (!this.pickDevice(project)) {
-      throw new ClientError(
-        'invalid',
-        'No device is ready. Sign in on an online device, then try again. Your messages are saved.',
-      )
+      throw new ClientError('invalid', '没有可用设备。请在在线设备上登录后重试，消息已保存。')
     }
     for (const item of this.world.inbox) {
       if (item.projectId !== projectId || item.kind !== 'system' || item.status !== 'pending') continue
@@ -1159,7 +1155,7 @@ ${response}`,
 
   private onlineDevice(deviceId: ID) {
     const device = this.device(deviceId)
-    if (device.connection !== 'online') throw new ClientError('unavailable', 'Reconnect this device to continue.')
+    if (device.connection !== 'online') throw new ClientError('unavailable', '请重新连接此设备后继续。')
     return device
   }
 
@@ -1168,7 +1164,7 @@ ${response}`,
     path = path.trim()
     const absolutePath = path.split(separator(path)).join('/')
     if (!absolutePath.startsWith('/') && !(/^[a-z]:/i.test(absolutePath) && absolutePath[2] === '/')) {
-      throw new ClientError('invalid', 'Enter an absolute folder path.')
+      throw new ClientError('invalid', '请输入文件夹的绝对路径。')
     }
     if (!device.folders.includes(path)) device.folders.push(path)
     const directories = (this.world.directories[deviceId] ??= [])
@@ -1180,7 +1176,7 @@ ${response}`,
   removeDeviceFolder(deviceId: ID, path: string): Device {
     const device = this.onlineDevice(deviceId)
     path = path.trim()
-    if (!device.folders.includes(path)) throw new ClientError('notFound', 'This folder is no longer shared.')
+    if (!device.folders.includes(path)) throw new ClientError('notFound', '此文件夹已不再共享。')
     device.folders = device.folders.filter((folder) => folder !== path)
     device.repos = device.repos.filter((repo) => device.folders.some((root) => insideFolder(repo, root)))
     this.emit('devices', 'files')
@@ -1189,7 +1185,7 @@ ${response}`,
 
   startSubscriptionLogin(deviceId: ID, provider: string): SubscriptionLoginChallenge {
     const device = this.onlineDevice(deviceId)
-    if (!device.hasRuntime) throw new ClientError('unavailable', 'Install the project assistant on this device first.')
+    if (!device.hasRuntime) throw new ClientError('unavailable', '请先在此设备上安装项目助手。')
     return {
       provider: subscriptionName(provider),
       verificationUri: provider.toLowerCase().includes('xai')
@@ -1222,7 +1218,7 @@ ${response}`,
 
   completeSubscriptionLogin(deviceNameOrId: string, provider: string) {
     const device = this.world.devices.find((item) => item.id === deviceNameOrId || item.name === deviceNameOrId)
-    if (!device) throw new ClientError('notFound', 'Device not found')
+    if (!device) throw new ClientError('notFound', '找不到设备')
     provider = subscriptionName(provider)
     const subscription = device.subscriptions.find((item) => item.provider === provider)
     if (subscription) Object.assign(subscription, { signedIn: true, status: 'available' })
@@ -1248,7 +1244,7 @@ ${response}`,
 
   createEnrollment(nodeId?: ID): EnrollmentRecord {
     if (nodeId !== undefined && this.device(nodeId).credentialState === 'revoked')
-      throw new ClientError('conflict', 'Device disconnected')
+      throw new ClientError('conflict', '设备已断开')
     this.sequence += 1
     const record: EnrollmentRecord = {
       id: `enr-${this.sequence}`,
@@ -1266,7 +1262,7 @@ ${response}`,
 
   enrollment(id: ID): EnrollmentRecord {
     const record = this.world.enrollments.find((item) => item.id === id)
-    if (!record) throw new ClientError('notFound', `Setup code ${id} not found`)
+    if (!record) throw new ClientError('notFound', `找不到设置码 ${id}`)
     return record
   }
 
@@ -1286,7 +1282,7 @@ ${response}`,
     if (!record) return
     if (record.targetNodeId !== undefined) {
       const device = this.device(record.targetNodeId)
-      if (device.credentialState === 'revoked') throw new ClientError('conflict', 'Device disconnected')
+      if (device.credentialState === 'revoked') throw new ClientError('conflict', '设备已断开')
       device.credentialState = 'active'
       record.state = 'connected'
       record.deviceId = device.id
@@ -1385,7 +1381,7 @@ ${response}`,
     const existing = this.projectClientIds.get(clientId)
     if (existing) return this.project(existing.id)
     const name = input.name.trim()
-    if (name === '') throw new ClientError('invalid', 'Enter a project name.')
+    if (name === '') throw new ClientError('invalid', '请输入项目名称。')
     if (
       input.sourceNodeId
         ? !this.world.devices.some((device) => device.id === input.sourceNodeId) ||
@@ -1394,11 +1390,11 @@ ${response}`,
         : !Object.hasOwn(assistantModels, input.subscription) ||
           !assistantModels[input.subscription].includes(input.model)
     ) {
-      throw new ClientError('invalid', `${input.model} is not available with ${input.subscription}`)
+      throw new ClientError('invalid', `${input.subscription} 无法使用 ${input.model}`)
     }
     if (this.world.failProjectSaves > 0) {
       this.world.failProjectSaves -= 1
-      throw new ClientError('unavailable', 'Baton could not save this project')
+      throw new ClientError('unavailable', 'Baton 无法保存此项目')
     }
     const used = new Set(this.world.projects.map((item) => item.hue))
     const project: Project = {
@@ -1423,7 +1419,7 @@ ${response}`,
   }
 
   private ensureProjectWritable(project: Project) {
-    if (project.status === 'archived') throw new ClientError('invalid', 'This project is archived')
+    if (project.status === 'archived') throw new ClientError('invalid', '项目已归档')
   }
 
   updateProject(projectId: ID, patch: ProjectPatch): Project {
@@ -1436,7 +1432,7 @@ ${response}`,
           !fields.includes(key) || (key !== 'memoryEmbedding' && key !== 'sourceNodeId' && typeof value !== 'string'),
       )
     ) {
-      throw new ClientError('invalid', 'Invalid project settings.')
+      throw new ClientError('invalid', '项目设置无效。')
     }
     const embedding = patch.memoryEmbedding
     const config = embedding
@@ -1447,7 +1443,7 @@ ${response}`,
         }
       : null
     if (config && (!config.base_url || !config.model)) {
-      throw new ClientError('invalid', 'Enter an embedding base URL and model.')
+      throw new ClientError('invalid', '请输入嵌入模型的基础 URL 和模型名称。')
     }
     const previous = project.memoryEmbedding
     const memoryEmbedding =
@@ -1468,7 +1464,7 @@ ${response}`,
     const next = { ...project, ...patch }
     next.name = next.name.trim()
     next.goal = next.goal.trim()
-    if (!next.name) throw new ClientError('invalid', 'Enter a project name.')
+    if (!next.name) throw new ClientError('invalid', '请输入项目名称。')
     if (
       next.sourceNodeId
         ? !this.world.devices.some((device) => device.id === next.sourceNodeId) ||
@@ -1476,11 +1472,11 @@ ${response}`,
           !next.model.trim()
         : !Object.hasOwn(assistantModels, next.subscription) || !assistantModels[next.subscription].includes(next.model)
     ) {
-      throw new ClientError('invalid', `${next.model} is not available with ${next.subscription}`)
+      throw new ClientError('invalid', `${next.subscription} 无法使用 ${next.model}`)
     }
     if (this.world.failSettingsSaves > 0) {
       this.world.failSettingsSaves -= 1
-      throw new ClientError('unavailable', 'Baton could not save these settings. Try again.')
+      throw new ClientError('unavailable', 'Baton 无法保存设置，请重试。')
     }
     const passive: Pick<ProjectPatch, 'name' | 'goal'> = {}
     if (next.name !== project.name) passive.name = next.name
@@ -1508,12 +1504,12 @@ ${response}`,
 
   setProjectStatus(projectId: ID, status: Project['status']): Project {
     const project = this.project(projectId)
-    if (!['active', 'paused', 'archived'].includes(status)) throw new ClientError('invalid', 'Unknown project status.')
+    if (!['active', 'paused', 'archived'].includes(status)) throw new ClientError('invalid', '项目状态未知。')
     if (project.status === status) return project
     this.ensureProjectWritable(project)
     if (this.world.failStatusSaves > 0) {
       this.world.failStatusSaves -= 1
-      throw new ClientError('unavailable', 'Baton could not save the project status. Try again.')
+      throw new ClientError('unavailable', 'Baton 无法保存项目状态，请重试。')
     }
     project.status = status
     if (status === 'active') {
@@ -1543,7 +1539,7 @@ ${response}`,
             note: '',
             actor: this.world.session.account?.name ?? 'You',
             at: this.scheduler.now(),
-            reason: 'Project archived',
+            reason: '项目已归档',
             inputId: null,
           }
         }
@@ -1579,20 +1575,19 @@ ${response}`,
     const fingerprint = JSON.stringify([projectId, noteId, body, version])
     const existing = this.memoryClientIds.get(clientId)
     if (existing) {
-      if (existing.fingerprint !== fingerprint)
-        throw new ClientError('conflict', 'This memory request was already saved with different content.')
+      if (existing.fingerprint !== fingerprint) throw new ClientError('conflict', '此记忆请求已使用不同内容保存。')
       return structuredClone(existing.result)
     }
-    if (typeof body !== 'string' || !body.trim()) throw new ClientError('invalid', 'Enter a memory note.')
+    if (typeof body !== 'string' || !body.trim()) throw new ClientError('invalid', '请输入记忆内容。')
     if (!clientId || (noteId === null ? version !== null : !Number.isInteger(version) || (version ?? 0) < 1)) {
-      throw new ClientError('invalid', 'A memory ID and its current version are required when editing.')
+      throw new ClientError('invalid', '编辑时需要记忆 ID 和当前版本。')
     }
     let note =
       noteId === null ? undefined : this.world.memory.find((item) => item.id === noteId && item.projectId === projectId)
-    if (noteId !== null && !note) throw new ClientError('notFound', 'This memory note is no longer available.')
+    if (noteId !== null && !note) throw new ClientError('notFound', '此记忆已不可用。')
     if (this.world.failMemorySaves > 0) {
       this.world.failMemorySaves -= 1
-      throw new ClientError('unavailable', 'Baton could not save this memory note. Try again.')
+      throw new ClientError('unavailable', 'Baton 无法保存记忆，请重试。')
     }
     if (note) {
       const elsewhere = this.world.memoryElsewhere[note.id]
@@ -1635,16 +1630,16 @@ ${response}`,
   changeMemory(input: import('../types').ChangeMemoryInput): MemorySave {
     this.ensureProjectWritable(this.project(input.projectId))
     const note = this.world.memory.find((n) => n.projectId === input.projectId && n.id === input.noteId)
-    if (!note) throw new ClientError('notFound', 'Memory not found.')
+    if (!note) throw new ClientError('notFound', '找不到记忆。')
     const fingerprint = JSON.stringify(input)
     const saved = this.memoryClientIds.get(input.clientId)
     if (saved) {
-      if (saved.fingerprint !== fingerprint) throw new ClientError('conflict', 'Request changed.')
+      if (saved.fingerprint !== fingerprint) throw new ClientError('conflict', '请求已更改。')
       return structuredClone(saved.result)
     }
     if (note.version !== input.version) return { state: 'conflict', note }
     if (input.action === 'restore' && (!note.suppressionId || note.suppressionId !== input.suppressionId))
-      throw new ClientError('conflict', 'Memory changed.')
+      throw new ClientError('conflict', '记忆已更改。')
     note.status = input.action === 'retire' ? 'retired' : 'active'
     note.effective = input.action === 'restore'
     note.suppressionId = input.action === 'retire' ? this.nextId('suppression') : null
@@ -1715,11 +1710,11 @@ ${response}`,
     this.ensureProjectWritable(project)
     const existing = this.projectClientIds.get(clientId)
     if (existing) {
-      if (existing.body !== body) throw new ClientError('conflict', 'This message was already sent with different text')
+      if (existing.body !== body) throw new ClientError('conflict', '此消息已使用不同内容发送')
       const entry = this.world.projectEntries.find((item) => item.id === existing.id && item.projectId === projectId)
       if (entry) return entry
     }
-    if (body.trim() === '') throw new ClientError('invalid', 'Message is empty')
+    if (body.trim() === '') throw new ClientError('invalid', '消息不能为空')
     const entry: UserEntry = {
       id: this.nextId('ent'),
       projectId,
@@ -1746,7 +1741,7 @@ ${response}`,
     const project = this.project(projectId)
     this.ensureProjectWritable(project)
     if (project.agent.state === 'stopping') return project
-    if (project.agent.state !== 'running') throw new ClientError('invalid', 'The project assistant is not running')
+    if (project.agent.state !== 'running') throw new ClientError('invalid', '项目助手未运行')
     this.cancelAssistant(project, false)
     // 停止前发出、还没被读到的消息一起撤回；停止请求之后发的消息在停下后读取。
     for (const entry of this.unread(project)) entry.delivery = 'withdrawn'
@@ -1792,9 +1787,9 @@ ${response}`,
     if (project.sourceNodeId) {
       const device = this.world.devices.find((item) => item.id === project.sourceNodeId)
       const connection = device?.modelConnections?.find((item) => `api-${item.id}` === project.subscription)
-      return connection ? `Waiting for ${connection.name} on ${device!.name}` : 'Choose another model source'
+      return connection ? `等待 ${device!.name} 上的 ${connection.name}` : '请选择其他模型来源'
     }
-    return `An online device with ${project.subscription} signed in`
+    return `等待已登录 ${project.subscription} 的在线设备`
   }
 
   private unread(project: Project) {
@@ -1838,8 +1833,8 @@ ${response}`,
       this.world.devices.find((item) => item.id === previous)
     if (!from || from.id === chosen.id || chosen.id === previous) return
     const block = assistantBlock(from, project.subscription)
-    const reason = block ? blockReason(from, block, project.subscription) : `${from.name} disconnected`
-    this.pushNote(project, `Switched to ${chosen.name} · ${reason}`)
+    const reason = block ? blockReason(from, block, project.subscription) : `${from.name} 已断开连接`
+    this.pushNote(project, `已切换到 ${chosen.name} · ${reason}`)
   }
 
   // 有没读的消息或 Thread 结果时开始一次运行。你停止后，Thread 结果等你下一条消息再一起读。
@@ -1891,13 +1886,13 @@ ${response}`,
   }
 
   private readingText(inputs: UserEntry[], replies: Reply[]) {
-    if (inputs.length > 0) return inputs.length === 1 ? 'Reading your message…' : `Reading ${inputs.length} messages…`
-    if (replies.length === 0) return 'Picking up where it left off…'
-    if (replies.length > 1) return `Reading ${replies.length} replies…`
+    if (inputs.length > 0) return inputs.length === 1 ? '正在读取你的消息…' : `正在读取 ${inputs.length} 条消息…`
+    if (replies.length === 0) return '正在继续处理…'
+    if (replies.length > 1) return `正在读取 ${replies.length} 条回复…`
     const thread = this.world.threads.find((item) => item.id === replies[0]?.threadId)
     const device = this.world.devices.find((item) => item.id === thread?.deviceId)
-    if (!thread || !device) return 'Reading a reply…'
-    return `Reading ${thread.agent ? agentNames[thread.agent] : 'Command'}'s reply…`
+    if (!thread || !device) return '正在读取回复…'
+    return `正在读取 ${thread.agent ? agentNames[thread.agent] : '命令'} 的回复…`
   }
 
   private respond(project: Project, inputs: UserEntry[], replies: Reply[]) {
@@ -2135,7 +2130,7 @@ ${response}`,
   private failOnce(key: string) {
     if (!this.world.failingReads.includes(key)) return
     this.world.failingReads = this.world.failingReads.filter((item) => item !== key)
-    throw new ClientError('unavailable', 'The device did not return this content')
+    throw new ClientError('unavailable', '设备未返回此内容')
   }
 
   // 文件预览只读允许的目录，每片最多 previewLimit 字节，二进制文件不传内容。
@@ -2156,7 +2151,7 @@ ${response}`,
     for (const byte of bytes) hash = (Math.imul(hash, 31) + byte) | 0
     const version = `${bytes.length}:${hash}`
     if (continuation && continuation.version !== version)
-      throw new ClientError('conflict', 'The file changed. Reload it to continue reading.')
+      throw new ClientError('conflict', '文件已更改，请重新加载后继续阅读。')
     const offset = continuation?.offset ?? 0
     if (
       !Number.isSafeInteger(offset) ||
@@ -2164,7 +2159,7 @@ ${response}`,
       offset > bytes.length ||
       (offset < bytes.length && (bytes[offset] & 0xc0) === 0x80)
     )
-      throw new ClientError('invalid', 'The file offset must be at a complete text character.')
+      throw new ClientError('invalid', '文件偏移量必须位于完整字符的边界。')
     let end = Math.min(offset + previewLimit, bytes.length)
     while (end < bytes.length && (bytes[end] & 0xc0) === 0x80) end -= 1
     const content = new TextDecoder().decode(bytes.slice(offset, end))
@@ -2185,7 +2180,7 @@ ${response}`,
   // 中心保存的过程与设备连接和本地历史无关。
   readTrace(messageId: ID, cursor?: string): Trace {
     if (!this.world.messages.some((item) => item.id === messageId))
-      throw new ClientError('notFound', `Message ${messageId} not found`)
+      throw new ClientError('notFound', `找不到消息 ${messageId}`)
     this.failOnce(`trace:${messageId}`)
     const steps = this.world.traces[messageId] ?? []
     if (steps.length === 0) return { state: 'unavailable', messageId, reason: 'missing' }

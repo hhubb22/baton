@@ -498,7 +498,18 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
           })
           const threadId = ThreadId.make(config.thread_id)
           const agentType = config.agent_type
-          const selection = options.model(message.model === undefined ? config : { ...config, model: message.model })
+          const selectedModel = options.model(
+            message.model === undefined ? config : { ...config, model: message.model },
+          )
+          const selection = message.thinking
+            ? {
+                ...selectedModel,
+                options: [
+                  ...(selectedModel.options ?? []).filter((option) => option.id !== message.thinking!.id),
+                  { id: message.thinking.id, value: message.thinking.value },
+                ],
+              }
+            : selectedModel
           const policy = options.runtimePolicy((yield* authorize(config)).cwd)
           if (message.mode === 'steer') {
             if (!options.steer) return yield* error(`${label} does not support steer`)

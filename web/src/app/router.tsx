@@ -15,9 +15,9 @@ import { WorkspaceLayout } from './WorkspaceLayout'
 
 function NotFound() {
   return (
-    <Page title="Page not found">
+    <Page title="页面不存在">
       <Column>
-        <p {...stylex.props(text.body, text.muted)}>Check the address, or pick a page from the sidebar.</p>
+        <p {...stylex.props(text.body, text.muted)}>请检查地址，或从侧栏选择页面。</p>
       </Column>
     </Page>
   )

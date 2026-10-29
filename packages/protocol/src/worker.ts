@@ -1,6 +1,7 @@
 import { Schema } from 'effect'
 import { ReleaseMetadata } from './release.ts'
 import { TraceContext } from './trace.ts'
+import { ThinkingSelection } from './device.ts'
 import { ThreadAnswerInput } from './thread-question.ts'
 import {
   AgentType,
@@ -85,6 +86,7 @@ export const WorkerIPCMessage = Schema.Struct({
   client_message_id: Schema.optionalKey(ClientMessageID),
   mode: Schema.optionalKey(Schema.Literals(['queue', 'steer'])),
   model: Schema.optionalKey(summary(512)),
+  thinking: Schema.optionalKey(ThinkingSelection),
   after_worker_seq: Schema.optionalKey(Integer),
   worker_seq: Schema.optionalKey(Integer),
   thread_reports: Schema.optionalKey(Schema.NullOr(Schema.Array(ThreadReport))),

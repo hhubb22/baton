@@ -206,22 +206,21 @@ describe('remote Cursor threads', () => {
         truncated: false,
         original_bytes: 100,
       }))
-      const detail = await screen.findByRole('region', { name: 'Messages' })
-      await waitFor(() => expect(within(detail).queryByText('Loading messages…')).not.toBeInTheDocument())
+      const detail = await screen.findByRole('region', { name: '消息记录' })
+      await waitFor(() => expect(within(detail).queryByText('正在加载消息…')).not.toBeInTheDocument())
       if (count === 0) {
-        expect(within(detail).queryByRole('button', { name: /Activity/ })).not.toBeInTheDocument()
+        expect(within(detail).queryByRole('button', { name: /执行过程/ })).not.toBeInTheDocument()
         return
       }
       const toggle = await within(detail).findByRole('button', {
-        name: `Activity · ${count} ${count === 1 ? 'step' : 'steps'}`,
+        name: `执行过程 · ${count} 个步骤`,
       })
-      expect(within(detail).getAllByRole('button', { name: /Activity/ })).toHaveLength(1)
+      expect(within(detail).getAllByRole('button', { name: /执行过程/ })).toHaveLength(1)
       if (replies > 0) {
         expect(within(detail).getByText('Saved reply 0')).toBeInTheDocument()
         expect(within(detail).getByText('Saved reply 1')).toBeInTheDocument()
       }
-      if (reason === 'failed')
-        expect(within(detail).getByText('Cursor could not finish this reply')).toBeInTheDocument()
+      if (reason === 'failed') expect(within(detail).getByText('Cursor 未能完成此回复')).toBeInTheDocument()
       await user.click(toggle)
       expect(await within(detail).findByText('Saved output 0')).toBeInTheDocument()
       const requests = fetcher.mock.calls
@@ -253,19 +252,19 @@ describe('remote Cursor threads', () => {
       },
     })
     expect(await screen.findByText('Saved reply summary')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Read full output' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '读取完整输出' })).toBeInTheDocument()
   })
 
   it('creates, opens and sends over HTTP while Project and Inbox endpoints return 501', async () => {
     const user = userEvent.setup()
     const { state, fetcher } = mount()
-    const input = await screen.findByLabelText('New thread message')
-    expect(await screen.findByRole('button', { name: 'Cursor · Default model' })).toBeInTheDocument()
-    expect(screen.getAllByText('Projects unavailable').length).toBeGreaterThan(0)
+    const input = await screen.findByLabelText('新对话消息')
+    expect(await screen.findByRole('button', { name: 'Cursor · 默认模型' })).toBeInTheDocument()
+    expect(screen.getAllByText('无法加载项目').length).toBeGreaterThan(0)
     await user.type(input, 'Inspect the repository')
-    await user.click(within(input.parentElement!).getByRole('button', { name: 'Send' }))
+    await user.click(within(input.parentElement!).getByRole('button', { name: '发送' }))
     expect(await screen.findByRole('heading', { name: 'Remote Cursor thread' })).toBeInTheDocument()
-    expect(await screen.findByText('Starting Cursor…')).toBeInTheDocument()
+    expect(await screen.findByText('正在启动 Cursor…')).toBeInTheDocument()
     expect(await screen.findByText('Inspect the repository')).toBeInTheDocument()
     const create = fetcher.mock.calls.find(
       ([url, init]) => requestURL(url) === '/api/v1/threads' && init?.method === 'POST',
@@ -278,10 +277,10 @@ describe('remote Cursor threads', () => {
     state.thread.opened_at = at
     state.thread.status = 'idle'
     act(() => Socket.current.receive({ type: 'thread.changed', thread_id: threadId }))
-    await waitFor(() => expect(screen.queryByText('Starting Cursor…')).not.toBeInTheDocument())
-    const followUp = screen.getByLabelText('Message')
+    await waitFor(() => expect(screen.queryByText('正在启动 Cursor…')).not.toBeInTheDocument())
+    const followUp = screen.getByLabelText('消息')
     await user.type(followUp, 'Continue')
-    await user.click(within(followUp.parentElement!).getByRole('button', { name: 'Send' }))
+    await user.click(within(followUp.parentElement!).getByRole('button', { name: '发送' }))
     await waitFor(() =>
       expect(
         fetcher.mock.calls.some(
@@ -294,14 +293,14 @@ describe('remote Cursor threads', () => {
   it('keeps a manually entered model when composing and sends it in the create request', async () => {
     const user = userEvent.setup()
     const { fetcher } = mount()
-    await user.click(await screen.findByRole('button', { name: 'Cursor · Default model' }))
-    await user.click(await screen.findByRole('menuitem', { name: 'Enter model ID…' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Choose Cursor model' })
-    await user.type(within(dialog).getByLabelText('Model ID'), '  custom-model  ')
-    await user.click(within(dialog).getByRole('button', { name: 'Use model' }))
+    await user.click(await screen.findByRole('button', { name: 'Cursor · 默认模型' }))
+    await user.click(await screen.findByRole('menuitem', { name: '输入模型 ID…' }))
+    const dialog = await screen.findByRole('dialog', { name: '选择 Cursor 模型' })
+    await user.type(within(dialog).getByLabelText('模型 ID'), '  custom-model  ')
+    await user.click(within(dialog).getByRole('button', { name: '使用模型' }))
     expect(await screen.findByRole('button', { name: 'Cursor · custom-model' })).toBeInTheDocument()
-    await user.type(screen.getByLabelText('New thread message'), 'Hello')
-    await user.click(screen.getByRole('button', { name: 'Send' }))
+    await user.type(screen.getByLabelText('新对话消息'), 'Hello')
+    await user.click(screen.getByRole('button', { name: '发送' }))
     await waitFor(() => {
       const request = fetcher.mock.calls.find(
         ([url, init]) => requestURL(url) === '/api/v1/threads' && init?.method === 'POST',
@@ -316,26 +315,26 @@ describe('remote Cursor threads', () => {
   it('keeps resume pending after reload until execution completion is reported', async () => {
     const { state } = mount({ existing: true, resumePending: true, status: 'stopped' })
     expect(await screen.findByRole('heading', { name: 'Remote Cursor thread' })).toBeInTheDocument()
-    expect(await screen.findByText('Resuming Cursor…')).toBeInTheDocument()
+    expect(await screen.findByText('正在恢复 Cursor…')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Resume thread' })).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Message')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('消息')).not.toBeInTheDocument()
     state.thread.status = 'idle'
     act(() => Socket.current.receive({ type: 'thread.changed', thread_id: threadId }))
-    expect(await screen.findByText('Resuming Cursor…')).toBeInTheDocument()
+    expect(await screen.findByText('正在恢复 Cursor…')).toBeInTheDocument()
     state.thread.resume_pending = false
     act(() => Socket.current.receive({ type: 'thread.changed', thread_id: threadId }))
-    expect(await screen.findByLabelText('Message')).toBeInTheDocument()
-    expect(screen.queryByText('Resuming Cursor…')).not.toBeInTheDocument()
+    expect(await screen.findByLabelText('消息')).toBeInTheDocument()
+    expect(screen.queryByText('正在恢复 Cursor…')).not.toBeInTheDocument()
   })
 
   it('explains an unverified Cursor and refuses creation', async () => {
     const user = userEvent.setup()
     const { fetcher } = mount({ create: false })
-    await user.click(await screen.findByRole('button', { name: 'No agent' }))
+    await user.click(await screen.findByRole('button', { name: '没有可用的助手' }))
     await user.click(await screen.findByRole('menuitem', { name: /Cursor.*Local sandbox needs setup/ }))
     expect(await screen.findByText('Local sandbox needs setup.')).toBeInTheDocument()
-    await user.type(screen.getByLabelText('New thread message'), 'Hello')
-    await user.click(screen.getByRole('button', { name: 'Send' }))
+    await user.type(screen.getByLabelText('新对话消息'), 'Hello')
+    await user.click(screen.getByRole('button', { name: '发送' }))
     expect(
       fetcher.mock.calls.some(([url, init]) => requestURL(url) === '/api/v1/threads' && init?.method === 'POST'),
     ).toBe(false)

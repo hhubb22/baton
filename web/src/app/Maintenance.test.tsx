@@ -40,13 +40,13 @@ async function replace(user: ReturnType<typeof userEvent.setup>, field: HTMLElem
 }
 
 async function openSettings(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByRole('button', { name: 'Project actions' }))
-  await user.click(await screen.findByRole('menuitem', { name: 'Settings' }))
-  await screen.findByRole('heading', { name: 'Project settings' })
+  await user.click(await screen.findByRole('button', { name: '项目操作' }))
+  await user.click(await screen.findByRole('menuitem', { name: '设置' }))
+  await screen.findByRole('heading', { name: '项目设置' })
 }
 
 async function save(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: 'Save changes' }))
+  await user.click(screen.getByRole('button', { name: '保存更改' }))
 }
 
 function settingsStatus() {
@@ -54,8 +54,8 @@ function settingsStatus() {
 }
 
 async function back(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: 'Back to project' }))
-  await waitFor(() => expect(screen.queryByRole('heading', { name: 'Project settings' })).not.toBeInTheDocument())
+  await user.click(screen.getByRole('button', { name: '返回项目' }))
+  await waitFor(() => expect(screen.queryByRole('heading', { name: '项目设置' })).not.toBeInTheDocument())
 }
 
 beforeEach(() => localStorage.clear())
@@ -67,14 +67,14 @@ describe('project maintenance', () => {
     const update = vi.spyOn(client, 'updateProject')
     await openSettings(user)
     expect(router.state.location.search).toMatchObject({ settings: true })
-    await replace(user, screen.getByLabelText('Name'), 'Release compatibility')
-    await user.click(screen.getByLabelText(/^Goal/))
-    await replace(user, screen.getByLabelText(/^Goal/), 'Verify Windows and Linux before release.')
-    await user.click(screen.getByLabelText('Name'))
-    expect(settingsStatus()).toHaveTextContent('Changes not saved')
+    await replace(user, screen.getByLabelText('名称'), 'Release compatibility')
+    await user.click(screen.getByLabelText(/^目标/))
+    await replace(user, screen.getByLabelText(/^目标/), 'Verify Windows and Linux before release.')
+    await user.click(screen.getByLabelText('名称'))
+    expect(settingsStatus()).toHaveTextContent('更改尚未保存')
     expect(update).not.toHaveBeenCalled()
     await save(user)
-    await waitFor(() => expect(settingsStatus()).toHaveTextContent('Saved'))
+    await waitFor(() => expect(settingsStatus()).toHaveTextContent('已保存'))
     expect(update).toHaveBeenCalledTimes(1)
     expect(update).toHaveBeenCalledWith({
       projectId: 'prj-compat',
@@ -83,19 +83,17 @@ describe('project maintenance', () => {
     await back(user)
     expect(await screen.findByRole('heading', { name: 'Release compatibility' })).toBeInTheDocument()
     expect(
-      within(screen.getByRole('navigation', { name: 'Workspace' })).getByRole('link', {
+      within(screen.getByRole('navigation', { name: '工作区' })).getByRole('link', {
         name: /Release compatibility/,
       }),
     ).toBeInTheDocument()
     expect(
-      within(screen.getByRole('complementary', { name: 'Overview' })).getByText(
-        'Verify Windows and Linux before release.',
-      ),
+      within(screen.getByRole('complementary', { name: '概览' })).getByText('Verify Windows and Linux before release.'),
     ).toBeInTheDocument()
     expect(router.state.location.search.settings).toBeUndefined()
     await openSettings(user)
-    expect(screen.getByLabelText('Name')).toHaveValue('Release compatibility')
-    expect(screen.getByLabelText(/^Goal/)).toHaveValue('Verify Windows and Linux before release.')
+    expect(screen.getByLabelText('名称')).toHaveValue('Release compatibility')
+    expect(screen.getByLabelText(/^目标/)).toHaveValue('Verify Windows and Linux before release.')
   })
 
   it('saves optional memory embeddings, retains a failed draft and turns them off', async () => {
@@ -104,28 +102,28 @@ describe('project maintenance', () => {
       vi.spyOn(client, 'updateProject').mockRejectedValueOnce(new ClientError('unavailable', 'Disconnected'))
     })
     const update = vi.spyOn(client, 'updateProject')
-    await screen.findByRole('heading', { name: 'Project settings' })
-    expect(screen.getByRole('switch', { name: 'Memory embeddings' })).not.toBeChecked()
-    await user.click(screen.getByRole('switch', { name: 'Memory embeddings' }))
-    await replace(user, screen.getByLabelText('Embedding base URL'), 'http://localhost:11434/v1')
-    await replace(user, screen.getByLabelText(/^Device credential name/), 'local-embeddings')
-    await replace(user, screen.getByLabelText('Embedding model'), 'local-embed')
-    await user.click(screen.getByLabelText('Name'))
+    await screen.findByRole('heading', { name: '项目设置' })
+    expect(screen.getByRole('switch', { name: '记忆嵌入' })).not.toBeChecked()
+    await user.click(screen.getByRole('switch', { name: '记忆嵌入' }))
+    await replace(user, screen.getByLabelText('嵌入模型基础 URL'), 'http://localhost:11434/v1')
+    await replace(user, screen.getByLabelText(/^设备凭据名称/), 'local-embeddings')
+    await replace(user, screen.getByLabelText('嵌入模型'), 'local-embed')
+    await user.click(screen.getByLabelText('名称'))
     expect(update).not.toHaveBeenCalled()
     await save(user)
-    expect(await screen.findByText("Couldn't save. Try again.")).toBeInTheDocument()
-    expect(screen.getByLabelText('Embedding model')).toHaveValue('local-embed')
-    await user.click(screen.getByRole('button', { name: 'Retry' }))
-    await waitFor(() => expect(settingsStatus()).toHaveTextContent('Saved'))
+    expect(await screen.findByText('无法保存，请重试。')).toBeInTheDocument()
+    expect(screen.getByLabelText('嵌入模型')).toHaveValue('local-embed')
+    await user.click(screen.getByRole('button', { name: '重试' }))
+    await waitFor(() => expect(settingsStatus()).toHaveTextContent('已保存'))
     expect((await client.listProjects()).find((project) => project.id === 'prj-compat')?.memoryEmbedding).toEqual({
       base_url: 'http://localhost:11434/v1',
       model: 'local-embed',
       credential_profile: 'local-embeddings',
       config_id: expect.any(String),
     })
-    await replace(user, screen.getByLabelText('Embedding model'), 'another-embed')
+    await replace(user, screen.getByLabelText('嵌入模型'), 'another-embed')
     await save(user)
-    await waitFor(() => expect(settingsStatus()).toHaveTextContent('Saved'))
+    await waitFor(() => expect(settingsStatus()).toHaveTextContent('已保存'))
     expect(update).toHaveBeenLastCalledWith({
       projectId: 'prj-compat',
       patch: {
@@ -136,12 +134,12 @@ describe('project maintenance', () => {
         },
       },
     })
-    await user.click(screen.getByRole('switch', { name: 'Memory embeddings' }))
-    expect(settingsStatus()).toHaveTextContent('Changes not saved')
+    await user.click(screen.getByRole('switch', { name: '记忆嵌入' }))
+    expect(settingsStatus()).toHaveTextContent('更改尚未保存')
     await save(user)
-    await waitFor(() => expect(settingsStatus()).toHaveTextContent('Saved'))
+    await waitFor(() => expect(settingsStatus()).toHaveTextContent('已保存'))
     expect(update).toHaveBeenLastCalledWith({ projectId: 'prj-compat', patch: { memoryEmbedding: null } })
-    expect(screen.queryByLabelText('Embedding model')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('嵌入模型')).not.toBeInTheDocument()
     expect((await client.listProjects()).find((project) => project.id === 'prj-compat')?.memoryEmbedding).toBeNull()
   })
 
@@ -149,22 +147,22 @@ describe('project maintenance', () => {
     const user = userEvent.setup()
     const { client } = setup(settingsPath)
     const update = vi.spyOn(client, 'updateProject')
-    await screen.findByRole('heading', { name: 'Project settings' })
-    await replace(user, screen.getByLabelText('Name'), '   ')
+    await screen.findByRole('heading', { name: '项目设置' })
+    await replace(user, screen.getByLabelText('名称'), '   ')
     await save(user)
-    expect(await screen.findByText('Enter a project name.', { selector: 'p' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Name')).toHaveAttribute('aria-invalid', 'true')
-    expect(settingsStatus()).toHaveTextContent('Changes not saved')
-    await user.click(screen.getByRole('button', { name: 'Pause' }))
-    expect(await screen.findByRole('button', { name: 'Resume' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Name')).toHaveValue('   ')
+    expect(await screen.findByText('请输入项目名称。', { selector: 'p' })).toBeInTheDocument()
+    expect(screen.getByLabelText('名称')).toHaveAttribute('aria-invalid', 'true')
+    expect(settingsStatus()).toHaveTextContent('更改尚未保存')
+    await user.click(screen.getByRole('button', { name: '暂停' }))
+    expect(await screen.findByRole('button', { name: '恢复' })).toBeInTheDocument()
+    expect(screen.getByLabelText('名称')).toHaveValue('   ')
     expect(update).not.toHaveBeenCalled()
     expect((await client.listProjects()).find((project) => project.id === 'prj-compat')?.status).toBe('paused')
     await back(user)
     await openSettings(user)
-    expect(screen.getByLabelText('Name')).toHaveValue('   ')
-    await user.click(screen.getByRole('button', { name: 'Discard changes' }))
-    expect(screen.getByLabelText('Name')).toHaveValue('Compatibility')
+    expect(screen.getByLabelText('名称')).toHaveValue('   ')
+    await user.click(screen.getByRole('button', { name: '放弃更改' }))
+    expect(screen.getByLabelText('名称')).toHaveValue('Compatibility')
     expect(settingsStatus()).toHaveTextContent('')
     expect(update).not.toHaveBeenCalled()
   })
@@ -174,41 +172,41 @@ describe('project maintenance', () => {
     const { router } = setup(settingsPath, 'normal', (client) => {
       vi.spyOn(client, 'updateProject').mockRejectedValueOnce(new ClientError('unavailable', 'Disconnected'))
     })
-    await screen.findByRole('heading', { name: 'Project settings' })
-    await replace(user, screen.getByLabelText(/^Goal/), 'Keep this goal after failure.')
+    await screen.findByRole('heading', { name: '项目设置' })
+    await replace(user, screen.getByLabelText(/^目标/), 'Keep this goal after failure.')
     await save(user)
-    expect(await screen.findByText("Couldn't save. Try again.")).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
-    expect(screen.getByLabelText(/^Goal/)).toHaveValue('Keep this goal after failure.')
+    expect(await screen.findByText('无法保存，请重试。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
+    expect(screen.getByLabelText(/^目标/)).toHaveValue('Keep this goal after failure.')
     await back(user)
     await act(() =>
       router.navigate({ to: '/projects/$projectId', params: { projectId: 'prj-compat' }, search: { settings: true } }),
     )
-    await screen.findByRole('heading', { name: 'Project settings' })
-    expect(screen.getByLabelText(/^Goal/)).toHaveValue('Keep this goal after failure.')
-    expect(settingsStatus()).toHaveTextContent('Changes not saved')
+    await screen.findByRole('heading', { name: '项目设置' })
+    expect(screen.getByLabelText(/^目标/)).toHaveValue('Keep this goal after failure.')
+    expect(settingsStatus()).toHaveTextContent('更改尚未保存')
     await save(user)
-    await waitFor(() => expect(settingsStatus()).toHaveTextContent('Saved'))
+    await waitFor(() => expect(settingsStatus()).toHaveTextContent('已保存'))
     await back(user)
     expect(
-      await within(screen.getByRole('complementary', { name: 'Overview' })).findByText('Keep this goal after failure.'),
+      await within(screen.getByRole('complementary', { name: '概览' })).findByText('Keep this goal after failure.'),
     ).toBeInTheDocument()
   })
 
   it('asks the browser to confirm before unloading unsaved settings', async () => {
     const user = userEvent.setup()
     setup(settingsPath)
-    await screen.findByRole('heading', { name: 'Project settings' })
+    await screen.findByRole('heading', { name: '项目设置' })
     const unload = () => {
       const event = new Event('beforeunload', { cancelable: true })
       window.dispatchEvent(event)
       return event.defaultPrevented
     }
     expect(unload()).toBe(false)
-    await replace(user, screen.getByLabelText('Name'), 'Unsaved name')
+    await replace(user, screen.getByLabelText('名称'), 'Unsaved name')
     expect(unload()).toBe(true)
     await save(user)
-    await waitFor(() => expect(settingsStatus()).toHaveTextContent('Saved'))
+    await waitFor(() => expect(settingsStatus()).toHaveTextContent('已保存'))
     expect(unload()).toBe(false)
   })
 
@@ -223,30 +221,30 @@ describe('project maintenance', () => {
         return update(snapshot)
       })
     })
-    await screen.findByRole('heading', { name: 'Project settings' })
-    await replace(user, screen.getByLabelText('Name'), 'First name')
+    await screen.findByRole('heading', { name: '项目设置' })
+    await replace(user, screen.getByLabelText('名称'), 'First name')
     await save(user)
     expect(settingsStatus()).toHaveTextContent('Saving…')
-    await replace(user, screen.getByLabelText('Name'), 'Latest name')
-    await replace(user, screen.getByLabelText(/^Goal/), 'The latest goal must survive.')
+    await replace(user, screen.getByLabelText('名称'), 'Latest name')
+    await replace(user, screen.getByLabelText(/^目标/), 'The latest goal must survive.')
     await advance(scheduler, browserLatency.save)
-    await waitFor(() => expect(settingsStatus()).toHaveTextContent('Changes not saved'))
-    expect(screen.getByLabelText('Name')).toHaveValue('Latest name')
-    expect(screen.getByLabelText(/^Goal/)).toHaveValue('The latest goal must survive.')
+    await waitFor(() => expect(settingsStatus()).toHaveTextContent('更改尚未保存'))
+    expect(screen.getByLabelText('名称')).toHaveValue('Latest name')
+    expect(screen.getByLabelText(/^目标/)).toHaveValue('The latest goal must survive.')
     expect(updateSpy.mock.calls.map(([input]) => input.patch)).toEqual([{ name: 'First name' }])
     await save(user)
     await advance(scheduler, browserLatency.save)
-    await waitFor(() => expect(settingsStatus()).toHaveTextContent('Saved'))
+    await waitFor(() => expect(settingsStatus()).toHaveTextContent('已保存'))
     await back(user)
     expect(await screen.findByRole('heading', { name: 'Latest name' })).toBeInTheDocument()
 
     await openSettings(user)
-    await replace(user, screen.getByLabelText('Name'), 'Unsaved before navigating back')
+    await replace(user, screen.getByLabelText('名称'), 'Unsaved before navigating back')
     await act(async () => router.history.back())
-    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Project settings' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '项目设置' })).not.toBeInTheDocument())
     await openSettings(user)
-    expect(screen.getByLabelText('Name')).toHaveValue('Unsaved before navigating back')
-    expect(settingsStatus()).toHaveTextContent('Changes not saved')
+    expect(screen.getByLabelText('名称')).toHaveValue('Unsaved before navigating back')
+    expect(settingsStatus()).toHaveTextContent('更改尚未保存')
     expect(updateSpy).toHaveBeenCalledTimes(2)
     expect((await client.listProjects()).find((project) => project.id === 'prj-compat')?.name).toBe('Latest name')
   })
@@ -254,26 +252,26 @@ describe('project maintenance', () => {
   it('keeps new memory drafts in their own project across browser history', async () => {
     const user = userEvent.setup()
     const { client, router } = setup('/projects/prj-baton?view=memory')
-    await screen.findByRole('button', { name: 'Add memory' })
+    await screen.findByRole('button', { name: '添加记忆' })
     await act(() =>
       router.navigate({ to: '/projects/$projectId', params: { projectId: 'prj-compat' }, search: { view: 'memory' } }),
     )
-    await user.click(await screen.findByRole('button', { name: 'Add memory' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Add memory' })
-    await user.type(within(dialog).getByLabelText('Memory'), 'Only the Compatibility project should get this memory.')
+    await user.click(await screen.findByRole('button', { name: '添加记忆' }))
+    const dialog = await screen.findByRole('dialog', { name: '添加记忆' })
+    await user.type(within(dialog).getByLabelText('记忆'), 'Only the Compatibility project should get this memory.')
     await act(async () => router.history.back())
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    await user.click(await screen.findByRole('button', { name: 'Add memory' }))
-    const other = await screen.findByRole('dialog', { name: 'Add memory' })
-    expect(within(other).getByLabelText('Memory')).toHaveValue('')
-    await user.click(within(other).getByRole('button', { name: 'Cancel' }))
+    await user.click(await screen.findByRole('button', { name: '添加记忆' }))
+    const other = await screen.findByRole('dialog', { name: '添加记忆' })
+    expect(within(other).getByLabelText('记忆')).toHaveValue('')
+    await user.click(within(other).getByRole('button', { name: '取消' }))
     await act(async () => router.history.forward())
-    await user.click(await screen.findByRole('button', { name: 'Add memory' }))
-    const restored = await screen.findByRole('dialog', { name: 'Add memory' })
-    expect(within(restored).getByLabelText('Memory')).toHaveValue(
+    await user.click(await screen.findByRole('button', { name: '添加记忆' }))
+    const restored = await screen.findByRole('dialog', { name: '添加记忆' })
+    expect(within(restored).getByLabelText('记忆')).toHaveValue(
       'Only the Compatibility project should get this memory.',
     )
-    await user.click(within(restored).getByRole('button', { name: 'Save memory' }))
+    await user.click(within(restored).getByRole('button', { name: '保存记忆' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(
       (await client.listProjectMemory('prj-compat')).filter(
@@ -290,15 +288,15 @@ describe('project maintenance', () => {
   it('explains when a model change takes effect and preserves the active run', async () => {
     const user = userEvent.setup()
     const { client } = setup('/projects/prj-baton?settings=true')
-    await screen.findByRole('heading', { name: 'Project settings' })
-    expect(screen.getByText('Changes apply from the next run.')).toBeInTheDocument()
-    await user.selectOptions(screen.getByLabelText('Model source'), '|Claude')
-    expect(screen.getByLabelText('Project assistant model')).toHaveValue('claude-opus-5-5')
-    await user.selectOptions(screen.getByLabelText('Project assistant model'), 'claude-sonnet-5-5')
+    await screen.findByRole('heading', { name: '项目设置' })
+    expect(screen.getByText('更改将在下次运行时生效。')).toBeInTheDocument()
+    await user.selectOptions(screen.getByLabelText('模型来源'), '|Claude')
+    expect(screen.getByLabelText('项目助手模型')).toHaveValue('claude-opus-5-5')
+    await user.selectOptions(screen.getByLabelText('项目助手模型'), 'claude-sonnet-5-5')
     await save(user)
-    await waitFor(() => expect(settingsStatus()).toHaveTextContent('Saved'))
+    await waitFor(() => expect(settingsStatus()).toHaveTextContent('已保存'))
     await back(user)
-    expect(await screen.findByRole('button', { name: 'Stop run' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '停止运行' })).toBeInTheDocument()
     const project = (await client.listProjects()).find((item) => item.id === 'prj-baton')!
     expect(project).toMatchObject({
       subscription: 'Claude',
@@ -306,7 +304,7 @@ describe('project maintenance', () => {
       agent: { state: 'running', deviceId: 'dev-ubuntu' },
     })
     await openSettings(user)
-    expect(screen.getByLabelText('Project assistant model')).toHaveValue('claude-sonnet-5-5')
+    expect(screen.getByLabelText('项目助手模型')).toHaveValue('claude-sonnet-5-5')
   })
 
   it('recovers failed project and memory reads with Retry project and Retry memory', async () => {
@@ -321,11 +319,11 @@ describe('project maintenance', () => {
         return notes
       })
     })
-    expect(await screen.findByText("Couldn't load project", { exact: true })).toBeInTheDocument()
-    expect(screen.queryByLabelText('Message the project assistant')).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Retry project' }))
+    expect((await screen.findAllByText('无法加载项目', { exact: true })).length).toBeGreaterThan(0)
+    expect(screen.queryByLabelText('给项目助手发消息')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '重试项目' }))
     expect(await screen.findByRole('heading', { name: 'Compatibility' })).toBeInTheDocument()
-    expect(screen.queryByText("Couldn't load project", { exact: true })).not.toBeInTheDocument()
+    expect(screen.queryAllByText('无法加载项目', { exact: true })).toHaveLength(0)
     await waitFor(() => expect(memorySpy).toHaveBeenCalledWith('prj-compat'))
     await act(async () => {
       await Promise.allSettled(memorySpy.mock.results.map((result) => result.value))
@@ -333,19 +331,19 @@ describe('project maintenance', () => {
     expect(memorySpy).toHaveBeenCalledTimes(1)
 
     failing = false
-    await user.click(screen.getByRole('tab', { name: /Memory/ }))
-    const memory = await screen.findByRole('region', { name: 'Project memory' })
-    expect(await within(memory).findByText("Couldn't load project memory")).toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: /记忆/ }))
+    const memory = await screen.findByRole('region', { name: '项目记忆' })
+    expect(await within(memory).findByText('无法加载项目记忆')).toBeInTheDocument()
     expect(within(memory).queryByRole('article')).not.toBeInTheDocument()
     expect(memorySpy).toHaveBeenCalledTimes(1)
-    expect(screen.getByRole('region', { name: 'Conversation' })).toHaveTextContent(
+    expect(screen.getByRole('region', { name: '对话' })).toHaveTextContent(
       'Run the compat suite on Windows Desktop and report failures.',
     )
 
-    await user.click(within(memory).getByRole('button', { name: 'Retry memory' }))
+    await user.click(within(memory).getByRole('button', { name: '重试加载记忆' }))
     expect(await within(memory).findByRole('button', { name: originalMemory })).toBeInTheDocument()
-    expect(within(memory).queryByText("Couldn't load project memory")).not.toBeInTheDocument()
-    expect(within(memory).queryByRole('button', { name: 'Retry memory' })).not.toBeInTheDocument()
+    expect(within(memory).queryByText('无法加载项目记忆')).not.toBeInTheDocument()
+    expect(within(memory).queryByRole('button', { name: '重试加载记忆' })).not.toBeInTheDocument()
     expect(memorySpy).toHaveBeenCalledTimes(2)
   })
 
@@ -360,15 +358,15 @@ describe('project maintenance', () => {
         has_more: false,
       }))
     })
-    const memory = await screen.findByRole('region', { name: 'Project memory' })
-    expect(await within(memory).findByText('Memory updates need sign-in')).toBeInTheDocument()
-    expect(screen.getAllByText('Memory updates need sign-in')).toHaveLength(1)
-    expect(screen.getByRole('region', { name: 'Conversation' })).not.toHaveTextContent('Memory updates need sign-in')
+    const memory = await screen.findByRole('region', { name: '项目记忆' })
+    expect(await within(memory).findByText('更新记忆需要登录')).toBeInTheDocument()
+    expect(screen.getAllByText('更新记忆需要登录')).toHaveLength(1)
+    expect(screen.getByRole('region', { name: '对话' })).not.toHaveTextContent('Memory updates need sign-in')
     expect((await client.listInbox()).some((item) => item.title.includes('Memory updates'))).toBe(false)
     attention = []
-    await user.click(screen.getByRole('tab', { name: /Threads/ }))
-    await user.click(screen.getByRole('tab', { name: /Memory/ }))
-    await waitFor(() => expect(screen.queryByText('Memory updates need sign-in')).not.toBeInTheDocument())
+    await user.click(screen.getByRole('tab', { name: /对话/ }))
+    await user.click(screen.getByRole('tab', { name: /记忆/ }))
+    await waitFor(() => expect(screen.queryByText('更新记忆需要登录')).not.toBeInTheDocument())
     expect(within(memory).queryByText('Processing')).not.toBeInTheDocument()
   })
 
@@ -382,10 +380,10 @@ describe('project maintenance', () => {
         has_more: false,
       })
     })
-    const memory = await screen.findByRole('region', { name: 'Project memory' })
-    expect(await within(memory).findByText('Memory search needs device credentials')).toBeInTheDocument()
-    await user.click(within(memory).getByRole('button', { name: 'Open settings' }))
-    expect(await screen.findByRole('heading', { name: 'Project settings' })).toBeInTheDocument()
+    const memory = await screen.findByRole('region', { name: '项目记忆' })
+    expect(await within(memory).findByText('搜索记忆需要设备凭据')).toBeInTheDocument()
+    await user.click(within(memory).getByRole('button', { name: '打开设置' }))
+    expect(await screen.findByRole('heading', { name: '项目设置' })).toBeInTheDocument()
   })
 
   it('keeps routine waiting and transient memory failures out of the interface', async () => {
@@ -415,7 +413,7 @@ describe('project maintenance', () => {
       })
     })
     expect(await screen.findByRole('button', { name: originalMemory })).toBeInTheDocument()
-    expect(screen.queryByText('Memory updates need sign-in')).not.toBeInTheDocument()
+    expect(screen.queryByText('更新记忆需要登录')).not.toBeInTheDocument()
     expect(screen.queryByText('device_unavailable')).not.toBeInTheDocument()
     expect(screen.queryByText('model_request_failed')).not.toBeInTheDocument()
   })
@@ -423,33 +421,33 @@ describe('project maintenance', () => {
   it('adds memory and records the author and previous version when editing assistant memory', async () => {
     const user = userEvent.setup()
     const { router } = setup()
-    await user.click(await screen.findByRole('button', { name: 'Project actions' }))
-    await user.click(await screen.findByRole('menuitem', { name: 'Memory' }))
+    await user.click(await screen.findByRole('button', { name: '项目操作' }))
+    await user.click(await screen.findByRole('menuitem', { name: '记忆' }))
     expect(router.state.location.search).toMatchObject({ view: 'memory' })
-    const memory = await screen.findByRole('region', { name: 'Project memory' })
-    await user.click(within(memory).getByRole('button', { name: 'Add memory' }))
-    const add = await screen.findByRole('dialog', { name: 'Add memory' })
-    await user.type(within(add).getByLabelText('Memory'), 'Release only after all supported OS tests pass.')
-    await user.click(within(add).getByRole('button', { name: 'Save memory' }))
+    const memory = await screen.findByRole('region', { name: '项目记忆' })
+    await user.click(within(memory).getByRole('button', { name: '添加记忆' }))
+    const add = await screen.findByRole('dialog', { name: '添加记忆' })
+    await user.type(within(add).getByLabelText('记忆'), 'Release only after all supported OS tests pass.')
+    await user.click(within(add).getByRole('button', { name: '保存记忆' }))
     expect(
       await within(memory).findByRole('button', { name: 'Release only after all supported OS tests pass.' }),
     ).toBeInTheDocument()
     await user.click(within(memory).getByRole('button', { name: 'Release only after all supported OS tests pass.' }))
-    const added = await screen.findByRole('dialog', { name: 'Edit memory' })
-    await user.click(within(added).getByText('View source and history'))
-    expect(within(added).getByText(/^v1 · You ·/)).toBeVisible()
-    await user.click(within(added).getByRole('button', { name: 'Cancel' }))
+    const added = await screen.findByRole('dialog', { name: '编辑记忆' })
+    await user.click(within(added).getByText('查看来源和历史'))
+    expect(within(added).getByText(/^v1 · 你 ·/)).toBeVisible()
+    await user.click(within(added).getByRole('button', { name: '取消' }))
     await user.click(within(memory).getByRole('button', { name: originalMemory }))
-    const edit = await screen.findByRole('dialog', { name: 'Edit memory' })
-    await replace(user, within(edit).getByLabelText('Memory'), 'The Windows suite lives in C:\\src\\compat-suite.')
-    await user.click(within(edit).getByRole('button', { name: 'Save memory' }))
+    const edit = await screen.findByRole('dialog', { name: '编辑记忆' })
+    await replace(user, within(edit).getByLabelText('记忆'), 'The Windows suite lives in C:\\src\\compat-suite.')
+    await user.click(within(edit).getByRole('button', { name: '保存记忆' }))
     await within(memory).findByRole('button', { name: 'The Windows suite lives in C:\\src\\compat-suite.' })
     await user.click(within(memory).getByRole('button', { name: 'The Windows suite lives in C:\\src\\compat-suite.' }))
-    const version = await screen.findByRole('dialog', { name: 'Edit memory' })
-    await user.click(within(version).getByText('View source and history'))
-    expect(within(version).getByText(/^v2 · You ·/)).toBeVisible()
+    const version = await screen.findByRole('dialog', { name: '编辑记忆' })
+    await user.click(within(version).getByText('查看来源和历史'))
+    expect(within(version).getByText(/^v2 · 你 ·/)).toBeVisible()
     expect(within(version).getByText(originalMemory)).toBeVisible()
-    expect(within(version).getByText(/^v1 · Project assistant ·/)).toBeVisible()
+    expect(within(version).getByText(/^v1 · 项目助手 ·/)).toBeVisible()
   })
 
   it('opens sources on demand, retires an entry and explicitly restores it from No longer used', async () => {
@@ -463,22 +461,22 @@ describe('project maintenance', () => {
         ])
     })
     await user.click(await screen.findByRole('button', { name: originalMemory }))
-    const dialog = await screen.findByRole('dialog', { name: 'Edit memory' })
+    const dialog = await screen.findByRole('dialog', { name: '编辑记忆' })
     expect(readSources).not.toHaveBeenCalled()
-    await user.click(within(dialog).getByText('View source and history'))
+    await user.click(within(dialog).getByText('查看来源和历史'))
     expect(await within(dialog).findByText('Keep Windows coverage.')).toBeVisible()
-    await user.click(within(dialog).getByRole('button', { name: 'Stop using' }))
+    await user.click(within(dialog).getByRole('button', { name: '停用' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect((await client.listProjectMemory('prj-compat')).find((n) => n.body === originalMemory)?.status).toBe(
       'retired',
     )
-    await user.click(screen.getByText('No longer used'))
+    await user.click(screen.getByText('已停用'))
     await user.click(screen.getByRole('button', { name: originalMemory }))
-    const retired = await screen.findByRole('dialog', { name: 'Edit memory' })
-    await user.click(within(retired).getByRole('button', { name: 'Restore memory' }))
+    const retired = await screen.findByRole('dialog', { name: '编辑记忆' })
+    await user.click(within(retired).getByRole('button', { name: '恢复记忆' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect((await client.listProjectMemory('prj-compat')).find((n) => n.body === originalMemory)?.status).toBe('active')
-    expect(screen.queryByText('No longer used')).not.toBeInTheDocument()
+    expect(screen.queryByText('已停用')).not.toBeInTheDocument()
   })
 
   it('keeps a memory draft after validation and save failure, then retries without duplication', async () => {
@@ -486,15 +484,15 @@ describe('project maintenance', () => {
     const { client } = setup(memoryPath, 'normal', (client) => {
       vi.spyOn(client, 'saveMemory').mockRejectedValueOnce(new ClientError('unavailable', 'Disconnected'))
     })
-    await user.click(await screen.findByRole('button', { name: 'Add memory' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Add memory' })
-    await user.click(within(dialog).getByRole('button', { name: 'Save memory' }))
-    expect(await within(dialog).findByText('Enter a memory.')).toBeInTheDocument()
-    await user.type(within(dialog).getByLabelText('Memory'), 'Never skip Windows regressions.')
-    await user.click(within(dialog).getByRole('button', { name: 'Save memory' }))
-    expect(await within(dialog).findByText('Not saved. Your draft is kept.')).toBeInTheDocument()
-    expect(within(dialog).getByLabelText('Memory')).toHaveValue('Never skip Windows regressions.')
-    await user.click(within(dialog).getByRole('button', { name: 'Save memory' }))
+    await user.click(await screen.findByRole('button', { name: '添加记忆' }))
+    const dialog = await screen.findByRole('dialog', { name: '添加记忆' })
+    await user.click(within(dialog).getByRole('button', { name: '保存记忆' }))
+    expect(await within(dialog).findByText('请输入记忆内容。')).toBeInTheDocument()
+    await user.type(within(dialog).getByLabelText('记忆'), 'Never skip Windows regressions.')
+    await user.click(within(dialog).getByRole('button', { name: '保存记忆' }))
+    expect(await within(dialog).findByText('保存失败，草稿已保留。')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('记忆')).toHaveValue('Never skip Windows regressions.')
+    await user.click(within(dialog).getByRole('button', { name: '保存记忆' }))
     expect(await screen.findByRole('button', { name: 'Never skip Windows regressions.' })).toBeInTheDocument()
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(
@@ -506,26 +504,26 @@ describe('project maintenance', () => {
     const user = userEvent.setup()
     setup(memoryPath, 'memoryConflict')
     await user.click(await screen.findByRole('button', { name: originalMemory }))
-    const dialog = await screen.findByRole('dialog', { name: 'Edit memory' })
-    await replace(user, within(dialog).getByLabelText('Memory'), 'Run all Windows path regressions before release.')
-    await user.click(within(dialog).getByRole('button', { name: 'Save memory' }))
+    const dialog = await screen.findByRole('dialog', { name: '编辑记忆' })
+    await replace(user, within(dialog).getByLabelText('记忆'), 'Run all Windows path regressions before release.')
+    await user.click(within(dialog).getByRole('button', { name: '保存记忆' }))
     expect(
       await within(dialog).findByText('Run the Windows drive-letter tests before every release.'),
     ).toBeInTheDocument()
-    expect(within(dialog).getByText(/Latest · v2 · Project assistant/)).toBeInTheDocument()
-    expect(within(dialog).getByLabelText('Memory')).toHaveValue('Run all Windows path regressions before release.')
-    expect(within(dialog).queryByRole('button', { name: 'Save memory' })).not.toBeInTheDocument()
-    expect(within(dialog).getByRole('status')).toHaveTextContent('Updated while you edited. Your draft is kept.')
-    await user.click(within(dialog).getByRole('button', { name: 'Review latest' }))
-    expect(within(dialog).getByLabelText('Memory')).toHaveValue('Run all Windows path regressions before release.')
-    await user.click(within(dialog).getByRole('button', { name: 'Save memory' }))
+    expect(within(dialog).getByText(/最新 · v2 · 项目助手/)).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('记忆')).toHaveValue('Run all Windows path regressions before release.')
+    expect(within(dialog).queryByRole('button', { name: '保存记忆' })).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('status')).toHaveTextContent('编辑期间内容已更新，草稿已保留。')
+    await user.click(within(dialog).getByRole('button', { name: '查看最新版本' }))
+    expect(within(dialog).getByLabelText('记忆')).toHaveValue('Run all Windows path regressions before release.')
+    await user.click(within(dialog).getByRole('button', { name: '保存记忆' }))
     const note = (
       await screen.findByRole('button', { name: 'Run all Windows path regressions before release.' })
     ).closest('article')!
     await user.click(within(note).getByRole('button', { name: 'Run all Windows path regressions before release.' }))
-    const history = await screen.findByRole('dialog', { name: 'Edit memory' })
-    await user.click(within(history).getByText('View source and history'))
-    expect(within(history).getByText(/^v3 · You ·/)).toBeVisible()
+    const history = await screen.findByRole('dialog', { name: '编辑记忆' })
+    await user.click(within(history).getByText('查看来源和历史'))
+    expect(within(history).getByText(/^v3 · 你 ·/)).toBeVisible()
     expect(within(history).getByText('Run the Windows drive-letter tests before every release.')).toBeVisible()
     expect(within(history).getByText(originalMemory)).toBeVisible()
   })
@@ -533,8 +531,8 @@ describe('project maintenance', () => {
   it('saves messages and Inbox answers while paused, lets threads run, and reads the backlog on resume', async () => {
     const user = userEvent.setup()
     const { client, scheduler, router } = setup(projectPath, 'inboxPaused')
-    expect(await screen.findByText('Project paused')).toBeInTheDocument()
-    await user.type(screen.getByLabelText('Message the project assistant'), 'Read this after resuming.{Enter}')
+    expect(await screen.findByText('项目已暂停')).toBeInTheDocument()
+    await user.type(screen.getByLabelText('给项目助手发消息'), 'Read this after resuming.{Enter}')
     expect(await screen.findByText('Read this after resuming.')).toBeInTheDocument()
     await advance(scheduler, browserLatency.save)
     expect(
@@ -544,12 +542,12 @@ describe('project maintenance', () => {
     ).toMatchObject({ delivery: 'saved' })
     await act(() => router.navigate({ to: '/inbox' }))
     const question = await screen.findByRole('region', { name: 'What should the release notes mention?' })
-    await user.click(within(question).getByRole('radio', { name: /Other…/ }))
-    await user.type(within(question).getByLabelText('Your reply'), 'Mention Windows support.')
-    await user.click(within(question).getByRole('button', { name: 'Send reply' }))
+    await user.click(within(question).getByRole('radio', { name: /其他…/ }))
+    await user.type(within(question).getByLabelText('你的回复'), 'Mention Windows support.')
+    await user.click(within(question).getByRole('button', { name: '发送回复' }))
     expect(
-      await within(await screen.findByRole('region', { name: 'Latest result' })).findByText(
-        'Reply saved · read after you resume',
+      await within(await screen.findByRole('region', { name: '最近的处理结果' })).findByText(
+        '回复已保存 · 恢复项目后读取',
       ),
     ).toBeInTheDocument()
     await act(() =>
@@ -561,13 +559,13 @@ describe('project maintenance', () => {
     )
     const thread = await screen.findByRole('complementary', { name: 'Run compat suite on Windows' })
     act(() => client.controls.setDeviceConnection('dev-windows', 'online'))
-    await user.type(within(thread).getByLabelText('Message'), 'Keep running the suite.{Enter}')
+    await user.type(within(thread).getByLabelText('消息'), 'Keep running the suite.{Enter}')
     await advance(scheduler, browserLatency.save + browserLatency.run)
     expect(await within(thread).findByText('Done. The change is ready for review.')).toBeInTheDocument()
-    expect(screen.getByText('Project paused')).toBeInTheDocument()
+    expect(screen.getByText('项目已暂停')).toBeInTheDocument()
     expect((await client.listProjects()).find((project) => project.id === 'prj-compat')?.agent.state).toBe('idle')
-    await user.click(screen.getByRole('button', { name: 'Resume project' }))
-    await waitFor(() => expect(screen.queryByText('Project paused')).not.toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: '恢复项目' }))
+    await waitFor(() => expect(screen.queryByText('项目已暂停')).not.toBeInTheDocument())
     await advance(scheduler, browserLatency.run * 2)
     const entries = await client.listProjectEntries('prj-compat')
     expect(entries.find((entry) => entry.kind === 'user' && entry.body === 'Read this after resuming.')).toMatchObject({
@@ -579,26 +577,24 @@ describe('project maintenance', () => {
           entry.kind === 'user' && entry.body.includes('Mention Windows support.') && entry.delivery === 'delivered',
       ),
     ).toBe(true)
-    expect(screen.getByRole('region', { name: 'Conversation' })).toHaveTextContent('Read this after resuming.')
+    expect(screen.getByRole('region', { name: '对话' })).toHaveTextContent('Read this after resuming.')
   })
 
   it('explains archiving and lets cancellation return to the unchanged project', async () => {
     const user = userEvent.setup()
     const { client, router } = setup()
-    await user.click(await screen.findByRole('button', { name: 'Project actions' }))
-    await user.click(await screen.findByRole('menuitem', { name: 'Archive project' }))
+    await user.click(await screen.findByRole('button', { name: '项目操作' }))
+    await user.click(await screen.findByRole('menuitem', { name: '归档项目' }))
     expect(router.state.location.search).toMatchObject({ settings: true, archive: true })
-    const dialog = await screen.findByRole('dialog', { name: 'Archive project?' })
+    const dialog = await screen.findByRole('dialog', { name: '归档项目？' })
     expect(
-      within(dialog).getByText(
-        'Stops the project assistant and its running threads, and closes 2 open questions. Chat, memory, and thread history are kept.',
-      ),
+      within(dialog).getByText('停止项目助手和运行中的对话，并关闭 2 个待处理问题。聊天、记忆和对话记录会保留。'),
     ).toBeInTheDocument()
-    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await user.click(within(dialog).getByRole('button', { name: '取消' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(screen.getByRole('heading', { name: 'Project settings' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '项目设置' })).toBeInTheDocument()
     await back(user)
-    expect(screen.getByLabelText('Message the project assistant')).toBeInTheDocument()
+    expect(screen.getByLabelText('给项目助手发消息')).toBeInTheDocument()
     expect((await client.listProjects()).find((project) => project.id === 'prj-compat')?.status).toBe('active')
     expect(
       (await client.listInbox()).filter((item) => item.projectId === 'prj-compat' && item.status === 'pending'),
@@ -610,32 +606,32 @@ describe('project maintenance', () => {
     const { scheduler, router, client } = setup(`${settingsPath}&archive=true`, 'normal', (client) => {
       vi.spyOn(client, 'setProjectStatus').mockRejectedValueOnce(new ClientError('unavailable', 'Disconnected'))
     })
-    const dialog = await screen.findByRole('dialog', { name: 'Archive project?' })
-    await user.click(within(dialog).getByRole('button', { name: 'Archive project' }))
-    const failed = await screen.findByRole('dialog', { name: 'Archive project?' })
-    expect(await within(failed).findByRole('alert')).toHaveTextContent("Couldn't archive. Try again.")
+    const dialog = await screen.findByRole('dialog', { name: '归档项目？' })
+    await user.click(within(dialog).getByRole('button', { name: '归档项目' }))
+    const failed = await screen.findByRole('dialog', { name: '归档项目？' })
+    expect(await within(failed).findByRole('alert')).toHaveTextContent('无法归档，请重试。')
     expect((await client.listProjects()).find((project) => project.id === 'prj-compat')?.status).toBe('active')
-    await user.click(within(failed).getByRole('button', { name: 'Archive project' }))
+    await user.click(within(failed).getByRole('button', { name: '归档项目' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(await screen.findByText('Read-only. Chat, memory, and thread history are kept.')).toBeInTheDocument()
-    expect(screen.getByLabelText('Name')).toHaveAttribute('readonly')
-    expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument()
+    expect(await screen.findByText('只读。聊天、记忆和对话记录已保留。')).toBeInTheDocument()
+    expect(screen.getByLabelText('名称')).toHaveAttribute('readonly')
+    expect(screen.queryByRole('button', { name: '保存更改' })).not.toBeInTheDocument()
     await back(user)
-    expect((await screen.findAllByText('Project archived')).length).toBeGreaterThan(0)
-    expect(screen.queryByLabelText('Message the project assistant')).not.toBeInTheDocument()
-    expect(screen.getByRole('region', { name: 'Conversation' })).toHaveTextContent(
+    expect((await screen.findAllByText('项目已归档')).length).toBeGreaterThan(0)
+    expect(screen.queryByLabelText('给项目助手发消息')).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '对话' })).toHaveTextContent(
       'Run the compat suite on Windows Desktop and report failures.',
     )
     expect(
-      within(screen.getByRole('navigation', { name: 'Workspace' })).queryByRole('link', { name: /Compatibility/ }),
+      within(screen.getByRole('navigation', { name: '工作区' })).queryByRole('link', { name: /Compatibility/ }),
     ).not.toBeInTheDocument()
     expect(
       (await client.listInbox())
         .filter((item) => item.projectId === 'prj-compat')
         .every((item) => item.status === 'withdrawn'),
     ).toBe(true)
-    await user.click(screen.getByRole('tab', { name: /Memory/ }))
-    const memory = await screen.findByRole('region', { name: 'Project memory' })
+    await user.click(screen.getByRole('tab', { name: /记忆/ }))
+    const memory = await screen.findByRole('region', { name: '项目记忆' })
     expect(within(memory).getByText(originalMemory)).toBeInTheDocument()
     await act(() =>
       router.navigate({
@@ -646,33 +642,33 @@ describe('project maintenance', () => {
     )
     const thread = await screen.findByRole('complementary', { name: 'Run compat suite on Windows' })
     act(() => client.controls.setDeviceConnection('dev-windows', 'online'))
-    await user.type(within(thread).getByLabelText('Message'), 'Continue after project archive.{Enter}')
+    await user.type(within(thread).getByLabelText('消息'), 'Continue after project archive.{Enter}')
     await advance(scheduler, browserLatency.save + browserLatency.run)
     expect(await within(thread).findByText('Done. The change is ready for review.')).toBeInTheDocument()
-    expect(screen.queryByLabelText('Message the project assistant')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('给项目助手发消息')).not.toBeInTheDocument()
   })
 
   it('opens archived projects from the account menu with read-only settings and memory', async () => {
     const user = userEvent.setup()
     const { router } = setup('/threads', 'archived')
-    const sidebar = await screen.findByRole('navigation', { name: 'Workspace' })
+    const sidebar = await screen.findByRole('navigation', { name: '工作区' })
     await user.click(within(sidebar).getByRole('button', { name: /Kaken He/ }))
-    await user.click(await screen.findByRole('menuitem', { name: 'Archived projects' }))
-    expect(await screen.findByRole('heading', { name: 'Archived projects' })).toBeInTheDocument()
+    await user.click(await screen.findByRole('menuitem', { name: '已归档项目' }))
+    expect(await screen.findByRole('heading', { name: '已归档项目' })).toBeInTheDocument()
     expect(router.state.location.pathname).toBe('/projects/archived')
     await user.click(screen.getByRole('link', { name: /Compatibility/ }))
-    expect((await screen.findAllByText('Project archived')).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText('项目已归档')).length).toBeGreaterThan(0)
     await openSettings(user)
-    for (const label of ['Name', 'Goal', 'Model source', 'Project assistant model']) {
+    for (const label of ['名称', '目标', '模型来源', '项目助手模型']) {
       expect(screen.getByLabelText(label, { exact: false })).toHaveAttribute('readonly')
     }
     expect(screen.queryByRole('button', { name: /^(Pause|Resume|Archive|Save changes)$/ })).not.toBeInTheDocument()
     await back(user)
-    await user.click(screen.getByRole('tab', { name: /Memory/ }))
-    const memory = await screen.findByRole('region', { name: 'Project memory' })
+    await user.click(screen.getByRole('tab', { name: /记忆/ }))
+    const memory = await screen.findByRole('region', { name: '项目记忆' })
     expect(within(memory).getByText(originalMemory)).toBeInTheDocument()
-    expect(within(memory).queryByRole('button', { name: 'Add memory' })).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('Message the project assistant')).not.toBeInTheDocument()
+    expect(within(memory).queryByRole('button', { name: '添加记忆' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('给项目助手发消息')).not.toBeInTheDocument()
   })
 
   it('stops running threads on archive and reports them as stopping until the device confirms', async () => {
@@ -687,19 +683,19 @@ describe('project maintenance', () => {
         return setStatus(input)
       })
     })
-    const dialog = await screen.findByRole('dialog', { name: 'Archive project?' })
-    await user.click(within(dialog).getByRole('button', { name: 'Archive project' }))
-    const progress = await screen.findByRole('dialog', { name: 'Archiving project' })
-    expect(within(progress).getByText('Saving archive status…')).toBeInTheDocument()
-    expect(within(progress).getByText('Stop requests go to online devices.')).toBeInTheDocument()
+    const dialog = await screen.findByRole('dialog', { name: '归档项目？' })
+    await user.click(within(dialog).getByRole('button', { name: '归档项目' }))
+    const progress = await screen.findByRole('dialog', { name: '正在归档项目' })
+    expect(within(progress).getByText('正在保存归档状态…')).toBeInTheDocument()
+    expect(within(progress).getByText('停止请求会发送到在线设备。')).toBeInTheDocument()
     await act(async () => release())
-    expect(await screen.findByText('Read-only. 1 thread still stopping.')).toBeInTheDocument()
+    expect(await screen.findByText('只读。1 个对话正在停止。')).toBeInTheDocument()
     expect((await client.listThreads()).find((thread) => thread.id === 'thr-gateway')).toMatchObject({
       status: 'running',
       pending: 'stop',
     })
     await advance(scheduler, browserLatency.device)
-    expect(await screen.findByText('Read-only. Chat, memory, and thread history are kept.')).toBeInTheDocument()
+    expect(await screen.findByText('只读。聊天、记忆和对话记录已保留。')).toBeInTheDocument()
     expect((await client.listThreads()).find((thread) => thread.id === 'thr-gateway')).toMatchObject({
       status: 'stopped',
       pending: null,
@@ -713,18 +709,18 @@ describe('project maintenance', () => {
     const { client, scheduler } = setup('/projects/prj-baton?settings=true&archive=true', 'normal', (client) => {
       client.controls.setDeviceConnection('dev-ubuntu', 'offline')
     })
-    const dialog = await screen.findByRole('dialog', { name: 'Archive project?' })
-    await user.click(within(dialog).getByRole('button', { name: 'Archive project' }))
-    expect(await screen.findByText('Read-only. 1 thread will stop when Ubuntu Dev connects.')).toBeInTheDocument()
+    const dialog = await screen.findByRole('dialog', { name: '归档项目？' })
+    await user.click(within(dialog).getByRole('button', { name: '归档项目' }))
+    expect(await screen.findByText('只读。1 个对话将在 Ubuntu Dev 连接后停止。')).toBeInTheDocument()
     await advance(scheduler, browserLatency.device * 2)
-    expect(screen.getByText('Read-only. 1 thread will stop when Ubuntu Dev connects.')).toBeInTheDocument()
+    expect(screen.getByText('只读。1 个对话将在 Ubuntu Dev 连接后停止。')).toBeInTheDocument()
     expect((await client.listThreads()).find((thread) => thread.id === 'thr-gateway')).toMatchObject({
       status: 'running',
       pending: 'stop',
     })
     act(() => client.controls.setDeviceConnection('dev-ubuntu', 'online'))
-    expect(await screen.findByText('Read-only. 1 thread still stopping.')).toBeInTheDocument()
+    expect(await screen.findByText('只读。1 个对话正在停止。')).toBeInTheDocument()
     await advance(scheduler, browserLatency.device)
-    expect(await screen.findByText('Read-only. Chat, memory, and thread history are kept.')).toBeInTheDocument()
+    expect(await screen.findByText('只读。聊天、记忆和对话记录已保留。')).toBeInTheDocument()
   })
 })

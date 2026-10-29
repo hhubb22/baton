@@ -33,8 +33,8 @@ export function MessageActions({ body, thread = false }: { body: string; thread?
     <div className="thread-reply-actions">
       <button
         type="button"
-        title={status === 'copied' ? 'Copied reply' : 'Copy reply'}
-        aria-label={status === 'copied' ? 'Copied reply' : 'Copy reply'}
+        title={status === 'copied' ? '已复制回复' : '复制回复'}
+        aria-label={status === 'copied' ? '已复制回复' : '复制回复'}
         onClick={() =>
           void copyText(body).then(
             () => setStatus('copied'),
@@ -47,14 +47,14 @@ export function MessageActions({ body, thread = false }: { body: string; thread?
       </button>
       {status && (
         <span role="status" {...stylex.props(text.caption)}>
-          {status === 'copied' ? 'Copied' : 'Copy failed'}
+          {status === 'copied' ? '已复制' : '复制失败'}
         </span>
       )}
     </div>
   ) : (
     <button
       type="button"
-      aria-label={status === 'copied' ? 'Copied reply' : 'Copy reply'}
+      aria-label={status === 'copied' ? '已复制回复' : '复制回复'}
       onClick={() =>
         void copyText(body).then(
           () => setStatus('copied'),
@@ -64,7 +64,7 @@ export function MessageActions({ body, thread = false }: { body: string; thread?
       {...stylex.props(text.caption, styles.button, focusRing.ring)}
     >
       <Icon name={status === 'copied' ? 'check' : 'copy'} size={12} />
-      {status === 'copied' ? 'Copied' : status === 'error' ? 'Copy failed' : 'Copy'}
+      {status === 'copied' ? '已复制' : status === 'error' ? '复制失败' : '复制'}
     </button>
   )
 }

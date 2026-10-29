@@ -38,7 +38,10 @@ function hostedAgentReport(agentType: HostedAgentType, result: ProbeResult): Run
   const version = typeof result.details.version === 'string' ? result.details.version : 'unknown'
   const platform =
     typeof result.details.platform === 'string' ? result.details.platform : `${process.platform}-${process.arch}`
-  const models = [...new Set(result.models)].map((id) => ({ id, name: id }))
+  const models = [...new Set(result.models)].map((id) => {
+    const thinking = result.model_thinking?.find((entry) => entry.model === id)?.thinking
+    return { id, name: id, ...(thinking ? { thinking } : {}) }
+  })
   const base: RuntimeAgent = {
     agent_type: agentType,
     version,

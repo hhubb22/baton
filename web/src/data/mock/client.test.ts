@@ -196,15 +196,15 @@ describe('device connection', () => {
     const { devices, projects, threads } = await state(client)
     const ubuntu = devices.find((item) => item.id === 'dev-ubuntu')
     const gateway = threads.find((item) => item.id === 'thr-gateway')!
-    expect(threadView(gateway, ubuntu).notice?.title).toBe('Ubuntu Dev is offline')
+    expect(threadView(gateway, ubuntu).notice?.title).toBe('Ubuntu Dev 已离线')
 
     const baton = projects.find((item) => item.id === 'prj-baton')!
     expect(baton.agent.state).toBe('waitingDevice')
-    expect(projectAgentStatus(baton, devices).label).toBe('Waiting for device')
+    expect(projectAgentStatus(baton, devices).label).toBe('等待设备')
 
     const preview = await client.readFile('dev-ubuntu', '/home/kaken/work/baton/apps/server/src/gateway.ts')
     expect(preview.state).toBe('unavailable')
-    expect(previewProblem(preview, ubuntu)?.title).toBe('Ubuntu Dev is offline')
+    expect(previewProblem(preview, ubuntu)?.title).toBe('Ubuntu Dev 已离线')
 
     expect(events.at(-1)?.topics).toEqual(expect.arrayContaining(['devices', 'threads', 'projects', 'files']))
 
@@ -866,7 +866,7 @@ describe('projects', () => {
     const { client, scheduler } = setup()
     await expect(
       client.createProject({ name: '  ', goal: '', subscription: 'ChatGPT', model: 'gpt-6.1-sol', clientId: 'p0' }),
-    ).rejects.toMatchObject({ code: 'invalid', message: 'Enter a project name.' })
+    ).rejects.toMatchObject({ code: 'invalid', message: '请输入项目名称。' })
     const project = await create(client, scheduler)
     expect(project).toMatchObject({ status: 'active', agent: { state: 'notStarted' } })
     expect((await create(client, scheduler)).id).toBe(project.id)
@@ -892,7 +892,7 @@ describe('projects', () => {
     expect((await client.listProjects()).find((item) => item.id === project.id)!.agent).toMatchObject({
       state: 'running',
       deviceId: 'dev-mac',
-      activity: 'Reading your message…',
+      activity: '正在读取你的消息…',
     })
 
     scheduler.advance(browserLatency.run / 2)
@@ -916,7 +916,7 @@ describe('projects', () => {
     expect((await client.listProjects()).find((item) => item.id === project.id)!.agent.state).toBe('idle')
     scheduler.advance(browserLatency.run / 2)
     expect((await client.listProjects()).find((item) => item.id === project.id)!.agent.activity).toBe(
-      "Reading Codex's reply…",
+      '正在读取 Codex 的回复…',
     )
     scheduler.advance(browserLatency.run / 2)
     entries = await client.listProjectEntries(project.id)
@@ -963,10 +963,10 @@ describe('projects', () => {
   it('keeps messages waiting while no device can run the assistant', async () => {
     const { client, scheduler } = setup('waiting')
     const docs = (await client.listProjects()).find((item) => item.id === 'prj-docs')!
-    expect(docs.agent).toMatchObject({ state: 'waitingDevice', reason: 'An online device with Claude signed in' })
+    expect(docs.agent).toMatchObject({ state: 'waitingDevice', reason: '等待已登录 Claude 的在线设备' })
     const devices = await client.listDevices()
     expect(assistantWait(docs, devices).detail).toBe(
-      'Sign in to Claude on MacBook Pro. Sign in to Claude on Ubuntu Dev. The project assistant is not installed on Windows Desktop.',
+      '请在 MacBook Pro 上登录 Claude。 请在 Ubuntu Dev 上登录 Claude。 Windows Desktop 未安装项目助手。',
     )
     await client.sendProjectMessage({ projectId: 'prj-docs', body: 'Check the install guide.', clientId: 'm1' })
     scheduler.advance(browserLatency.run * 4)
@@ -1016,7 +1016,7 @@ describe('projects', () => {
     client.controls.setDeviceConnection('dev-ubuntu', 'offline')
     expect((await client.listProjectEntries('prj-baton')).at(-1)).toMatchObject({
       kind: 'note',
-      body: 'Switched to MacBook Pro · Ubuntu Dev offline',
+      body: '已切换到 MacBook Pro · Ubuntu Dev 已离线',
     })
     client.controls.setDeviceConnection('dev-mac', 'offline')
     expect((await client.listProjects()).find((item) => item.id === 'prj-baton')!.agent.state).toBe('waitingDevice')

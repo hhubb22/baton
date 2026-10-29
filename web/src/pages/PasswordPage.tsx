@@ -22,10 +22,10 @@ function passwordError(password: string, username: string) {
     password !== password.trim() ||
     Array.from(password).some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
   ) {
-    return 'Use no control characters or spaces at the start or end.'
+    return '开头和结尾不能有空格，密码不能包含控制字符。'
   }
-  if (Array.from(password).length < 12 || Array.from(password).length > 128) return 'Use 12 to 128 characters.'
-  if (password.toLowerCase() === username.toLowerCase()) return 'Choose a password different from your username.'
+  if (Array.from(password).length < 12 || Array.from(password).length > 128) return '请输入 12 到 128 个字符。'
+  if (password.toLowerCase() === username.toLowerCase()) return '密码不能与用户名相同。'
 }
 
 export function PasswordPage() {
@@ -73,21 +73,21 @@ export function PasswordPage() {
 
   const failure = change.error
     ? change.error instanceof ClientError && change.error.code === 'unavailable'
-      ? "Can't reach Baton. Try again."
+      ? '无法连接 Baton，请重试。'
       : change.error instanceof ClientError && change.error.code === 'invalid'
         ? change.error.message
-        : "Couldn't update your password. Check your current password and try again."
+        : '无法更新密码，请检查当前密码后重试。'
     : null
 
   return (
     <AuthShell>
       <div {...stylex.props(styles.brand)}>
         <BrandMark tone="color" size={36} />
-        <h1 {...stylex.props(text.title)}>Change your password</h1>
-        <p {...stylex.props(text.small, text.muted)}>Update your password before opening your workspace.</p>
+        <h1 {...stylex.props(text.title)}>修改密码</h1>
+        <p {...stylex.props(text.small, text.muted)}>请先修改密码，再进入工作区。</p>
       </div>
       <form onSubmit={submit} noValidate {...stylex.props(styles.form)}>
-        <Field label="Current password" error={currentMissing ? 'Enter your current password.' : undefined}>
+        <Field label="当前密码" error={currentMissing ? '请输入当前密码。' : undefined}>
           {(props) => (
             <Input
               {...props}
@@ -107,8 +107,8 @@ export function PasswordPage() {
           )}
         </Field>
         <Field
-          label="New password"
-          helper="Use 12 to 128 characters. Avoid control characters and spaces at the start or end. Choose a password different from your username."
+          label="新密码"
+          helper="使用 12 到 128 个字符。开头和结尾不能有空格，不能包含控制字符，也不能与用户名相同。"
           error={validation}
         >
           {(props) => (
@@ -129,7 +129,7 @@ export function PasswordPage() {
             />
           )}
         </Field>
-        <Field label="Confirm new password" error={mismatch ? 'Passwords do not match.' : undefined}>
+        <Field label="确认新密码" error={mismatch ? '两次输入的密码不一致。' : undefined}>
           {(props) => (
             <Input
               {...props}
@@ -153,7 +153,7 @@ export function PasswordPage() {
           </p>
         )}
         <Button type="submit" variant="primary" block>
-          {change.isPending ? 'Updating…' : 'Update password'}
+          {change.isPending ? '正在更新…' : '更新密码'}
         </Button>
       </form>
     </AuthShell>

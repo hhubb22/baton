@@ -280,6 +280,44 @@ describe('Pi Agent host', () => {
     await Effect.runPromise(agent.close())
   })
 
+  it('passes the selected thinking level to Pi before the next prompt', async () => {
+    const original = await readPiTranscript(piFixturePath('multi_turn'))
+    const prompts = original.entries.flatMap((entry, index) =>
+      entry.type === 'expect_outbound' && Predicate.hasProperty(entry.frame, 'type') && entry.frame.type === 'prompt'
+        ? [index]
+        : [],
+    )
+    const second = prompts[1]
+    if (second === undefined) throw new Error('Pi thinking replay requires a second prompt')
+    const transcript: PiRpcReplayTranscript = {
+      ...original,
+      scenario: `${original.scenario}-thinking`,
+      metadata: { ...original.metadata, derivedFrom: original.scenario, purpose: 'per-turn thinking selection' },
+      entries: [
+        ...original.entries.slice(0, second),
+        { type: 'expect_outbound', frame: { type: 'set_thinking_level', level: 'xhigh', id: 't3-100' } },
+        {
+          type: 'emit_inbound',
+          frame: { type: 'response', command: 'set_thinking_level', id: 't3-100', success: true },
+        },
+        ...original.entries.slice(second),
+      ],
+    }
+    const { agent, events, config } = startTranscript(await workspace(), await writeTranscript(transcript))
+    await Effect.runPromise(agent.open(config))
+    const first = message('thinking-1', 'Respond with exactly: first fixture turn complete')
+    await Effect.runPromise(agent.send(first, await Effect.runPromise(agent.prepareInput(first, 0))))
+    await waitFor(() => events.some((event) => event.type === 'end'))
+    const input = {
+      ...message('thinking-2', 'Respond with exactly: second fixture turn complete'),
+      thinking: { id: 'thinking' as const, value: 'xhigh' },
+    }
+    await Effect.runPromise(agent.send(input, await Effect.runPromise(agent.prepareInput(input, 1))))
+    await waitFor(() => events.filter((event) => event.type === 'end').length === 2)
+    expect(events.some((event) => event.type === 'uncertain')).toBe(false)
+    await Effect.runPromise(agent.close())
+  })
+
   it.each([false, true])(
     'selects a per-turn model with native rejection=%s without resending input',
     async (rejected) => {

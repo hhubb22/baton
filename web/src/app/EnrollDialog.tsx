@@ -76,7 +76,7 @@ function detectOS(): DeviceOS {
   return 'Linux'
 }
 
-const placeholderName = 'My computer'
+const placeholderName = '我的电脑'
 
 function shellQuote(value: string, os: DeviceOS) {
   if (/^[\w .()-]*$/.test(value)) return `"${value}"`
@@ -130,8 +130,8 @@ function countdown(ms: number) {
 
 // 接入后只写系统；同步中或没有可用 Agent 时补一句。
 function availability(device: Device) {
-  if (device.connection === 'syncing') return 'Checking availability…'
-  return device.agents.some((agent) => !agent.problem) ? null : 'No agents available yet'
+  if (device.connection === 'syncing') return '正在检查可用性…'
+  return device.agents.some((agent) => !agent.problem) ? null : '暂无可用助手'
 }
 
 type Copied = { target: 'code' | 'command' | 'download'; ok: boolean }
@@ -222,7 +222,7 @@ function BrowserEnrollDialog({
     issued && showCommand
       ? registerCommand(issued.enrollment.coordinatorUrl, name, targetOS, device !== undefined, cli)
       : ''
-  const title = device ? 'Reconnect device' : 'Connect a device'
+  const title = device ? '重新连接设备' : '连接设备'
 
   const copy = (target: Copied['target'], value: string) => {
     copyText(value).then(
@@ -243,10 +243,10 @@ function BrowserEnrollDialog({
         title={title}
         wide
         finalFocus={finalFocus}
-        note={<Status tone="success">Connected</Status>}
+        note={<Status tone="success">已连接</Status>}
         actions={
           <Button variant="primary" onClick={close}>
-            Done
+            完成
           </Button>
         }
       >
@@ -267,42 +267,40 @@ function BrowserEnrollDialog({
 
   const closed = phase === 'expired' || phase === 'used'
   const codeLabels: Record<Exclude<Phase, 'connected'>, string> = {
-    loading: 'Getting a setup code…',
-    failed: 'Setup code',
-    pending: 'Setup code',
-    expired: 'Setup code expired',
-    used: 'Setup code already used',
+    loading: '正在获取设置码…',
+    failed: '设置码',
+    pending: '设置码',
+    expired: '设置码已过期',
+    used: '设置码已使用',
   }
 
   // 复制成功只换成对勾图标，不另加说明。
-  const blocked = <span {...stylex.props(styles.warning)}>Clipboard blocked. Copy it manually.</span>
+  const blocked = <span {...stylex.props(styles.warning)}>无法访问剪贴板，请手动复制。</span>
   let codeNote: ReactNode = null
   if (phase === 'expired' || phase === 'used') {
-    codeNote = <span {...stylex.props(styles.error)}>Run the command again with a new code.</span>
+    codeNote = <span {...stylex.props(styles.error)}>请使用新设置码重新运行命令。</span>
   } else if (copied?.target === 'code' && !copied.ok) {
     codeNote = blocked
   }
 
-  let commandNote: ReactNode = (
-    <span {...stylex.props(styles.helper)}>Paste the code and press Enter. It stays hidden.</span>
-  )
+  let commandNote: ReactNode = <span {...stylex.props(styles.helper)}>粘贴设置码并按 Enter，输入内容不会显示。</span>
   if (copied?.target === 'command' && !copied.ok) commandNote = blocked
 
   const notes: Record<Exclude<Phase, 'connected'>, ReactNode> = {
-    loading: <Status tone="hollow">Getting a new code…</Status>,
-    failed: <Status tone="attention">Can't reach Baton</Status>,
+    loading: <Status tone="hollow">正在获取新设置码…</Status>,
+    failed: <Status tone="attention">无法连接 Baton</Status>,
     pending: (
       <span {...stylex.props(styles.status)}>
-        <Status tone="hollow">Waiting for device…</Status>
+        <Status tone="hollow">等待设备连接…</Status>
         {issued && (
           <span {...stylex.props(styles.countdown)}>
-            Expires in {countdown(issued.enrollment.expiresIn - (now - issued.receivedAt))}
+            {countdown(issued.enrollment.expiresIn - (now - issued.receivedAt))} 后过期
           </span>
         )}
       </span>
     ),
-    expired: <Status tone="danger">Setup code expired</Status>,
-    used: <Status tone="danger">Setup code already used</Status>,
+    expired: <Status tone="danger">设置码已过期</Status>,
+    used: <Status tone="danger">设置码已使用</Status>,
   }
 
   const retry = phase === 'failed' || closed
@@ -319,10 +317,10 @@ function BrowserEnrollDialog({
       note={notes[phase]}
       actions={
         <>
-          <Button onClick={close}>Close</Button>
+          <Button onClick={close}>关闭</Button>
           {retry && (
             <Button variant="primary" onClick={request}>
-              Get a new code
+              获取新设置码
             </Button>
           )}
         </>
@@ -333,7 +331,7 @@ function BrowserEnrollDialog({
       ) : (
         <div {...stylex.props(styles.section)}>
           <label htmlFor="enroll-name" {...stylex.props(text.label)}>
-            Device name
+            设备名称
           </label>
           <div {...stylex.props(styles.nameRow)}>
             <Input
@@ -345,19 +343,19 @@ function BrowserEnrollDialog({
               style={styles.name}
             />
             <div {...stylex.props(styles.system)}>
-              <Segmented label="Operating system" options={systems} value={os} onChange={setOS} block />
+              <Segmented label="操作系统" options={systems} value={os} onChange={setOS} block />
             </div>
           </div>
         </div>
       )}
-      {downloads.isPending && <p {...stylex.props(text.small, styles.helper)}>Loading downloads…</p>}
+      {downloads.isPending && <p {...stylex.props(text.small, styles.helper)}>正在加载下载信息…</p>}
       {downloads.isError && (
         <div {...stylex.props(styles.section)}>
           <p role="alert" {...stylex.props(text.small, styles.error)}>
-            Couldn't load downloads.
+            无法加载下载信息。
           </p>
           <Button small onClick={() => void downloads.refetch()}>
-            Try again
+            重试
           </Button>
         </div>
       )}
@@ -372,7 +370,7 @@ function BrowserEnrollDialog({
                   download={item.file}
                   {...stylex.props(text.label, styles.link, focusRing.ring)}
                 >
-                  Download {item.kind === 'cli' ? 'CLI' : 'desktop app'} · {item.arch}
+                  下载{item.kind === 'cli' ? '命令行工具' : '桌面客户端'} · {item.arch}
                 </a>
                 <span {...stylex.props(text.caption, styles.helper)}>
                   {manifest.version} · {fileSize(item.size)}
@@ -381,19 +379,17 @@ function BrowserEnrollDialog({
               </div>
             ))}
           {desktopOnly && items.length > 0 ? (
-            <p {...stylex.props(text.small, styles.helper)}>
-              Install the desktop app, then choose “Open in desktop app” on Devices.
-            </p>
+            <p {...stylex.props(text.small, styles.helper)}>安装桌面客户端后，在设备页面选择“在桌面客户端打开”。</p>
           ) : (
             !desktopOnly &&
-            !cli && <p {...stylex.props(text.small, styles.helper)}>No CLI download available for {targetOS}.</p>
+            !cli && <p {...stylex.props(text.small, styles.helper)}>暂无适用于 {targetOS} 的命令行工具下载。</p>
           )}
           {items.length === 0 && desktopOnly && (
-            <p {...stylex.props(text.small, styles.helper)}>No desktop download available for Windows.</p>
+            <p {...stylex.props(text.small, styles.helper)}>暂无适用于 Windows 的桌面客户端下载。</p>
           )}
           {cliItems.length > 1 && (
             <Segmented
-              label="Architecture"
+              label="架构"
               options={cliItems.map((item) => ({ value: item.arch, label: item.arch }))}
               value={cli?.arch ?? arch}
               onChange={setArch}
@@ -402,7 +398,7 @@ function BrowserEnrollDialog({
           {cli && !desktopOnly && (
             <>
               <span id="enroll-download-label" {...stylex.props(text.label)}>
-                Download in terminal
+                在终端下载
               </span>
               <div {...stylex.props(styles.box)}>
                 <pre aria-labelledby="enroll-download-label" {...stylex.props(text.mono, styles.boxText)}>
@@ -410,14 +406,12 @@ function BrowserEnrollDialog({
                 </pre>
                 <IconButton
                   icon={copied?.target === 'download' && copied.ok ? 'check' : 'copy'}
-                  label="Copy download command"
+                  label="复制下载命令"
                   onClick={() => copy('download', downloadCommand)}
                 />
               </div>
               <p {...stylex.props(text.caption, styles.helper)}>
-                {copied?.target === 'download' && !copied.ok
-                  ? blocked
-                  : 'Check the SHA-256 before running the setup command.'}
+                {copied?.target === 'download' && !copied.ok ? blocked : '运行设置命令前，请核对 SHA-256。'}
               </p>
             </>
           )}
@@ -433,14 +427,14 @@ function BrowserEnrollDialog({
               aria-labelledby="enroll-code-label"
               {...stylex.props(text.mono, styles.boxText, (phase !== 'pending' || !code) && styles.dim)}
             >
-              {phase === 'loading' && 'Waiting for Baton…'}
-              {phase === 'failed' && 'No code issued'}
+              {phase === 'loading' && '正在等待 Baton…'}
+              {phase === 'failed' && '未生成设置码'}
               {phase !== 'loading' && phase !== 'failed' && code}
             </code>
             {phase === 'pending' && (
               <IconButton
                 icon={copied?.target === 'code' && copied.ok ? 'check' : 'copy'}
-                label="Copy setup code"
+                label="复制设置码"
                 onClick={() => copy('code', code)}
               />
             )}
@@ -451,7 +445,7 @@ function BrowserEnrollDialog({
       {issued && showCommand && phase !== 'failed' && (
         <div {...stylex.props(styles.section)}>
           <span id="enroll-command-label" {...stylex.props(text.label)}>
-            Run in terminal
+            在终端运行
           </span>
           <div {...stylex.props(styles.box)}>
             <pre aria-labelledby="enroll-command-label" {...stylex.props(text.mono, styles.boxText)}>
@@ -459,7 +453,7 @@ function BrowserEnrollDialog({
             </pre>
             <IconButton
               icon={copied?.target === 'command' && copied.ok ? 'check' : 'copy'}
-              label="Copy command"
+              label="复制命令"
               onClick={() => copy('command', command)}
             />
           </div>

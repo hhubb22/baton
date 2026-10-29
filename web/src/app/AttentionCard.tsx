@@ -73,11 +73,11 @@ const styles = stylex.create({
 })
 
 const statusLabels = {
-  pending: 'Waiting for your reply',
-  answered: 'Answered',
-  closed: 'Closed',
-  withdrawn: 'Withdrawn',
-  resolved: 'Resolved',
+  pending: '待回复',
+  answered: '已回复',
+  closed: '已关闭',
+  withdrawn: '已撤回',
+  resolved: '已解决',
 }
 const blankDraft: ItemDraft = { option: null, note: '', replying: false }
 
@@ -139,11 +139,11 @@ export function AttentionCard({
     setError(null)
     if (decision.kind === 'answer') {
       if (decision.option === null && !decision.note.trim()) {
-        setError('Choose an option or write a reply.')
+        setError('请选择一个选项或填写回复。')
         return
       }
       if (new TextEncoder().encode(decision.note).length > 4096) {
-        setError('Over 4 KB. Shorten it to send.')
+        setError('回复超过 4 KB，请缩短后发送。')
         return
       }
     }
@@ -154,17 +154,15 @@ export function AttentionCard({
           workspace.itemDrafts.set(item.id, null)
           onHandled?.(item.id, operation.phase === 'conflict' ? operation.detail : null)
           if (operation.phase === 'conflict')
-            setError(
-              operation.detail ?? `Already ${decision.kind === 'close' ? 'closed' : 'answered'} in another window.`,
-            )
+            setError(operation.detail ?? `此问题已在其他窗口${decision.kind === 'close' ? '关闭' : '回复'}。`)
         },
         onError: (cause) =>
           setError(
             cause instanceof ClientError && cause.code === 'invalid'
               ? cause.message
               : decision.kind === 'close'
-                ? `Couldn't close this ${system ? 'notice' : 'question'}. Try again.`
-                : "Couldn't send. Try again.",
+                ? `无法关闭${system ? '提示' : '问题'}，请重试。`
+                : '无法发送，请重试。',
           ),
       },
     )
@@ -189,7 +187,7 @@ export function AttentionCard({
           )}
           <span {...stylex.props(styles.status)}>
             <StatusDot tone={pending ? 'attention' : 'neutral'} />
-            {archived ? 'Project archived' : pending ? 'Needs reply' : statusLabels[item.status]}
+            {archived ? '项目已归档' : pending ? '待回复' : statusLabels[item.status]}
           </span>
           {thread && !inThread ? (
             <Link
@@ -201,12 +199,12 @@ export function AttentionCard({
               {thread.title}
             </Link>
           ) : !thread && !showProject ? (
-            <span {...stylex.props(styles.meta)}>{system ? 'Baton' : 'Project'}</span>
+            <span {...stylex.props(styles.meta)}>{system ? 'Baton' : '项目'}</span>
           ) : null}
           {pending && (
             <IconButton
               icon="close"
-              label={system ? 'Close notice' : 'Close question'}
+              label={system ? '关闭通知' : '关闭问题'}
               onClick={() => submit({ kind: 'close' })}
               style={styles.close}
             />
@@ -215,7 +213,7 @@ export function AttentionCard({
         <h2 {...stylex.props(text.heading, detail && text.title)}>{item.title}</h2>
         {!done && (
           <SelectionArea
-            label={archived ? 'Copy selection' : 'Ask project assistant'}
+            label={archived ? '复制所选内容' : '询问项目助手'}
             icon={archived ? 'copy' : 'reply'}
             describe={describe}
           >
@@ -228,7 +226,7 @@ export function AttentionCard({
           <>
             {pendingCount >= 10 && (
               <p {...stylex.props(text.caption, styles.meta)}>
-                {pendingCount} questions waiting in this project. Consider answering or closing older questions.
+                此项目有 {pendingCount} 个待处理问题，请先回答或关闭较早的问题。
               </p>
             )}
             <RadioGroup
@@ -253,12 +251,12 @@ export function AttentionCard({
                     key={index}
                     value={String(index)}
                     ref={(element) =>
-                      element?.setAttribute('aria-label', `${option}${index === item.recommended ? ', suggested' : ''}`)
+                      element?.setAttribute('aria-label', `${option}${index === item.recommended ? '，推荐' : ''}`)
                     }
                     label={
                       <>
                         {option}
-                        {index === item.recommended && <span {...stylex.props(styles.recommended)}>Suggested</span>}
+                        {index === item.recommended && <span {...stylex.props(styles.recommended)}>推荐</span>}
                       </>
                     }
                   />
@@ -268,8 +266,8 @@ export function AttentionCard({
                       <RadioItem
                         key="other"
                         value="other"
-                        label="Other…"
-                        ref={(element) => element?.setAttribute('aria-label', 'Other…')}
+                        label="其他…"
+                        ref={(element) => element?.setAttribute('aria-label', '其他…')}
                       />,
                     ]
                   : []),
@@ -282,7 +280,7 @@ export function AttentionCard({
                 aria-expanded={optionsExpanded}
                 onClick={() => setOptionsExpanded(!optionsExpanded)}
               >
-                {optionsExpanded ? 'Show fewer options' : `Show all ${item.options.length} options`}
+                {optionsExpanded ? '收起选项' : `显示全部 ${item.options.length} 个选项`}
               </Button>
             )}
             {draft.replying && (
@@ -294,7 +292,7 @@ export function AttentionCard({
                 {...stylex.props(styles.form)}
               >
                 <Field
-                  label={draft.option === null ? 'Your reply' : 'Note'}
+                  label={draft.option === null ? '你的回复' : '备注'}
                   optional={draft.option !== null}
                   error={error}
                 >
@@ -321,10 +319,10 @@ export function AttentionCard({
                       }
                     }}
                   >
-                    Cancel
+                    取消
                   </OpenUIButton>
                   <OpenUIButton size="small" type="submit">
-                    {handle.isPending ? 'Saving…' : 'Send reply'}
+                    {handle.isPending ? '正在保存…' : '发送回复'}
                   </OpenUIButton>
                 </div>
               </form>
@@ -337,7 +335,7 @@ export function AttentionCard({
             style={styles.action}
             onClick={() => void navigate({ to: '/projects/$projectId', params: { projectId: item.projectId } })}
           >
-            Go to project
+            前往项目
           </Button>
         )}
         {!pending && item.result && (
@@ -353,12 +351,12 @@ export function AttentionCard({
             {waiting && (
               <p>
                 {project?.status === 'paused'
-                  ? 'Reply saved · read after you resume'
+                  ? '回复已保存 · 恢复项目后读取'
                   : project?.agent.state === 'waitingDevice'
-                    ? 'Reply saved · read when a device is online'
+                    ? '回复已保存 · 设备上线后读取'
                     : project?.agent.state === 'blocked'
-                      ? 'Reply saved · retry from the project when ready'
-                      : 'Reply saved'}
+                      ? '回复已保存 · 请在项目中重试'
+                      : '回复已保存'}
               </p>
             )}
           </div>
@@ -370,7 +368,7 @@ export function AttentionCard({
         )}
         {handle.isPending && !draft.replying && (
           <p role="status" {...stylex.props(text.caption, styles.meta)}>
-            Saving reply…
+            正在保存回复…
           </p>
         )}
       </Card>

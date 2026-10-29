@@ -45,7 +45,7 @@ export function DesktopEnrollDialog({
   const expired = enrollment.data?.state === 'expired'
   const connected = enrollment.data?.state === 'connected'
   const canConnect = current && !foreign && (!current.registered || needsDesktopReauth(current, devices.data ?? []))
-  const failure = error ?? (expired ? 'Setup code expired. Try again.' : null)
+  const failure = error ?? (expired ? '设置码已过期，请重试。' : null)
   const reason = current && desktopStatusReason(current)
 
   const connect = async () => {
@@ -59,7 +59,7 @@ export function DesktopEnrollDialog({
       const status = await desktop.bridge.status()
       desktop.update(status)
       if (device && (!status.registered || device.id !== status.node_id))
-        throw new Error('Reconnect this device in a browser.')
+        throw new Error('请在浏览器中重新连接此设备。')
       if (status.registered && !needsDesktopReauth(status, devices.data ?? [])) {
         setAccepted(true)
         return
@@ -68,17 +68,15 @@ export function DesktopEnrollDialog({
       let issued = await client.createEnrollment(nodeId)
       if (issued.state === 'expired' || issued.expiresIn <= 0) issued = await client.createEnrollment(nodeId)
       setEnrollmentId(issued.id)
-      if (issued.state !== 'pending' || issued.expiresIn <= 0) throw new Error('Setup code expired. Try again.')
+      if (issued.state !== 'pending' || issued.expiresIn <= 0) throw new Error('设置码已过期，请重试。')
       secret = issued.code
-      if (!secret) throw new Error('No setup code was issued. Try again.')
+      if (!secret) throw new Error('未生成设置码，请重试。')
       const result = status.registered
         ? await desktop.bridge.reauth({ code: secret })
         : await desktop.bridge.enroll({ code: secret, ...(name.trim() ? { displayName: name.trim() } : {}) })
       desktop.update(result)
       if (result.state === 'rejected' || result.connection_state === 'rejected') {
-        setError(
-          (desktopStatusReason(result) ?? 'Could not connect this computer. Try again.').replaceAll(secret, '[hidden]'),
-        )
+        setError((desktopStatusReason(result) ?? '无法连接此电脑，请重试。').replaceAll(secret, '[hidden]'))
       } else setAccepted(result.registered)
     } catch (cause) {
       // 桥接异常也可能包含输入，接入口令在写入界面状态前移除。
@@ -95,30 +93,30 @@ export function DesktopEnrollDialog({
       onOpenChange={(open) => {
         if (!open) onClose()
       }}
-      title={accepted || connected ? 'This computer' : reauth ? 'Reconnect this computer' : 'Connect this computer'}
+      title={accepted || connected ? '此电脑' : reauth ? '重新连接此电脑' : '连接此电脑'}
       finalFocus={finalFocus}
-      note={busy ? 'Connecting…' : current ? desktopStatusLabel(current) : 'Checking this computer…'}
+      note={busy ? '正在连接…' : current ? desktopStatusLabel(current) : '正在检查此电脑…'}
       actions={
         <>
-          <Button onClick={onClose}>{connected || accepted ? 'Done' : 'Close'}</Button>
+          <Button onClick={onClose}>{connected || accepted ? '完成' : '关闭'}</Button>
           {(!accepted || expired || current?.code === 'needs_reauth') && canConnect && (
             <Button variant="primary" aria-busy={busy} onClick={() => void connect()}>
-              {failure ? 'Try again' : reauth ? 'Reconnect' : 'Connect'}
+              {failure ? '重试' : reauth ? '重新连接' : '连接'}
             </Button>
           )}
-          {desktop.isError && <Button onClick={() => void desktop.refetch()}>Try again</Button>}
+          {desktop.isError && <Button onClick={() => void desktop.refetch()}>重试</Button>}
         </>
       }
     >
       {!reauth && (
         <div {...stylex.props(styles.field)}>
           <label htmlFor="desktop-device-name" {...stylex.props(text.label)}>
-            Device name
+            设备名称
           </label>
           <Input
             id="desktop-device-name"
             value={name}
-            placeholder="Computer name"
+            placeholder="电脑名称"
             autoComplete="off"
             maxLength={120}
             onChange={(event) => setName(event.target.value)}
@@ -129,8 +127,8 @@ export function DesktopEnrollDialog({
       {(failure || foreign || desktop.isError || reason) && (
         <p role="alert" {...stylex.props(text.small, styles.error)}>
           {foreign
-            ? 'Reconnect this device in a browser.'
-            : (failure ?? (desktop.isError ? "Couldn't read this computer's status. Try again." : reason))}
+            ? '请在浏览器中重新连接此设备。'
+            : (failure ?? (desktop.isError ? '无法读取此电脑的状态，请重试。' : reason))}
         </p>
       )}
     </Dialog>

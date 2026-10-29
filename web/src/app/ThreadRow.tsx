@@ -39,7 +39,7 @@ export function ThreadRow({ thread, device }: { thread: Thread; device: Device |
       {thread.unread && <UnreadDot />}
       <span {...stylex.props(text.caption, styles.folder, text.truncate)}>{folderName(thread.folder)}</span>
       <span {...stylex.props(text.caption, styles.meta)}>
-        {device?.name ?? 'Removed device'} · {thread.agent ? agentNames[thread.agent] : 'Command'} · {view.status.label}
+        {device?.name ?? '已移除的设备'} · {thread.agent ? agentNames[thread.agent] : '命令'} · {view.status.label}
       </span>
     </Link>
   )

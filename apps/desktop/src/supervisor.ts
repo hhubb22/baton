@@ -121,22 +121,14 @@ export class Supervisor {
         ? failure.code
         : undefined
     const publicReason =
-      knownCode === 'needs_reauth'
-        ? 'Sign-in expired'
-        : knownCode === 'deployment_invalid'
-          ? 'Invalid connection settings'
-          : knownCode
+      knownCode === 'needs_reauth' ? '登录已过期' : knownCode === 'deployment_invalid' ? '连接设置无效' : knownCode
     // stderr 的字段名和敏感值可能分行；最近退出只保留已知错误码与固定说明。
     const detail =
-      knownCode === 'spawn_failed'
-        ? '无法启动内置 batond'
-        : stderr.trim()
-          ? 'batond reported a failure; check logs'
-          : undefined
+      knownCode === 'spawn_failed' ? '无法启动内置 batond' : stderr.trim() ? 'batond 报告了错误，请查看日志' : undefined
     this.lastExit = {
       at: new Date((this.options.now ?? Date.now)()).toISOString(),
       reason: [
-        `batond ${this.stopReason ?? 'exited'} (code: ${code ?? 'none'}, signal: ${signal ?? 'none'})`,
+        `batond ${this.stopReason ?? '已退出'} (退出码: ${code ?? '无'}, 信号: ${signal ?? '无'})`,
         publicReason,
         detail,
       ]
@@ -167,7 +159,7 @@ export class Supervisor {
       }, decision.delay)
   }
 
-  async stop(reason = 'stopped by client'): Promise<void> {
+  async stop(reason = '已由客户端停止'): Promise<void> {
     const generation = ++this.generation
     this.stopped = true
     if (this.timer) clearTimeout(this.timer)
@@ -193,7 +185,7 @@ export class Supervisor {
   }
 
   async restart(shouldStart: () => boolean = () => true) {
-    const stopping = this.stop('stopped for restart')
+    const stopping = this.stop('已停止以便重启')
     const generation = this.generation
     await stopping
     if (generation !== this.generation || !shouldStart()) return

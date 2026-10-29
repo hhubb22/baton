@@ -11,6 +11,7 @@ import { PiSettings } from '@t3tools/provider-pi/settings'
 import { checkPiProviderStatus } from '@t3tools/provider-pi/server/status'
 import { makeProviderHostDriver } from '../../agent-host/driver.ts'
 import { AgentHostDriver, AgentHostError, type ProbeResult } from '../../agent-host/protocol.ts'
+import { thinkingCapability } from '../thinking.ts'
 
 const instanceId = ProviderInstanceIdSchema.make(PI_PROVIDER)
 
@@ -55,6 +56,10 @@ const piProbe = (launchArgs = '') =>
     const result: ProbeResult = {
       authenticated,
       models,
+      model_thinking: status.models.flatMap((model) => {
+        const thinking = thinkingCapability(model.capabilities)
+        return thinking ? [{ model: model.slug, thinking }] : []
+      }),
       ...(reason ? { reason } : {}),
       details: {
         version,

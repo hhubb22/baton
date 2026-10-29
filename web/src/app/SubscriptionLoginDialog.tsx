@@ -75,27 +75,27 @@ export function SubscriptionLoginDialog({
     <Dialog
       open
       onOpenChange={(open) => !open && onClose()}
-      title={`${localSetup ? 'Set up' : 'Sign in to'} ${provider} on ${device.name}`}
+      title={`在 ${device.name} 上${localSetup ? '设置' : '登录'} ${provider}`}
       description={
         localSetup
-          ? `Run these commands on ${device.name} using the same account that connected it to Baton.`
+          ? `请使用连接 Baton 的同一账号，在 ${device.name} 上运行这些命令。`
           : signedIn
-            ? 'Signed in'
-            : 'Open the sign-in page and enter this code. Keep this window open to see when sign-in finishes.'
+            ? '已登录'
+            : '打开登录页面并输入此代码。请保持窗口打开，以便查看登录结果。'
       }
       note={
         !signedIn && challenge && !start.isPending && !start.isError && !expired
-          ? `Expires in ${Math.floor(remaining / 60)}m ${remaining % 60}s`
+          ? `${Math.floor(remaining / 60)} 分 ${remaining % 60} 秒后过期`
           : undefined
       }
       finalFocus={() => document.getElementById(`device-row-${device.id}`)}
-      actions={<Button onClick={onClose}>{signedIn ? 'Done' : 'Close'}</Button>}
+      actions={<Button onClick={onClose}>{signedIn ? '完成' : '关闭'}</Button>}
     >
       {localSetup && (
         <>
           {methods.includes('oauth') && (
             <>
-              <p {...stylex.props(text.small)}>Sign in with your subscription:</p>
+              <p {...stylex.props(text.small)}>使用订阅登录：</p>
               <pre {...stylex.props(text.mono, styles.code)}>{`batond login ${providerId}`}</pre>
             </>
           )}
@@ -105,15 +105,15 @@ export function SubscriptionLoginDialog({
         <>
           {start.isPending && (
             <p role="status" {...stylex.props(text.small, text.muted)}>
-              Getting sign-in code…
+              正在获取登录码…
             </p>
           )}
           {start.isError && (
             <>
               <p role="alert" {...stylex.props(text.small, styles.error)}>
-                Couldn't start sign-in. Try again.
+                无法开始登录，请重试。
               </p>
-              <Button onClick={retry}>Retry sign-in</Button>
+              <Button onClick={retry}>重新登录</Button>
             </>
           )}
           {!start.isPending &&
@@ -122,34 +122,34 @@ export function SubscriptionLoginDialog({
             (expired ? (
               <>
                 <p role="status" {...stylex.props(text.small, text.muted)}>
-                  Sign-in code expired. Get a new code to continue.
+                  登录码已过期，请获取新码后继续。
                 </p>
-                <Button onClick={retry}>Get a new code</Button>
+                <Button onClick={retry}>获取新验证码</Button>
               </>
             ) : (
               <>
-                <div aria-label="Sign-in code" {...stylex.props(text.mono, styles.code)}>
+                <div aria-label="登录码" {...stylex.props(text.mono, styles.code)}>
                   {challenge.userCode}
                 </div>
                 <div {...stylex.props(styles.actions)}>
-                  <Button onClick={() => void copyCode()}>Copy code</Button>
+                  <Button onClick={() => void copyCode()}>复制验证码</Button>
                   <a
                     href={challenge.verificationUri}
                     target="_blank"
                     rel="noreferrer"
                     {...stylex.props(text.small, styles.link)}
                   >
-                    Open sign-in page
+                    打开登录页面
                   </a>
                 </div>
                 {copy && (
                   <p role="status" {...stylex.props(text.caption, copy === 'failed' ? styles.error : text.muted)}>
-                    {copy === 'copied' ? 'Code copied' : 'Clipboard blocked. Copy it manually.'}
+                    {copy === 'copied' ? '代码已复制' : '无法访问剪贴板，请手动复制。'}
                   </p>
                 )}
                 {device.connection !== 'online' && (
                   <p role="status" {...stylex.props(text.small, text.muted)}>
-                    Reconnect {device.name} to check sign-in status.
+                    请重新连接 {device.name}，以检查登录状态。
                   </p>
                 )}
               </>

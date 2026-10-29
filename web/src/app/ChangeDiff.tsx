@@ -34,7 +34,7 @@ export function ChangeDiff({ patch, path, fallback }: { patch: string; path?: st
   )
   if (!files) return fallback
   return (
-    <div aria-label="File changes" {...stylex.props(styles.root)}>
+    <div aria-label="文件改动" {...stylex.props(styles.root)}>
       {files.map((file, index) => (
         <DiffSurface key={index} file={file} options={options} />
       ))}

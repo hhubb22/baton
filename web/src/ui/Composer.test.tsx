@@ -16,7 +16,7 @@ it('expands and shrinks with the message and limits the input height', () => {
     return <Composer value={value} onChange={setValue} onSend={() => {}} placeholder="Message" />
   }
   render(<Example />)
-  const input = screen.getByRole('textbox', { name: 'Message' })
+  const input = screen.getByRole('textbox', { name: '消息' })
   expect(input).toHaveStyle({ height: '24px' })
   fireEvent.change(input, { target: { value: 'one\ntwo\nthree' } })
   expect(input).toHaveStyle({ height: '72px' })
@@ -40,7 +40,7 @@ it('keeps the roomy input at least four lines tall as its content changes', () =
     return <Composer roomy value={value} onChange={setValue} onSend={() => {}} placeholder="Message" />
   }
   render(<Example />)
-  const input = screen.getByRole('textbox', { name: 'Message' })
+  const input = screen.getByRole('textbox', { name: '消息' })
   expect(input).toHaveStyle({ height: '96px' })
   fireEvent.change(input, { target: { value: 'one\ntwo\nthree\nfour\nfive' } })
   expect(input).toHaveStyle({ height: '120px' })

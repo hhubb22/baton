@@ -14,7 +14,7 @@ it('defaults to the system application and persists a native editor choice priva
     expect((await editorPreferences(directory)).get()).toBe(editor)
     expect(JSON.parse(await readFile(join(directory, 'editor.json'), 'utf8'))).toEqual({ editor })
     if (process.platform !== 'win32') expect((await stat(join(directory, 'editor.json'))).mode & 0o777).toBe(0o600)
-    await expect(settings.set('editor --arbitrary-argument')).rejects.toThrow('Choose an editor')
+    await expect(settings.set('editor --arbitrary-argument')).rejects.toThrow('请选择编辑器')
     expect(settings.get()).toBe(editor)
     await settings.set(null)
     expect((await editorPreferences(directory)).get()).toBeNull()

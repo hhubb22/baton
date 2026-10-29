@@ -21,12 +21,12 @@ interface OutputResponse {
   full_output?: FullOutputPage
 }
 const messages: Record<string, string> = {
-  node_offline: 'The device is offline. Connect it to read the full output.',
-  node_syncing: 'The device is reconnecting. Try again shortly.',
-  output_missing: 'The full output is no longer on this device.',
-  output_expired: 'The retention period for this output has ended.',
-  output_identity_mismatch: 'This output does not belong to this reply.',
-  output_changed: 'The saved output changed. Read it again from the start.',
+  node_offline: '设备已离线，请连接设备以读取完整输出。',
+  node_syncing: '设备正在重新连接，请稍后重试。',
+  output_missing: '完整输出已不在此设备上。',
+  output_expired: '此输出已超过保留期限。',
+  output_identity_mismatch: '此输出不属于这条回复。',
+  output_changed: '保存的输出已更改，请从头读取。',
 }
 
 export function createFullOutputReader(request: HttpContext['request']) {
@@ -38,7 +38,7 @@ export function createFullOutputReader(request: HttpContext['request']) {
       cursor,
     })
     const result = await request<OutputResponse>(`/threads/${apiPath(threadId)}/output?${query}`, { signal })
-    if (!result.ok) throw new Error(messages[result.code ?? ''] ?? 'The device could not read this output. Try again.')
+    if (!result.ok) throw new Error(messages[result.code ?? ''] ?? '设备无法读取此输出，请重试。')
     const page = result.full_output
     if (
       !page ||
@@ -60,15 +60,14 @@ export function createFullOutputReader(request: HttpContext['request']) {
       typeof page.data !== 'string' ||
       page.data.length > 16 * 1024
     )
-      throw new Error('The device returned an invalid output page.')
+      throw new Error('设备返回的输出页面无效。')
     let bytes: Uint8Array
     try {
       bytes = Uint8Array.from(atob(page.data), (char) => char.charCodeAt(0))
     } catch {
-      throw new Error('The device returned an invalid output page.')
+      throw new Error('设备返回的输出页面无效。')
     }
-    if (bytes.length !== page.next_offset - page.offset)
-      throw new Error('The device returned an incomplete output page.')
+    if (bytes.length !== page.next_offset - page.offset) throw new Error('设备返回的输出页面不完整。')
     return { page, bytes }
   }
 }

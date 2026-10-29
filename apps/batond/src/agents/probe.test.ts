@@ -193,6 +193,24 @@ describe.each(providers)('%s report', (agentType) => {
   })
 })
 
+it.each(['codex', 'pi'] as const)('reports %s thinking choices with their model', async (agentType) => {
+  const thinking = {
+    id: agentType === 'codex' ? ('reasoningEffort' as const) : ('thinking' as const),
+    options: [{ id: 'high', label: 'High', is_default: true }],
+  }
+  const report = await probe(agentType, {
+    authenticated: 'valid',
+    models: ['model-a', 'model-b'],
+    model_thinking: [{ model: 'model-a', thinking }],
+    details: { installed: true },
+  })
+  expect(report.models).toEqual([
+    { id: 'model-a', name: 'model-a', thinking },
+    { id: 'model-b', name: 'model-b' },
+  ])
+  expect(Schema.is(RuntimeAgent)(report)).toBe(true)
+})
+
 describe('Cursor installation', () => {
   it.each([{ integrity: false }, { sandboxHelper: false }])('reports dependency failures: %j', async (details) => {
     expect(

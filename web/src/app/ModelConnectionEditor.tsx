@@ -68,7 +68,7 @@ export function ModelConnectionEditor({
         setModels(complete.models.join('\n'))
       })
       .catch(() => {
-        if (active) setError('Could not load the complete model list. Reconnect the device and try again.')
+        if (active) setError('无法加载完整模型列表，请重新连接设备后重试。')
       })
     return () => {
       active = false
@@ -105,7 +105,7 @@ export function ModelConnectionEditor({
       setKey('')
       onBack()
     } catch {
-      setError('Could not save the connection. Check the fields and device status, then try again.')
+      setError('无法保存连接，请检查填写内容和设备状态后重试。')
     } finally {
       setSaving(false)
     }
@@ -113,11 +113,11 @@ export function ModelConnectionEditor({
   return (
     <section {...stylex.props(styles.section)}>
       <Button small variant="ghost" style={styles.back} onClick={onBack}>
-        Back to {device.name}
+        返回 {device.name}
       </Button>
-      <h3 {...stylex.props(text.title)}>{initial ? 'Edit API connection' : 'Add API connection'}</h3>
-      <p {...stylex.props(text.caption, text.muted)}>Each device can store up to 29 API connections.</p>
-      <Field label="Name">
+      <h3 {...stylex.props(text.title)}>{initial ? '编辑 API 连接' : '添加 API 连接'}</h3>
+      <p {...stylex.props(text.caption, text.muted)}>每台设备最多可保存 29 个 API 连接。</p>
+      <Field label="名称">
         {(props) => (
           <Input
             {...props}
@@ -126,7 +126,7 @@ export function ModelConnectionEditor({
           />
         )}
       </Field>
-      <Field label="Protocol">
+      <Field label="协议">
         {(props) => (
           <select
             {...props}
@@ -156,7 +156,7 @@ export function ModelConnectionEditor({
           </select>
         )}
       </Field>
-      <Field label="Base URL">
+      <Field label="服务地址">
         {(props) => (
           <Input
             {...props}
@@ -165,8 +165,8 @@ export function ModelConnectionEditor({
           />
         )}
       </Field>
-      <p {...stylex.props(text.caption, text.muted)}>Request URL: {path}</p>
-      <Field label="Model IDs" helper="One model ID per line.">
+      <p {...stylex.props(text.caption, text.muted)}>请求地址： {path}</p>
+      <Field label="模型 ID" helper="每行输入一个模型 ID。">
         {(props) => (
           <TextArea
             {...props}
@@ -178,16 +178,16 @@ export function ModelConnectionEditor({
       </Field>
       {connection.modelsTruncated && (
         <p role="alert" {...stylex.props(text.small, styles.error)}>
-          Loading the complete model list from this device is required before saving changes.
+          保存更改前，需要从此设备加载完整模型列表。
         </p>
       )}
       {local ? (
-        <Field label="API key" helper="Leave blank to keep the saved key.">
+        <Field label="API 密钥" helper="留空可保留已保存的密钥。">
           {(props) => <Input {...props} type="password" value={key} onChange={(event) => setKey(event.target.value)} />}
         </Field>
       ) : (
         <p {...stylex.props(text.caption, text.muted)}>
-          After saving, on {device.name} run:{' '}
+          保存后，请在 {device.name} 上运行：{' '}
           <code>batond project-runtime connection-key {connection.id} &lt; key-file</code>
         </p>
       )}
@@ -198,14 +198,13 @@ export function ModelConnectionEditor({
       )}
       {confirmDelete && (
         <p {...stylex.props(text.small)}>
-          Deleting this connection will leave{' '}
-          {affected.length ? affected.map((project) => project.name).join(', ') : 'no projects'} waiting for a new model
-          source.
+          删除此连接后，{affected.length ? affected.map((project) => project.name).join('、') : '没有项目'}
+          将等待新的模型来源。
         </p>
       )}
       {projects.isError && initial && (
         <p role="alert" {...stylex.props(text.small, styles.error)}>
-          Couldn't load projects. Try again before deleting this connection.
+          无法加载项目，请重试后再删除此连接。
         </p>
       )}
       <div {...stylex.props(styles.actions)}>
@@ -216,14 +215,14 @@ export function ModelConnectionEditor({
             disabled={saving || !projects.isSuccess}
             onClick={() => (confirmDelete ? void run('delete') : setConfirmDelete(true))}
           >
-            {confirmDelete ? 'Confirm delete' : 'Delete connection'}
+            {confirmDelete ? '确认删除' : '删除连接'}
           </Button>
         )}
         <Button disabled={saving} onClick={onBack}>
-          Cancel
+          取消
         </Button>
         <Button variant="primary" disabled={saving || connection.modelsTruncated} onClick={() => void run('save')}>
-          Save connection
+          保存连接
         </Button>
       </div>
     </section>

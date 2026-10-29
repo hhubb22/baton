@@ -33,11 +33,11 @@ const styles = stylex.create({
 type Notice = LoginNotice | 'unavailable'
 
 const notices: Record<Notice, { title: string; detail: string }> = {
-  signedOut: { title: 'You are signed out', detail: '' },
-  expired: { title: 'Your sign-in expired', detail: '' },
-  passwordReset: { title: 'Password reset by administrator', detail: 'Other sessions were signed out.' },
-  passwordUpdated: { title: 'Password updated', detail: 'Sign in again with your new password.' },
-  unavailable: { title: "Can't reach Baton", detail: '' },
+  signedOut: { title: '已退出登录', detail: '' },
+  expired: { title: '登录已过期', detail: '' },
+  passwordReset: { title: '管理员已重置密码', detail: '其他会话已退出。' },
+  passwordUpdated: { title: '密码已更新', detail: '使用新密码重新登录。' },
+  unavailable: { title: '无法连接 Baton', detail: '' },
 }
 
 function unavailable(error: Error | null) {
@@ -86,15 +86,15 @@ export function LoginPage() {
     )
   }
 
-  let label = 'Sign in'
-  if (signIn.isPending) label = 'Signing in…'
-  else if (unreachable) label = 'Try signing in again'
+  let label = '登录'
+  if (signIn.isPending) label = '正在登录…'
+  else if (unreachable) label = '重新登录'
 
   return (
     <AuthShell>
       <div {...stylex.props(styles.brand)}>
         <BrandMark tone="color" size={36} />
-        <h1 {...stylex.props(text.title)}>Sign in to Baton</h1>
+        <h1 {...stylex.props(text.title)}>登录 Baton</h1>
       </div>
       {notice && (
         <div role={notice === 'unavailable' ? 'alert' : 'status'} {...stylex.props(styles.notice)}>
@@ -103,7 +103,7 @@ export function LoginPage() {
         </div>
       )}
       <form onSubmit={submit} {...stylex.props(styles.form)}>
-        <Field label="Username">
+        <Field label="用户名">
           {(props) => (
             <Input
               {...props}
@@ -116,14 +116,14 @@ export function LoginPage() {
             />
           )}
         </Field>
-        <Field label="Password" error={invalid ? 'Invalid username or password.' : undefined}>
+        <Field label="密码" error={invalid ? '用户名或密码错误。' : undefined}>
           {(props) => (
             <Input
               {...props}
               ref={passwordRef}
               type="password"
               autoComplete="current-password"
-              placeholder={notice === 'passwordReset' ? 'New password' : 'Password'}
+              placeholder={notice === 'passwordReset' ? '新密码' : '密码'}
               value={password}
               onChange={(event) => {
                 setPassword(event.target.value)
@@ -136,7 +136,7 @@ export function LoginPage() {
           {label}
         </Button>
       </form>
-      <p {...stylex.props(text.caption, text.muted, styles.note)}>No account? Ask your administrator.</p>
+      <p {...stylex.props(text.caption, text.muted, styles.note)}>没有账号？请联系管理员。</p>
     </AuthShell>
   )
 }

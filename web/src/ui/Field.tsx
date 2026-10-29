@@ -56,7 +56,7 @@ export function Field({
     <div {...stylex.props(styles.field)}>
       <label htmlFor={id} {...stylex.props(text.label, styles.label)}>
         {label}
-        {optional && <span {...stylex.props(styles.optional)}> (optional)</span>}
+        {optional && <span {...stylex.props(styles.optional)}> （可选）</span>}
       </label>
       {children({ id, 'aria-invalid': error ? true : undefined, 'aria-describedby': note ? noteId : undefined })}
       {note && (

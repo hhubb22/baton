@@ -61,16 +61,16 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
   const submit = () => {
     if (create.isPending) return
     if (name.trim() === '') {
-      setNameError('Enter a project name.')
+      setNameError('请输入项目名称。')
       nameRef.current?.focus()
       return
     }
     if (!validProjectEmoji(emoji)) {
-      setEmojiError('Choose or enter one emoji.')
+      setEmojiError('请选择或输入一个表情。')
       return
     }
     if (!subscription.trim() || !model.trim()) {
-      setFailure('Choose a provider and model, or enter them manually.')
+      setFailure('请选择或手动输入服务商和模型。')
       return
     }
     setFailure(null)
@@ -83,9 +83,7 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
         },
         onError: (error) =>
           setFailure(
-            error instanceof ClientError && error.code === 'invalid'
-              ? error.message
-              : "Couldn't create the project. Try again.",
+            error instanceof ClientError && error.code === 'invalid' ? error.message : '无法创建项目，请重试。',
           ),
       },
     )
@@ -95,8 +93,8 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
     <Dialog
       open
       onOpenChange={(open) => !open && onClose()}
-      title="New project"
-      description="A project has its own assistant that opens threads on your devices and reports back."
+      title="新建项目"
+      description="项目助手会在你的设备上新建对话并汇报结果。"
       note={
         failure && (
           <span role="alert" {...stylex.props(styles.failure)}>
@@ -106,9 +104,9 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
       }
       actions={
         <>
-          <DialogClose render={<Button>Cancel</Button>} />
+          <DialogClose render={<Button>取消</Button>} />
           <Button variant="primary" onClick={submit}>
-            {create.isPending ? 'Creating…' : failure ? 'Try again' : 'Create project'}
+            {create.isPending ? '正在创建…' : failure ? '重试' : '创建项目'}
           </Button>
         </>
       }
@@ -119,7 +117,7 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
           submit()
         }}
       >
-        <Field label="Name" error={nameError}>
+        <Field label="名称" error={nameError}>
           {(props) => (
             <Input
               {...props}
@@ -143,12 +141,12 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
           setEmojiError(null)
         }}
       />
-      <Field label="Goal" optional>
+      <Field label="目标" optional>
         {(props) => (
           <TextArea
             {...props}
             value={goal}
-            placeholder="What should this project achieve?"
+            placeholder="这个项目要达成什么目标？"
             onChange={(event) => setGoal(event.target.value)}
           />
         )}
@@ -162,10 +160,8 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
       />
       {devices.data && subscription && ready === 0 && (
         <p {...stylex.props(text.caption, styles.hint)}>
-          {sourceNodeId
-            ? 'This connection needs its device online and an API key.'
-            : `No online device has ${subscriptionLabel} signed in.`}{' '}
-          Messages wait until it is available.
+          {sourceNodeId ? '此连接需要设备在线并配置 API 密钥。' : `在线设备均未登录 ${subscriptionLabel}。`}{' '}
+          可用后将发送消息。
         </p>
       )}
     </Dialog>

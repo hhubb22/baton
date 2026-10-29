@@ -4,6 +4,8 @@
 
 原生程序从 PATH 查找 `codex`，认证和配置使用设备的 `CODEX_HOME`，未设置时沿用原生默认位置。host 仅继承该配置项与系统必要变量。模型取 Thread 的 `model` 或 `adapter_config.model`，未指定时使用上游 contracts 的 `DEFAULT_MODEL`；只读探测把上游标记的默认模型放在目录首位。排队消息可逐轮指定模型，host 把该选择同时写入上游 `startTurn.modelSelection` 和 `appThread.modelSelection`，由 adapter 传给原生 `turn/start`；插入消息沿用活动回合模型。
 
+探测保留上游每个模型的 `reasoningEffort` 选项及默认值；排队消息的思考强度随模型选择传入上游，省略时使用 Codex 默认值。
+
 运行策略是 `approvalPolicy: never`、`sandboxPolicy: { type: workspaceWrite, networkAccess: false, writableRoots: [] }`；审批 reviewer 沿用上游 user 模式。运行时权限类请求只允许本次请求，提问（含 MCP elicitation）转发网页等待回答，停止后到达的请求一律取消。
 
 公共 `agents/probe.ts` 的只读探测在临时空工作目录的 host 中执行上游 Codex 安装、版本、认证和模型检查，不发送 prompt、不打开登录。程序已安装且认证为 valid 或 unknown 时报告 available，开放新建与恢复；缺程序或明确 missing 时报告 unavailable。版本、系统、认证未知和模型目录缺失写入 reason，不另设版本或系统白名单；版本未知不阻止新建，目录不可读时使用上游默认模型。整次 host 探测失败且安装状态未确认时报告 unverified。上游支持会话内换模型，`switch_model` 为 true。提交失败且不能证明原生尚未接收输入时保留 unknown，只查证据，不自动重发；显式恢复使用最近确认提交的回合模型。

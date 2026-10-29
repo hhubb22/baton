@@ -335,31 +335,27 @@ const styles = stylex.create({
 
 const recentLimit = 5
 
-function plural(count: number, word: string) {
-  return `${count} ${count === 1 ? word : `${word}s`}`
-}
-
 function dayLabel(at: number, now: number) {
   const day = (value: number) => new Date(value).toDateString()
-  if (day(at) === day(now)) return 'Today'
-  if (day(at) === day(now - 86_400_000)) return 'Yesterday'
-  return new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  if (day(at) === day(now)) return '今天'
+  if (day(at) === day(now - 86_400_000)) return '昨天'
+  return new Date(at).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
 }
 
 function deliveryNote(delivery: Delivery) {
   switch (delivery) {
     case 'submitted':
-      return 'Sending…'
+      return '正在发送…'
     case 'saved':
-      return 'Saved'
+      return '已保存'
     case 'queued':
-      return 'Waiting for the assistant'
+      return '等待助手'
     case 'waitingDevice':
-      return 'Waiting for a device'
+      return '等待设备'
     case 'withdrawn':
-      return 'Not sent · you stopped the run'
+      return '未发送 · 运行已停止'
     case 'unknown':
-      return 'Not sure if the assistant received this'
+      return '无法确认助手是否收到'
     case 'delivered':
       return null
   }
@@ -372,9 +368,9 @@ function processSummary(steps: ProcessStep[]) {
   const notes = steps.filter((step) => step.kind === 'note').length
   const tools = steps.filter((step) => step.kind === 'tool' && step.name !== 'nodes.exec').length
   const parts = []
-  if (commands > 0) parts.push(`ran ${plural(commands, 'command')}`)
-  if (tools > 0) parts.push(`used ${plural(tools, 'tool')}`)
-  if (notes > 0) parts.push(`${plural(notes, 'note')}`)
+  if (commands > 0) parts.push(`运行 ${commands} 条命令`)
+  if (tools > 0) parts.push(`使用 ${tools} 个工具`)
+  if (notes > 0) parts.push(`${notes} 条记录`)
   const line = parts.join(' · ')
   return line.charAt(0).toUpperCase() + line.slice(1)
 }
@@ -388,40 +384,40 @@ function toolLabel(step: Extract<ProcessStep, { kind: 'tool' }>) {
     } catch {
       // 无法解析时保留工具名称。
     }
-    return 'Run command'
+    return '运行命令'
   }
   const labels: Record<string, string> = {
-    'threads.create': 'Open thread',
-    'threads.send': 'Send to thread',
-    'threads.read': 'Read thread',
-    'threads.list': 'List threads',
-    'threads.get': 'Check thread',
-    'threads.trace': 'Read thread activity',
-    'threads.stop': 'Stop thread',
-    'threads.resume': 'Resume thread',
-    'threads.archive': 'Archive thread',
-    'threads.withdraw': 'Withdraw message',
-    'devices.list': 'List devices',
-    'inbox.ask': 'Ask a question',
-    'inbox.list': 'List questions',
-    'inbox.get': 'Read question',
-    'inbox.withdraw': 'Withdraw question',
-    'history.search': 'Search conversation',
-    'history.read': 'Read conversation',
-    'memory.recall': 'Search memory',
-    'memory.read': 'Read memory',
-    'memory.remember': 'Save memory',
-    'memory.correct': 'Update memory',
-    'memory.retire': 'Retire memory',
-    'memory.restore': 'Restore memory',
+    'threads.create': '新建对话',
+    'threads.send': '发送到对话',
+    'threads.read': '读取对话',
+    'threads.list': '查看对话列表',
+    'threads.get': '查看对话',
+    'threads.trace': '查看对话执行过程',
+    'threads.stop': '停止对话',
+    'threads.resume': '恢复对话',
+    'threads.archive': '归档对话',
+    'threads.withdraw': '撤回消息',
+    'devices.list': '查看设备',
+    'inbox.ask': '提出问题',
+    'inbox.list': '查看问题列表',
+    'inbox.get': '查看问题',
+    'inbox.withdraw': '撤回问题',
+    'history.search': '搜索对话',
+    'history.read': '读取对话',
+    'memory.recall': '搜索记忆',
+    'memory.read': '读取记忆',
+    'memory.remember': '保存记忆',
+    'memory.correct': '更新记忆',
+    'memory.retire': '停用记忆',
+    'memory.restore': '恢复记忆',
   }
   return labels[step.name] ?? step.name
 }
 
 const cardTitles: Record<EntryThreads['action'], (count: number) => string> = {
-  opened: (count) => `Opened ${plural(count, 'thread')}`,
-  messaged: (count) => `Messaged ${plural(count, 'thread')}`,
-  replies: (count) => `Replies from ${plural(count, 'thread')}`,
+  opened: (count) => `已新建 ${count} 个对话`,
+  messaged: (count) => `已向 ${count} 个对话发送消息`,
+  replies: (count) => `来自 ${count} 个对话的回复`,
 }
 
 function ProcessItem({ step, devices, live }: { step: ProcessStep; devices: Device[]; live: boolean }) {
@@ -439,12 +435,12 @@ function ProcessItem({ step, devices, live }: { step: ProcessStep; devices: Devi
   const isCommand = step.kind === 'command'
   const failed = isCommand ? step.exitCode !== 0 : step.status === 'failed'
   const status = isCommand
-    ? `${devices.find((item) => item.id === step.deviceId)?.name ?? 'Removed device'} · exit ${step.exitCode} · ${(step.durationMs / 1000).toFixed(1)}s`
+    ? `${devices.find((item) => item.id === step.deviceId)?.name ?? '设备已移除'} · 退出码 ${step.exitCode} · ${(step.durationMs / 1000).toFixed(1)} 秒`
     : step.status === 'pending'
-      ? 'Awaiting result'
+      ? '等待结果'
       : step.status === 'failed'
-        ? 'Failed'
-        : 'Result received'
+        ? '失败'
+        : '已收到结果'
   const isShell = isCommand || step.name === 'nodes.exec'
   const label = isCommand ? step.command : toolLabel(step)
   return (
@@ -464,19 +460,19 @@ function ProcessItem({ step, devices, live }: { step: ProcessStep; devices: Devi
         <div {...stylex.props(styles.stepDetail)}>
           {!isCommand && (
             <>
-              <span {...stylex.props(text.caption, styles.detailLabel)}>Input</span>
+              <span {...stylex.props(text.caption, styles.detailLabel)}>输入</span>
               <pre {...stylex.props(text.mono, styles.detailText)}>{step.input}</pre>
             </>
           )}
           {step.output && (
             <>
-              <span {...stylex.props(text.caption, styles.detailLabel)}>{isCommand ? 'Output' : 'Result'}</span>
+              <span {...stylex.props(text.caption, styles.detailLabel)}>{isCommand ? '输出' : '结果'}</span>
               <pre {...stylex.props(styles.output)}>{step.output}</pre>
             </>
           )}
           {!step.output && (
             <span {...stylex.props(text.caption, styles.faint)}>
-              {!isCommand && step.status === 'pending' ? 'Awaiting result' : 'No output'}
+              {!isCommand && step.status === 'pending' ? '等待结果' : '没有输出'}
             </span>
           )}
         </div>
@@ -505,8 +501,8 @@ function ProcessLine({ steps, devices }: { steps: ProcessStep[]; devices: Device
       >
         <Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} />
         {processSummary(steps)}
-        {failures > 0 && <span {...stylex.props(styles.danger)}>{plural(failures, 'failed step')}</span>}
-        {awaiting > 0 && <span {...stylex.props(styles.faint)}>Awaiting {plural(awaiting, 'result')}</span>}
+        {failures > 0 && <span {...stylex.props(styles.danger)}>{`${failures} 个步骤失败`}</span>}
+        {awaiting > 0 && <span {...stylex.props(styles.faint)}>等待 {awaiting} 个结果</span>}
       </button>
       {open && (
         <div {...stylex.props(styles.steps)}>
@@ -558,7 +554,7 @@ function ThreadButton({
       <span {...stylex.props(styles.threadTitle, text.truncate)}>{thread.title}</span>
       <span {...stylex.props(text.mono, styles.folderTag, text.truncate)}>{folderName(thread.folder)}</span>
       <span {...stylex.props(text.caption, styles.threadMeta)}>
-        {device?.name ?? 'Removed device'} · {thread.agent ? agentNames[thread.agent] : 'Command'}
+        {device?.name ?? '设备已移除'} · {thread.agent ? agentNames[thread.agent] : '命令'}
       </span>
       {!local && status}
     </button>
@@ -651,10 +647,7 @@ function Entry({
     }
     case 'assistant':
       return (
-        <article
-          aria-label={streaming ? 'Project assistant response in progress' : 'Project assistant'}
-          {...stylex.props(styles.assistant)}
-        >
+        <article aria-label={streaming ? '项目助手正在回复' : '项目助手'} {...stylex.props(styles.assistant)}>
           {entry.process.length > 0 && <ProcessLine steps={entry.process} devices={devices} />}
           {entry.threads && (
             <ThreadCard
@@ -696,15 +689,15 @@ function assistantLine(project: Project, devices: Device[]) {
   const source = project.sourceNodeId
     ? connection
       ? `${connection.name} · ${device!.name}`
-      : 'API connection unavailable'
+      : 'API 连接不可用'
     : project.subscription
   switch (project.agent.state) {
     case 'blocked':
-      return project.agent.reason ?? 'Needs attention'
+      return project.agent.reason ?? '需要处理'
     case 'waitingDevice':
       return assistantWait(project, devices).overview
     case 'stopping':
-      return 'Stopping…'
+      return '正在停止…'
     case 'stopped':
       return project.agent.reason ?? `${source} · ${project.model}`
     default:
@@ -754,11 +747,11 @@ function Overview({
     live.filter((thread) => groups.includes(views.get(thread.id)!.group)).sort((a, b) => b.updatedAt - a.updatedAt)
   const recent = inGroup('idle')
   const groups = [
-    { label: 'Needs attention', threads: inGroup('attention') },
-    { label: 'Running', threads: inGroup('running', 'stopping') },
-    { label: 'Waiting for device', threads: inGroup('waiting', 'stopRequested') },
-    { label: 'Recent', threads: showAll ? recent : recent.slice(0, recentLimit) },
-  ].map((group) => ({ ...group, count: group.label === 'Recent' ? recent.length : group.threads.length }))
+    { label: '需要处理', threads: inGroup('attention') },
+    { label: '运行中', threads: inGroup('running', 'stopping') },
+    { label: '等待设备', threads: inGroup('waiting', 'stopRequested') },
+    { label: '最近', threads: showAll ? recent : recent.slice(0, recentLimit) },
+  ].map((group) => ({ ...group, count: group.label === '最近' ? recent.length : group.threads.length }))
 
   const row = (thread: Thread) => {
     const view = views.get(thread.id)!
@@ -796,12 +789,12 @@ function Overview({
   }
 
   return (
-    <aside aria-label="Overview" {...stylex.props(styles.overview)}>
-      <section aria-label="Project assistant" {...stylex.props(styles.assistantDevice)}>
+    <aside aria-label="概览" {...stylex.props(styles.overview)}>
+      <section aria-label="项目助手" {...stylex.props(styles.assistantDevice)}>
         <Icon name="laptop" size={24} style={styles.muted} />
         <div {...stylex.props(styles.assistantDeviceText)}>
           <span {...stylex.props(text.small, text.truncate)}>
-            {device?.name ?? 'No device yet'}
+            {device?.name ?? '暂无设备'}
             {deviceStatus && ` · ${deviceStatus.label}`}
           </span>
           <span {...stylex.props(text.caption, styles.muted)}>{assistantLine(project, devices)}</span>
@@ -809,25 +802,25 @@ function Overview({
       </section>
       {project.goal && (
         <section {...stylex.props(styles.section)}>
-          <h3 {...stylex.props(text.captionMedium, styles.sectionLabel)}>Goal</h3>
+          <h3 {...stylex.props(text.captionMedium, styles.sectionLabel)}>目标</h3>
           <p {...stylex.props(text.small)}>{project.goal}</p>
         </section>
       )}
       <Tabs
-        label="Overview lists"
+        label="概览列表"
         value={tab}
         onChange={onTabChange}
         options={[
-          { value: 'threads', label: 'Threads', count: live.length },
-          { value: 'memory', label: 'Memory', count: memory?.length ?? 0 },
+          { value: 'threads', label: '对话', count: live.length },
+          { value: 'memory', label: '记忆', count: memory?.length ?? 0 },
         ]}
       />
       {tab === 'threads' && (
         <>
-          {live.length === 0 && pending.length === 0 && <p {...stylex.props(text.small, styles.faint)}>No threads</p>}
+          {live.length === 0 && pending.length === 0 && <p {...stylex.props(text.small, styles.faint)}>暂无对话</p>}
           {pending.length > 0 && (
-            <section aria-label="Decisions" {...stylex.props(styles.group)}>
-              <h3 {...stylex.props(text.captionMedium, styles.groupLabel)}>Needs decision</h3>
+            <section aria-label="待决定" {...stylex.props(styles.group)}>
+              <h3 {...stylex.props(text.captionMedium, styles.groupLabel)}>待决定</h3>
               {pending.map((item) => (
                 <button
                   key={item.id}
@@ -870,13 +863,13 @@ function Overview({
                 {!folded.includes(group.label) && group.threads.map(row)}
               </section>
             ))}
-          {!showAll && recent.length > recentLimit && !folded.includes('Recent') && (
+          {!showAll && recent.length > recentLimit && !folded.includes('最近') && (
             <button
               type="button"
               onClick={() => setShowAll(true)}
               {...stylex.props(text.caption, styles.more, focusRing.ring)}
             >
-              Show {recent.length - recentLimit} more
+              再显示 {recent.length - recentLimit} 条
             </button>
           )}
         </>
@@ -906,11 +899,11 @@ function DockBanner({
     return (
       <Banner
         icon="pause"
-        title="Project paused"
-        detail="New messages wait until you resume."
+        title="项目已暂停"
+        detail="新消息将在恢复后处理。"
         action={
           <Button small onClick={onResume}>
-            {resuming ? 'Resuming…' : 'Resume project'}
+            {resuming ? '正在恢复…' : '恢复项目'}
           </Button>
         }
       />
@@ -928,7 +921,7 @@ function DockBanner({
           detail={wait.detail}
           action={
             <Button small onClick={onViewDevices}>
-              View devices
+              查看设备
             </Button>
           }
         />
@@ -938,19 +931,13 @@ function DockBanner({
       return (
         <Banner
           icon="stop"
-          title={`Waiting for ${devices.find((item) => item.id === project.agent.deviceId)?.name ?? 'the device'} to stop the assistant`}
-          detail="Threads keep running."
+          title={`等待 ${devices.find((item) => item.id === project.agent.deviceId)?.name ?? '设备'} 停止助手`}
+          detail="对话会继续运行。"
         />
       )
     case 'stopped':
       if (!project.agent.reason) return null
-      return (
-        <Banner
-          icon="alert"
-          title="The project assistant stopped"
-          detail={`${project.agent.reason}. Send a message to start it again.`}
-        />
-      )
+      return <Banner icon="alert" title="项目助手已停止" detail={`${project.agent.reason}。发送消息可重新启动。`} />
     default:
       return null
   }
@@ -1119,30 +1106,30 @@ export function ProjectPage() {
   }, [project?.id, search.settings])
   if (projects.data && !project) {
     return (
-      <Page title="Project not found">
+      <Page title="未找到项目">
         <div {...stylex.props(styles.entries)}>
-          <p {...stylex.props(text.body, text.muted)}>This project was deleted or you no longer have access.</p>
+          <p {...stylex.props(text.body, text.muted)}>项目已删除，或你已无权访问。</p>
         </div>
       </Page>
     )
   }
   if (!project)
     return (
-      <Page title="Project">
+      <Page title="项目">
         <div {...stylex.props(styles.entries)}>
           {projects.isError ? (
             <Banner
               icon="alert"
-              title="Couldn't load project"
+              title="无法加载项目"
               action={
                 <Button small onClick={() => void projects.refetch()}>
-                  Retry project
+                  重试项目
                 </Button>
               }
             />
           ) : (
             <p role="status" {...stylex.props(text.small, text.muted)}>
-              Loading project…
+              正在加载项目…
             </p>
           )}
         </div>
@@ -1182,9 +1169,7 @@ export function ProjectPage() {
         },
         onError: (cause) => {
           setFailed({ body, clientId })
-          setError(
-            cause instanceof ClientError && cause.code === 'invalid' ? cause.message : "Couldn't send. Try again.",
-          )
+          setError(cause instanceof ClientError && cause.code === 'invalid' ? cause.message : '无法发送，请重试。')
         },
       },
     )
@@ -1194,8 +1179,7 @@ export function ProjectPage() {
     if (stop.isPending) return
     setError(null)
     stop.mutate(projectId, {
-      onError: (cause) =>
-        setError(cause instanceof ClientError ? cause.message : "Couldn't stop the assistant. Try again."),
+      onError: (cause) => setError(cause instanceof ClientError ? cause.message : '无法停止助手，请重试。'),
     })
   }
 
@@ -1204,7 +1188,7 @@ export function ProjectPage() {
     setError(null)
     changeStatus.mutate(
       { projectId, status: next },
-      { onError: () => setError(`Couldn't ${next === 'active' ? 'resume' : 'pause'} the project. Try again.`) },
+      { onError: () => setError(`无法${next === 'active' ? '恢复' : '暂停'}项目，请重试。`) },
     )
   }
   const settings = (open: boolean, archive = false) =>
@@ -1233,13 +1217,7 @@ export function ProjectPage() {
     !error
   const statusLine =
     error ??
-    (send.isPending
-      ? 'Sending…'
-      : stop.isPending
-        ? 'Stopping…'
-        : changeStatus.isPending
-          ? 'Saving project status…'
-          : null)
+    (send.isPending ? '正在发送…' : stop.isPending ? '正在停止…' : changeStatus.isPending ? '正在保存项目状态…' : null)
   const previewDevice = project.agent.deviceId ?? projectThreads[0]?.deviceId
 
   if (search.settings)
@@ -1256,15 +1234,15 @@ export function ProjectPage() {
 
   let conversation
   if (entries.isPending) {
-    conversation = <p {...stylex.props(text.caption, styles.muted)}>Loading conversation…</p>
+    conversation = <p {...stylex.props(text.caption, styles.muted)}>正在加载对话…</p>
   } else if (entries.isError) {
     conversation = (
       <Banner
         icon="alert"
-        title="Couldn't load the conversation"
+        title="无法加载对话"
         action={
           <Button small onClick={() => void entries.refetch()}>
-            Retry
+            重试
           </Button>
         }
       />
@@ -1337,7 +1315,7 @@ export function ProjectPage() {
             )
           )}
           {streaming && livePreview?.truncated && (
-            <span {...stylex.props(text.caption, styles.faint)}>Preview truncated. Waiting for the full reply.</span>
+            <span {...stylex.props(text.caption, styles.faint)}>预览已截断，正在等待完整回复。</span>
           )}
         </div>
       )
@@ -1359,41 +1337,41 @@ export function ProjectPage() {
             <span {...stylex.props(text.caption, styles.headerStatus, headerTone(status.tone))}>
               <StatusDot tone={status.tone} />
               {status.label}
-              {waitingMessages > 0 && ` · ${plural(waitingMessages, 'message')} waiting`}
+              {waitingMessages > 0 && ` · ${waitingMessages} 条消息待发送`}
             </span>
             {running && (
               <Button variant="ghost" small icon="stop" onClick={onStop}>
-                Stop run
+                停止运行
               </Button>
             )}
-            {stopping && <span {...stylex.props(text.caption, styles.muted)}>Stop requested</span>}
+            {stopping && <span {...stylex.props(text.caption, styles.muted)}>已请求停止</span>}
           </>
         }
         actions={
           <>
-            <Menu narrow align="end" trigger={<IconButton icon="dots" label="Project actions" />}>
-              <MenuOption onSelect={() => settings(true)}>Settings</MenuOption>
+            <Menu narrow align="end" trigger={<IconButton icon="dots" label="项目操作" />}>
+              <MenuOption onSelect={() => settings(true)}>设置</MenuOption>
               <MenuOption
                 onSelect={() => {
                   setOverviewOpen(true)
                   void navigate({ to: '/projects/$projectId', params: { projectId }, search: { view: 'memory' } })
                 }}
               >
-                Memory
+                记忆
               </MenuOption>
               {project.status !== 'archived' && (
                 <>
                   <MenuRule />
                   <MenuOption onSelect={() => onStatus(project.status === 'paused' ? 'active' : 'paused')}>
-                    {project.status === 'paused' ? 'Resume project' : 'Pause project'}
+                    {project.status === 'paused' ? '恢复项目' : '暂停项目'}
                   </MenuOption>
-                  <MenuOption onSelect={() => settings(true, true)}>Archive project</MenuOption>
+                  <MenuOption onSelect={() => settings(true, true)}>归档项目</MenuOption>
                 </>
               )}
             </Menu>
             <IconButton
               icon="details"
-              label={showPanel ? 'Hide overview' : 'Show overview'}
+              label={showPanel ? '隐藏概览' : '显示概览'}
               active={showPanel}
               aria-expanded={showPanel}
               onClick={() => {
@@ -1408,7 +1386,7 @@ export function ProjectPage() {
           <div
             ref={timelineRef}
             role="region"
-            aria-label="Conversation"
+            aria-label="对话"
             onScroll={onTimelineScroll}
             {...stylex.props(styles.timeline, overviewOpen && !search.thread && styles.timelineWithOverview)}
           >
@@ -1440,15 +1418,15 @@ export function ProjectPage() {
               />
             </div>
             {search.thread && (counts.running > 0 || counts.waiting > 0 || pending.length > 0) && (
-              <div aria-label="Project threads" {...stylex.props(styles.chips)}>
-                {counts.running > 0 && <StatusChip tone="info" label="Running" count={counts.running} />}
-                {counts.waiting > 0 && <StatusChip tone="hollow" label="Waiting for device" count={counts.waiting} />}
-                {pending.length > 0 && <StatusChip tone="attention" label="Needs decision" count={pending.length} />}
+              <div aria-label="项目对话" {...stylex.props(styles.chips)}>
+                {counts.running > 0 && <StatusChip tone="info" label="运行中" count={counts.running} />}
+                {counts.waiting > 0 && <StatusChip tone="hollow" label="等待设备" count={counts.waiting} />}
+                {pending.length > 0 && <StatusChip tone="attention" label="待决定" count={pending.length} />}
               </div>
             )}
             {project.status !== 'archived' && (
               <Composer
-                label="Message the project assistant"
+                label="给项目助手发消息"
                 style={styles.dockInteractive}
                 inputRef={inputRef}
                 header={
@@ -1465,9 +1443,7 @@ export function ProjectPage() {
                 value={draft}
                 onChange={setDraft}
                 onSend={onSend}
-                placeholder={
-                  list.length === 0 ? 'Describe what you want to build or verify…' : 'Ask the project assistant…'
-                }
+                placeholder={list.length === 0 ? '描述你想完成或验证的事…' : '给项目助手发消息…'}
               />
             )}
             <span role="status" {...stylex.props(text.caption, styles.status, error !== null && styles.danger)}>
@@ -1479,7 +1455,7 @@ export function ProjectPage() {
       {
         <ResizablePane
           key={search.thread ? 'thread' : 'overview'}
-          label="Resize project panel"
+          label="调整项目面板宽度"
           storageKey="baton.width.project-panel"
           defaultWidth={search.thread ? 440 : 320}
           min={280}

@@ -63,7 +63,7 @@ const cursorProbe = Effect.gen(function* () {
     details,
   })
   if (inspected._tag === 'None' || inspected.value.missingAssets.length > 0)
-    return result({ authenticated: 'unknown', models: [], reason: 'Cursor SDK installation is incomplete' })
+    return result({ authenticated: 'unknown', models: [], reason: 'Cursor SDK 安装不完整' })
   const helpers = yield* Effect.tryPromise({
     try: async () => {
       await promisify(execFile)(inspected.value.sandboxHelper, ['--help'], { timeout: 5000, maxBuffer: 1024 * 1024 })
@@ -71,12 +71,10 @@ const cursorProbe = Effect.gen(function* () {
     },
     catch: () => undefined,
   }).pipe(Effect.match({ onFailure: () => false, onSuccess: () => true }))
-  if (!helpers)
-    return result({ authenticated: 'unknown', models: [], reason: 'Cursor SDK platform helpers could not be executed' })
+  if (!helpers) return result({ authenticated: 'unknown', models: [], reason: '无法运行 Cursor SDK 的平台辅助程序' })
   details.installed = true
   details.integrity = true
-  if (!key?.trim())
-    return result({ authenticated: 'missing', models: [], reason: 'An explicit CURSOR_API_KEY is required' })
+  if (!key?.trim()) return result({ authenticated: 'missing', models: [], reason: '需要显式配置 CURSOR_API_KEY' })
   const authenticated = yield* Effect.tryPromise({
     try: () => Cursor.me({ apiKey: key }),
     catch: () => undefined,
@@ -126,16 +124,14 @@ const cursorProbe = Effect.gen(function* () {
     return result({
       authenticated: authenticated ? 'valid' : 'unknown',
       models: [],
-      reason: 'Cursor native sandbox could not be verified with isolated settings',
+      reason: '无法使用隔离设置验证 Cursor 原生沙箱',
     })
-  if (!authenticated)
-    return result({ authenticated: 'unknown', models: [], reason: 'Cursor authentication could not be verified' })
+  if (!authenticated) return result({ authenticated: 'unknown', models: [], reason: '无法确认 Cursor 认证状态' })
   const models = yield* Effect.tryPromise({
     try: () => Cursor.models.list({ apiKey: key }),
     catch: () => undefined,
   }).pipe(Effect.option)
-  if (models._tag === 'None')
-    return result({ authenticated: 'valid', models: [], reason: 'Cursor model catalog could not be read' })
+  if (models._tag === 'None') return result({ authenticated: 'valid', models: [], reason: '无法读取 Cursor 模型目录' })
   return result({ authenticated: 'valid', models: models.value.map((model) => model.id) })
 })
 

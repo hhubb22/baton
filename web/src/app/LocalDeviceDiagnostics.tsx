@@ -6,6 +6,25 @@ import { text } from '../theme/text'
 import { colors, space } from '../theme/tokens.stylex'
 import { Button } from '../ui/Button'
 
+const stateLabels: Record<string, string> = {
+  unregistered: '未连接',
+  stopped: '已停止',
+  connecting: '正在连接',
+  restarting: '正在重新连接',
+  rejected: '连接被拒绝',
+  external: '由外部服务管理',
+  stopping: '正在停止',
+  online: '在线',
+  draining: '等待任务结束',
+  ready: '准备就绪',
+  migrating: '正在升级',
+  syncing: '正在同步',
+  completed: '已完成',
+  cancelled: '已取消',
+  failed: '失败',
+}
+const stateLabel = (state: string) => (Object.hasOwn(stateLabels, state) ? stateLabels[state]! : state)
+
 const styles = stylex.create({
   section: { display: 'flex', flexDirection: 'column', gap: space.md },
   facts: { display: 'grid', gridTemplateColumns: '148px minmax(0, 1fr)', gap: '12px 20px', margin: 0 },
@@ -48,62 +67,62 @@ function Diagnostics({ nodeId, bridge, state }: { nodeId: string; bridge: Deskto
   const data = query.data
   const external = state === 'external' || data?.processState === 'external'
   return (
-    <section aria-label="On this computer" {...stylex.props(styles.section)}>
-      <h3 {...stylex.props(text.bodyMedium)}>On this computer</h3>
-      {query.isPending && <span {...stylex.props(text.small, text.muted)}>Loading diagnostics…</span>}
+    <section aria-label="本机诊断" {...stylex.props(styles.section)}>
+      <h3 {...stylex.props(text.bodyMedium)}>本机诊断</h3>
+      {query.isPending && <span {...stylex.props(text.small, text.muted)}>正在加载诊断信息…</span>}
       {query.isError && (
         <div {...stylex.props(styles.actions)}>
           <span role="alert" {...stylex.props(text.small, styles.error)}>
-            Couldn't read diagnostics.
+            无法读取诊断信息。
           </span>
           <Button small onClick={() => void query.refetch()}>
-            Retry
+            重试
           </Button>
         </div>
       )}
       {data && (
         <>
           <dl {...stylex.props(text.small, styles.facts)}>
-            <dt {...stylex.props(text.caption, styles.label)}>Device service</dt>
-            <dd {...stylex.props(styles.value)}>{external ? 'Managed by external service' : data.processState}</dd>
+            <dt {...stylex.props(text.caption, styles.label)}>设备服务</dt>
+            <dd {...stylex.props(styles.value)}>{external ? '由外部服务管理' : stateLabel(data.processState)}</dd>
             {data.lastExit && (
               <>
-                <dt {...stylex.props(text.caption, styles.label)}>Last exit</dt>
+                <dt {...stylex.props(text.caption, styles.label)}>上次退出</dt>
                 <dd {...stylex.props(styles.value)}>
                   {data.lastExit.reason} ·{' '}
                   <time dateTime={data.lastExit.at}>
-                    {new Date(data.lastExit.at).toLocaleString(undefined, { hour12: false })}
+                    {new Date(data.lastExit.at).toLocaleString('zh-CN', { hour12: false })}
                   </time>
                 </dd>
               </>
             )}
-            <dt {...stylex.props(text.caption, styles.label)}>Versions</dt>
+            <dt {...stylex.props(text.caption, styles.label)}>版本</dt>
             <dd {...stylex.props(styles.value)}>
               Baton {data.clientVersion} · batond {data.batondVersion}
             </dd>
-            <dt {...stylex.props(text.caption, styles.label)}>Platform</dt>
+            <dt {...stylex.props(text.caption, styles.label)}>平台</dt>
             <dd {...stylex.props(styles.value)}>{data.platform}</dd>
             {data.upgradePhase && (
               <>
-                <dt {...stylex.props(text.caption, styles.label)}>Update</dt>
-                <dd {...stylex.props(styles.value)}>{data.upgradePhase}</dd>
+                <dt {...stylex.props(text.caption, styles.label)}>更新</dt>
+                <dd {...stylex.props(styles.value)}>{stateLabel(data.upgradePhase)}</dd>
               </>
             )}
           </dl>
           <div aria-busy={pending !== null} {...stylex.props(styles.actions)}>
             {data.canRestart && !external && bridge.restartDaemon && (
               <Button small onClick={() => void run('restartDaemon')}>
-                {pending === 'restartDaemon' ? 'Restarting…' : 'Restart device service'}
+                {pending === 'restartDaemon' ? '正在重启…' : '重启设备服务'}
               </Button>
             )}
             {bridge.openLogs && (
               <Button small variant="ghost" onClick={() => void run('openLogs')}>
-                Open logs folder
+                打开日志文件夹
               </Button>
             )}
             {bridge.copyDiagnostics && (
               <Button small variant="ghost" onClick={() => void run('copyDiagnostics')}>
-                {copied ? 'Summary copied' : 'Copy diagnostic summary'}
+                {copied ? '诊断摘要已复制' : '复制诊断摘要'}
               </Button>
             )}
           </div>

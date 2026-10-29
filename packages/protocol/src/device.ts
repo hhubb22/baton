@@ -223,9 +223,29 @@ export const NodeRevocation = Schema.Struct({
 })
 export type NodeRevocation = typeof NodeRevocation.Type
 
+export const ThinkingCapability = Schema.Struct({
+  id: Schema.Literals(['reasoningEffort', 'thinking']),
+  options: Schema.Array(
+    Schema.Struct({
+      id: nonemptyText(128),
+      label: nonemptyText(256),
+      is_default: Schema.optionalKey(Schema.Boolean),
+    }),
+  ).check(Schema.isMaxLength(32)),
+  current_value: Schema.optionalKey(nonemptyText(128)),
+})
+export type ThinkingCapability = typeof ThinkingCapability.Type
+
+export const ThinkingSelection = Schema.Struct({
+  id: Schema.Literals(['reasoningEffort', 'thinking']),
+  value: nonemptyText(128),
+})
+export type ThinkingSelection = typeof ThinkingSelection.Type
+
 export const RuntimeModel = Schema.Struct({
   id: nonemptyText(512),
   name: nonemptyText(512),
+  thinking: Schema.optionalKey(ThinkingCapability),
 })
 export type RuntimeModel = typeof RuntimeModel.Type
 

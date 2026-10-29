@@ -116,8 +116,8 @@ export function ProjectModelFields({
   const connectionLabel = catalog.find(
     (item) => item.provider === value.subscription && item.sourceNodeId === value.sourceNodeId,
   )?.label
-  const providerLabel = 'Model source'
-  const modelLabel = creating ? 'Model' : 'Project assistant model'
+  const providerLabel = '模型来源'
+  const modelLabel = creating ? '模型' : '项目助手模型'
   const models =
     catalog.find(
       (item) => item.provider === value.subscription && (item.sourceNodeId ?? null) === (value.sourceNodeId ?? null),
@@ -127,16 +127,14 @@ export function ProjectModelFields({
     <div {...stylex.props(styles.section)}>
       {!readOnly && catalog.length === 0 && (
         <p {...stylex.props(text.caption, text.muted)}>
-          {loading ? 'Loading models…' : 'No models from your devices.'}{' '}
+          {loading ? '正在加载模型…' : '设备上没有可用模型。'}{' '}
           <Link to="/devices" search={{ connect: true }} {...stylex.props(styles.link)}>
-            Connect a device
+            连接设备
           </Link>
         </p>
       )}
       {missingConnection && (
-        <p {...stylex.props(text.caption, text.muted)}>
-          This API connection is unavailable on its device. Choose another model source to resume.
-        </p>
+        <p {...stylex.props(text.caption, text.muted)}>此 API 连接在设备上不可用。请选择其他模型来源以继续。</p>
       )}
       {(readOnly || custom || catalog.length > 0) && (
         <div
@@ -147,7 +145,7 @@ export function ProjectModelFields({
         >
           <Field
             label={providerLabel}
-            helper={custom && !readOnly ? 'Provider ID, for example openai-codex or xai.' : undefined}
+            helper={custom && !readOnly ? '服务商 ID，例如 openai-codex 或 xai。' : undefined}
           >
             {(props) =>
               readOnly || custom ? (
@@ -155,13 +153,13 @@ export function ProjectModelFields({
                   {...props}
                   value={
                     missingConnection
-                      ? 'API connection unavailable'
+                      ? 'API 连接不可用'
                       : readOnly && value.sourceNodeId
-                        ? (connectionLabel ?? 'API connection unavailable')
+                        ? (connectionLabel ?? 'API 连接不可用')
                         : value.subscription
                   }
                   readOnly={readOnly || missingConnection}
-                  placeholder="Provider ID"
+                  placeholder="服务商 ID"
                   onChange={(event) => {
                     setManual(true)
                     onChange({ ...value, subscription: event.target.value, sourceNodeId: null })
@@ -184,7 +182,7 @@ export function ProjectModelFields({
                   }}
                   {...stylex.props(text.small, styles.select, focusRing.ring)}
                 >
-                  <optgroup label="Subscriptions">
+                  <optgroup label="订阅">
                     {catalog
                       .filter((item) => !item.sourceNodeId)
                       .map((item) => (
@@ -193,7 +191,7 @@ export function ProjectModelFields({
                         </option>
                       ))}
                   </optgroup>
-                  <optgroup label="API connections">
+                  <optgroup label="API 连接">
                     {catalog
                       .filter((item) => item.sourceNodeId)
                       .map((item) => (
@@ -216,7 +214,7 @@ export function ProjectModelFields({
                   {...props}
                   value={value.model}
                   readOnly={readOnly}
-                  placeholder="Model ID"
+                  placeholder="模型 ID"
                   onChange={(event) => {
                     setManual(true)
                     onChange({ ...value, model: event.target.value })
@@ -256,11 +254,11 @@ export function ProjectModelFields({
                 onCommit?.()
               }}
             >
-              Choose from device models
+              从设备模型中选择
             </Button>
           ) : !custom ? (
             <Button small onClick={() => setManual(true)}>
-              Enter provider and model manually
+              手动输入服务商和模型
             </Button>
           ) : null}
         </div>

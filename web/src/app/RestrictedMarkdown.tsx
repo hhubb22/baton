@@ -110,7 +110,7 @@ export const markdownComponents: Components = {
   strong: ({ children }) => <strong {...stylex.props(styles.strong)}>{children}</strong>,
   code: ({ children }) => <code {...stylex.props(styles.code)}>{children}</code>,
   pre: ({ children }) => (
-    <pre aria-label="Code block" tabIndex={0} {...stylex.props(styles.codeBlock, focusRing.ring)}>
+    <pre aria-label="代码块" tabIndex={0} {...stylex.props(styles.codeBlock, focusRing.ring)}>
       {children}
     </pre>
   ),
@@ -121,7 +121,7 @@ export const markdownComponents: Components = {
     </ol>
   ),
   table: ({ children }) => (
-    <div role="region" aria-label="Table" tabIndex={0} {...stylex.props(styles.tableScroll, focusRing.ring)}>
+    <div role="region" aria-label="表格" tabIndex={0} {...stylex.props(styles.tableScroll, focusRing.ring)}>
       <table {...stylex.props(styles.table)}>{children}</table>
     </div>
   ),
