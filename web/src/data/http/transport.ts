@@ -1,4 +1,5 @@
 import { ClientError } from '../client'
+import { clearFailure, recordFailure, resetFailures } from '../../telemetry/diagnostics'
 
 export interface ErrorPayload {
   code?: string
@@ -60,9 +61,10 @@ export interface TransportOptions {
 }
 
 export function createTransport(options: TransportOptions = {}) {
-  const fetcher = options.fetch ?? globalThis.fetch.bind(globalThis)
+  const fetcher: typeof fetch = options.fetch ?? ((...args) => globalThis.fetch(...args))
   const base = (options.baseUrl ?? '/api/v1').replace(/\/$/, '')
   let csrf: string | null = null
+  let telemetry: typeof import('../../telemetry/index') | undefined
   const request = async <T>(path: string, init: RequestInit = {}, retry = true): Promise<T> => {
     const method = (init.method ?? 'GET').toUpperCase()
     const write = method !== 'GET' && method !== 'HEAD'
@@ -75,10 +77,12 @@ export function createTransport(options: TransportOptions = {}) {
     try {
       response = await fetcher(`${base}${path}`, { ...init, headers, credentials: 'same-origin', cache: 'no-store' })
     } catch {
+      recordFailure(path, null, 'unavailable')
       throw new ClientError('unavailable', '无法连接 Baton，请检查网络后重试。')
     }
     const payload = response.status === 204 ? null : ((await response.json().catch(() => null)) as ErrorPayload | null)
     if (!response.ok) {
+      recordFailure(path, response.headers.get('traceresponse'), payload?.code)
       if (response.status === 403 && payload?.code === 'csrf_rejected' && retry) {
         csrf = null
         await request('/me')
@@ -86,19 +90,53 @@ export function createTransport(options: TransportOptions = {}) {
       }
       if (response.status === 401 && path !== '/login' && path !== '/me/password') {
         csrf = null
+        telemetry?.stopTelemetry()
+        resetFailures()
         options.onUnauthorized?.()
       }
       throw new HttpError(response.status, payload ?? {})
     }
     if (response.status !== 204 && payload === null)
       throw new ClientError('unavailable', 'Baton 返回了无法读取的内容，请重试。')
+    clearFailure(path)
     if (payload && typeof payload.csrf_token === 'string') csrf = payload.csrf_token
+    if (path === '/me' && payload) {
+      const config = payload.telemetry
+      if (
+        config &&
+        typeof config === 'object' &&
+        'endpoint' in config &&
+        'key' in config &&
+        typeof config.endpoint === 'string' &&
+        config.endpoint &&
+        typeof config.key === 'string' &&
+        config.key
+      ) {
+        try {
+          telemetry ??= await import('../../telemetry/index')
+          telemetry.startTelemetry({
+            endpoint: config.endpoint,
+            key: config.key,
+            ...('session_replay' in config && config.session_replay === 'masked' ? { session_replay: 'masked' } : {}),
+          })
+        } catch {
+          try {
+            telemetry?.stopTelemetry()
+          } catch {
+            /* 遥测不可用时继续使用 Baton。 */
+          }
+        }
+      } else telemetry?.stopTelemetry()
+    }
     return payload as T
   }
   return {
     request,
+    traceSocket: (socket: WebSocket) => telemetry?.traceSocket(socket),
     clear: () => {
       csrf = null
+      telemetry?.stopTelemetry()
+      resetFailures()
     },
   }
 }

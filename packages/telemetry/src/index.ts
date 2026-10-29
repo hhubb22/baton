@@ -14,6 +14,7 @@ import type { TraceData } from 'effect/observability/OtlpTracer'
 import type { KeyValue } from 'effect/observability/OtlpResource'
 import { TraceContext } from '@baton/protocol/trace'
 import * as Statement from 'effect/sql/Statement'
+import { safeAttributes } from './attributes.ts'
 
 export type { TraceContext } from '@baton/protocol/trace'
 
@@ -103,61 +104,6 @@ export const tracePromise = async <A>(
   return exit.value
 }
 
-const safeAttributes = new Set([
-  'service.name',
-  'service.version',
-  'vcs.ref.head.revision',
-  'service.instance.id',
-  'process.pid',
-  'os.type',
-  'host.arch',
-  'deployment.environment.name',
-  'baton.employee.id',
-  'baton.node.id',
-  'baton.turn.seq',
-  'baton.project.id',
-  'baton.project.run.id',
-  'baton.conversation.id',
-  'baton.memory.job.id',
-  'baton.memory.job.state',
-  'baton.memory.attempt',
-  'baton.memory.batch',
-  'baton.agent',
-  'gen_ai.provider.name',
-  'gen_ai.request.model',
-  'gen_ai.usage.input_tokens',
-  'gen_ai.usage.output_tokens',
-  'baton.usage.cached_input_tokens',
-  'baton.usage.reported',
-  'baton.error.code',
-  'baton.wait.reason',
-  'baton.wait.duration_ms',
-  'baton.retry.count',
-  'baton.stop.result',
-  'baton.turn.result',
-  'baton.turn.first_output_ms',
-  'baton.tool.kind',
-  'baton.project.tool',
-  'baton.output.truncated',
-  'baton.output.bytes',
-  'baton.command.id',
-  'baton.thread.id',
-  'baton.command.action',
-  'baton.recovery',
-  'baton.dispatch.accepted',
-  'http.request.method',
-  'http.response.status_code',
-  'http.route',
-  'db.system.name',
-  'db.operation.name',
-  'effect.sql.method',
-  'db.namespace',
-  'db.client.connection.wait_time_ms',
-  'server.address',
-  'server.port',
-  'error.type',
-  'effect.fiber.interrupted',
-])
 const metricValues: Record<string, ReadonlySet<string>> = {
   'baton.command.action': new Set([
     'open',
@@ -203,7 +149,9 @@ const metricNames = new Set([
 const safeResource = (attributes: KeyValue[], nodeId?: string) =>
   attributes.filter(
     ({ key, value }) =>
-      safeAttributes.has(key) && (key !== 'baton.node.id' || (nodeId !== undefined && value.stringValue === nodeId)),
+      safeAttributes.has(key) &&
+      key !== 'rum.sessionId' &&
+      (key !== 'baton.node.id' || (nodeId !== undefined && value.stringValue === nodeId)),
   )
 const redact = (data: TraceData, nodeId?: string): TraceData => {
   for (const resource of data.resourceSpans) {
@@ -214,7 +162,7 @@ const redact = (data: TraceData, nodeId?: string): TraceData => {
         scope.spans[index] = {
           ...span,
           attributes: span.attributes
-            .filter(({ key }) => safeAttributes.has(key))
+            .filter(({ key }) => safeAttributes.has(key) && key !== 'rum.sessionId')
             .filter(
               ({ key }) =>
                 !span.attributes.some(
@@ -264,7 +212,9 @@ const privateSerialization = (nodeId?: string) =>
                   )
                   .map((record) => ({
                     ...record,
-                    attributes: record.attributes.filter(({ key }) => safeAttributes.has(key)),
+                    attributes: record.attributes.filter(
+                      ({ key }) => safeAttributes.has(key) && key !== 'rum.sessionId',
+                    ),
                   }))
             }
           }

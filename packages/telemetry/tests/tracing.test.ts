@@ -104,7 +104,12 @@ it('exports to a local OTLP capture endpoint on scope release and redacts automa
               }),
               1,
             )
-            yield* Effect.sleep('200 millis')
+            yield* Effect.promise(() =>
+              vi.waitFor(() => {
+                expect(payloads.some((body) => body.includes('resourceLogs'))).toBe(true)
+                expect(payloads.some((body) => body.includes('resourceMetrics'))).toBe(true)
+              }),
+            )
             return yield* Effect.fail(error)
           }),
           'baton.failure',
@@ -118,7 +123,7 @@ it('exports to a local OTLP capture endpoint on scope release and redacts automa
             OTEL_SERVICE_VERSION: 'spoof',
             BATON_TELEMETRY_NODE_ID: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
             OTEL_BLRP_SCHEDULE_DELAY: '30',
-            OTEL_METRIC_EXPORT_INTERVAL: '30',
+            OTEL_METRIC_EXPORT_INTERVAL: '100',
           }),
         ),
       ),

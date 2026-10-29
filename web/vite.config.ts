@@ -19,6 +19,9 @@ if (process.env.VITEST) delete stylexPlugin.configureServer
 const backend = process.env.BATON_DEV_BACKEND
 
 export default defineConfig({
+  define: {
+    __BATON_BUILD__: process.env.BATON_WEB_BUILD ?? JSON.stringify({ version: 'development', commit: 'development' }),
+  },
   plugins: lazyPlugins(() => [stylexPlugin, react()]),
   server: {
     host: 'localhost',

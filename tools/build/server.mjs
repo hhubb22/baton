@@ -9,13 +9,23 @@ import { fileURLToPath } from 'node:url'
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 
+export const webBuildEnvironment = (identity, env = process.env) => ({
+  ...env,
+  BATON_WEB_BUILD: JSON.stringify(identity),
+})
+
 export async function buildServer(output = join(repository, 'apps/server/dist/server.cjs'), release = {}) {
   const identity = buildInfo(release)
   await promisify(execFile)(
     'pnpm',
     ['--dir', join(repository, 'web'), 'exec', 'vp', 'build', '--outDir', join(dirname(output), 'web')],
     // Windows 上 pnpm 是 pnpm.cmd，需要经 shell 启动。
-    { cwd: repository, maxBuffer: 4 * 1024 * 1024, shell: process.platform === 'win32' },
+    {
+      cwd: repository,
+      maxBuffer: 4 * 1024 * 1024,
+      shell: process.platform === 'win32',
+      env: webBuildEnvironment(identity),
+    },
   )
   await build({
     entryPoints: [join(repository, 'apps/server/src/index.ts')],

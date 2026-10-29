@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { build } from './build.mjs'
+import { webBuildEnvironment } from './build/server.mjs'
 
 const expected = [
   ['pnpm', ['install', '--frozen-lockfile', '--ignore-scripts']],
@@ -9,6 +10,13 @@ const expected = [
   ['pnpm', ['--filter', '@baton/batond', 'build']],
   [process.execPath, ['tools/package-batond.mjs', '--out', 'bin']],
 ]
+
+test('网页构建使用中心构建身份并覆盖继承的身份', () => {
+  const identity = { version: 'v0.1.0', commit: 'a'.repeat(40) }
+  const env = webBuildEnvironment(identity, { BATON_WEB_BUILD: 'spoof', OTHER: 'kept' })
+  assert.deepEqual(JSON.parse(env.BATON_WEB_BUILD), identity)
+  assert.equal(env.OTHER, 'kept')
+})
 
 test('安装 workspace 锁定依赖，构建中心与节点 bundle 并生成 SEA 安装包', () => {
   const calls = []

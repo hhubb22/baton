@@ -1,5 +1,7 @@
 import * as stylex from '@stylexjs/stylex'
-import type { ReactNode } from 'react'
+import { useSyncExternalStore, type ReactNode } from 'react'
+import { DiagnosticCopy } from '../telemetry/DiagnosticCopy'
+import { hasFailure, subscribeFailures } from '../telemetry/diagnostics'
 import { text } from '../theme/text'
 import { colors, size, space } from '../theme/tokens.stylex'
 import { Icon, type IconName } from './Icon'
@@ -52,6 +54,7 @@ export function Banner({
   action?: ReactNode
   attention?: boolean
 }) {
+  const failedRequest = useSyncExternalStore(subscribeFailures, hasFailure, () => false)
   return (
     <div role="status" {...stylex.props(styles.banner, attention && styles.attention)}>
       <Icon name={attention ? 'alert' : icon} size={16} style={attention ? styles.glyphAttention : styles.glyph} />
@@ -62,6 +65,7 @@ export function Banner({
         )}
       </div>
       {action}
+      {icon === 'alert' && failedRequest && <DiagnosticCopy />}
     </div>
   )
 }

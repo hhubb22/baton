@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { App } from './app/App'
 import type { BatonClient } from './data/client'
 import { createHttpClient } from './data/http/client'
+import { ErrorBoundary } from './telemetry/ErrorBoundary'
 import '@fontsource-variable/inter/index.css'
 import './theme/global.css'
 
@@ -23,7 +24,9 @@ async function start() {
   }
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <App client={client}>{development}</App>
+      <ErrorBoundary>
+        <App client={client}>{development}</App>
+      </ErrorBoundary>
     </StrictMode>,
   )
 }
