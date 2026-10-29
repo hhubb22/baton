@@ -98,7 +98,7 @@ Cursor store 子进程禁用 fetch 和 HTTP(S) 请求。上述加载检查不调
 
 中心与节点构建入口、统一构建和 SEA 打包都接受 `--version <带 v 前缀的发布版本> --commit <完整小写 Git 哈希>`，两个参数一起指定；未指定时版本和提交均为 `development`。构建通过 esbuild 编译常量注入身份，不从运行环境变量读取版本。`packages/protocol/src/release.mjs` 是共享来源，中心、daemon、Worker、agent-host、watchdog 和 Runtime 的 `--version` 及诊断使用同一份元数据。中心版本查询无需数据库配置；节点及子进程另报告 SEA 和 Node 运行信息。开发 bundle 的 Runtime 与 watchdog 从同一 bundle 启动，直接源码入口仍通过 tsx 运行。
 
-`release.json` 和安装包清单保存 `version`、`commit`、`platform`、`arch`、`protocol_version`、`schema_version`、`ledger_versions` 和 `supported_daemon_versions`。当前协议版本为 1，中心迁移版本为 `0012_project_model_source.sql`，账本 `node`、`project`、`thread` 均为格式 1。构建核对中心迁移目录的最新文件与声明一致，账本检查直接使用共享格式常量。首版仅支持当前 daemon 发布版本，连接时执行该声明的准入检查；增量迁移来源及应用回切范围尚待相应升级实现声明。包内元数据与程序输出不一致时，安装包检查和归档失败；归档器不能给旧二进制重新贴标。
+`release.json` 和安装包清单保存 `version`、`commit`、`platform`、`arch`、`protocol_version`、`schema_version`、`ledger_versions` 和 `supported_daemon_versions`。当前协议版本为 1，中心迁移版本为 `0013_thread_thinking.sql`，账本 `node`、`project`、`thread` 均为格式 1。构建核对中心迁移目录的最新文件与声明一致，账本检查直接使用共享格式常量。首版仅支持当前 daemon 发布版本，连接时执行该声明的准入检查；增量迁移来源及应用回切范围尚待相应升级实现声明。包内元数据与程序输出不一致时，安装包检查和归档失败；归档器不能给旧二进制重新贴标。
 
 发布组合按 `supported_daemon_versions` 精确匹配，首版列表为 `[当前版本]`，不计算 N−1 窗口、不解析版本范围或 SemVer。节点和中心的协议版本必须一致。双方均为 `development` 时正常连接；一方为 `development` 时也放行版本号差异，便于本地源码与发布包联调，协议版本仍须一致。Agent 的 CLI 版本、模型和系统组合继续按既有准入规则处理。
 
