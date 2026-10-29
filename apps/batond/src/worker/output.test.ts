@@ -67,4 +67,13 @@ describe('current turn output', () => {
     expect(result.every((item) => Buffer.byteLength(item.text) <= outputPageBytes)).toBe(true)
     expect(Buffer.byteLength(result.map((item) => item.text).join(''))).toBe(outputCapacity)
   })
+
+  it('keeps the current reply identity when a later reply replaces buffered output', async () => {
+    const mailbox = makeOutputMailbox()
+    const identity = { nativeSessionId: 'native', messageId: 'input', executionId: 'run' }
+    mailbox.offer({ ...identity, replyId: 'first', text: 'first reply' })
+    mailbox.offer({ ...identity, replyId: 'second', text: 'second reply' })
+    const result = await Effect.runPromise(Stream.runCollect(mailbox.stream.pipe(Stream.take(1))))
+    expect(result[0]).toMatchObject({ replyId: 'second', text: 'second reply' })
+  })
 })

@@ -54,6 +54,43 @@ it('offers manual model entry when discovery returns an empty catalog', async ()
   expect(onSelect).toHaveBeenCalledWith({ agent: 'pi', model: 'provider/custom' })
 })
 
+it('lists reported Codex models without a manual model entry', async () => {
+  const user = userEvent.setup()
+  render(
+    <ThreadModelMenu
+      agents={[{ ...agent, kind: 'codex', models: ['gpt-6.1-sol'] }]}
+      choice={null}
+      label="Choose model"
+      onSelect={() => {}}
+    />,
+  )
+  await user.click(screen.getByRole('button', { name: 'Choose model' }))
+  expect(await screen.findByRole('menuitem', { name: 'gpt-6.1-sol' })).toBeInTheDocument()
+  expect(screen.queryByRole('menuitem', { name: 'Enter model ID…' })).not.toBeInTheDocument()
+})
+
+it('filters models by name and resets the search when reopened', async () => {
+  const user = userEvent.setup()
+  const onSelect = vi.fn()
+  render(
+    <ThreadModelMenu
+      agents={[{ ...agent, models: ['provider/alpha', 'provider/beta'] }]}
+      choice={null}
+      label="Choose model"
+      onSelect={onSelect}
+    />,
+  )
+  await user.click(screen.getByRole('button', { name: 'Choose model' }))
+  await user.type(await screen.findByRole('textbox', { name: 'Search models' }), 'beta')
+  expect(screen.getByRole('menuitem', { name: 'provider/beta' })).toBeInTheDocument()
+  expect(screen.queryByRole('menuitem', { name: 'provider/alpha' })).not.toBeInTheDocument()
+  await user.click(screen.getByRole('menuitem', { name: 'provider/beta' }))
+  expect(onSelect).toHaveBeenCalledWith({ agent: 'pi', model: 'provider/beta' })
+  await user.click(screen.getByRole('button', { name: 'Choose model' }))
+  expect(await screen.findByRole('textbox', { name: 'Search models' })).toHaveValue('')
+  expect(screen.getByRole('menuitem', { name: 'provider/alpha' })).toBeInTheDocument()
+})
+
 it('explains unsupported model switching without offering a manual entry', async () => {
   const user = userEvent.setup()
   const onSelect = vi.fn()

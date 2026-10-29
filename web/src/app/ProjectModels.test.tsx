@@ -88,6 +88,16 @@ describe('device project model catalogs', () => {
     expect(screen.queryByRole('dialog', { name: 'New project' })).not.toBeInTheDocument()
   })
 
+  it('includes the selected project emoji when creating a project', async () => {
+    const user = userEvent.setup()
+    const { createProject } = setup('/inbox', reportedModels)
+    const dialog = await newProject(user)
+    await user.type(within(dialog).getByLabelText('Name'), 'Emoji project')
+    await user.click(within(dialog).getByRole('button', { name: '🚀' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Create project' }))
+    await waitFor(() => expect(createProject).toHaveBeenCalledWith(expect.objectContaining({ emoji: '🚀' })))
+  })
+
   it('offers device guidance and explicit manual entry when no device is registered', async () => {
     const user = userEvent.setup()
     const { createProject } = setup('/inbox', (devices) => devices.splice(0))
@@ -137,6 +147,15 @@ describe('device project model catalogs', () => {
     const dialog = await newProject(user)
     expect(within(dialog).getByLabelText('Model')).toHaveValue('grok-4')
     expect(within(dialog).getByText(/No online device has xAI signed in/)).toBeInTheDocument()
+  })
+
+  it('saves a changed project emoji from settings', async () => {
+    const user = userEvent.setup()
+    const { updateProject } = setup('/projects/prj-baton?settings=true')
+    await screen.findByRole('heading', { name: 'Project settings' })
+    await user.click(screen.getByRole('button', { name: '🧪' }))
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(updateProject).toHaveBeenCalledWith({ projectId: 'prj-baton', patch: { emoji: '🧪' } }))
   })
 
   it('preserves an existing unreported model and lets settings switch to the reported catalog', async () => {

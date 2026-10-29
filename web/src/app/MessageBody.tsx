@@ -1,21 +1,23 @@
 import * as stylex from '@stylexjs/stylex'
+import { Streamdown, type Components } from 'streamdown'
 import { fonts } from '../theme/base.stylex'
-import { colors, radius } from '../theme/tokens.stylex'
+import { colors, radius, space } from '../theme/tokens.stylex'
 import { focusRing } from '../ui/Button'
+import { markdownComponents, safeLinkUrl } from './RestrictedMarkdown'
 
 const styles = stylex.create({
-  body: { margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' },
+  body: { minWidth: 0, maxWidth: '100%', overflowWrap: 'anywhere' },
   code: {
     fontFamily: fonts.mono,
     fontSize: '0.92em',
-    paddingInline: '4px',
+    paddingInline: space.xxs,
     borderRadius: radius.sm,
     backgroundColor: colors.subtle,
   },
   path: {
     fontFamily: fonts.mono,
     fontSize: '0.92em',
-    paddingInline: '4px',
+    paddingInline: space.xxs,
     borderWidth: 0,
     borderRadius: radius.sm,
     backgroundColor: { default: colors.subtle, ':hover': colors.hover },
@@ -26,31 +28,41 @@ const styles = stylex.create({
 
 const isPath = (value: string) => /^(\/|~\/|[A-Za-z]:\\)/.test(value)
 
-// 消息正文：反引号里的绝对路径可以点开预览，其余反引号内容按代码显示。
-export function MessageBody({ body, onOpenPath }: { body: string; onOpenPath: (path: string) => void }) {
-  const parts = body.split(/`([^`\n]+)`/)
-  return (
-    <p {...stylex.props(styles.body)}>
-      {parts.map((part, index) => {
-        if (index % 2 === 0) return part
-        if (isPath(part)) {
-          return (
-            <button
-              key={index}
-              type="button"
-              onClick={() => onOpenPath(part)}
-              {...stylex.props(styles.path, focusRing.ring)}
-            >
-              {part}
-            </button>
-          )
-        }
+export function MessageBody({
+  body,
+  onOpenPath,
+  streaming = false,
+}: {
+  body: string
+  onOpenPath: (path: string) => void
+  streaming?: boolean
+}) {
+  const components: Components = {
+    ...markdownComponents,
+    inlineCode: ({ children }) => {
+      if (typeof children === 'string' && isPath(children)) {
         return (
-          <code key={index} {...stylex.props(styles.code)}>
-            {part}
-          </code>
+          <button type="button" onClick={() => onOpenPath(children)} {...stylex.props(styles.path, focusRing.ring)}>
+            {children}
+          </button>
         )
-      })}
-    </p>
+      }
+      return <code {...stylex.props(styles.code)}>{children}</code>
+    },
+    img: () => null,
+  }
+  return (
+    <div {...stylex.props(styles.body)}>
+      <Streamdown
+        mode={streaming ? 'streaming' : 'static'}
+        isAnimating={streaming}
+        skipHtml
+        urlTransform={safeLinkUrl}
+        components={components}
+        controls={false}
+      >
+        {body}
+      </Streamdown>
+    </div>
   )
 }

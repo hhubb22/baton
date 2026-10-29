@@ -87,7 +87,7 @@ function presentation(step: TraceStep): { label: string; icon: IconName; body: R
     case 'dynamic_tool':
       return {
         label: title ?? string(data.toolName) ?? 'Tool call',
-        icon: 'settings',
+        icon: 'tool',
         body: (
           <>
             <Output label="Tool input" value={data.input} />
@@ -124,7 +124,7 @@ function presentation(step: TraceStep): { label: string; icon: IconName; body: R
       }
     }
     case 'reasoning':
-      return { label: title ?? 'Reasoning', icon: 'sparkle', body: <Output label="Reasoning" value={data.text} /> }
+      return { label: title ?? 'Reasoning', icon: 'reasoning', body: <Output label="Reasoning" value={data.text} /> }
     case 'proposed_plan':
       return { label: title ?? 'Plan', icon: 'tasks', body: <Output label="Plan" value={data.markdown} /> }
     case 'todo_list':
@@ -154,7 +154,7 @@ function presentation(step: TraceStep): { label: string; icon: IconName; body: R
     case 'web_search':
       return {
         label: title ?? (step.type === 'file_search' ? 'File search' : 'Web search'),
-        icon: 'folder',
+        icon: step.type === 'file_search' ? 'file-search' : 'web-search',
         body: (
           <>
             <Output label="Search query" value={data.pattern ?? data.patterns} />
@@ -172,7 +172,7 @@ function presentation(step: TraceStep): { label: string; icon: IconName; body: R
     case 'subagent':
       return {
         label: title ?? 'Assistant task',
-        icon: 'sparkle',
+        icon: 'subagent',
         body: (
           <>
             <Output label="Task prompt" value={data.prompt} />
@@ -193,7 +193,7 @@ function presentation(step: TraceStep): { label: string; icon: IconName; body: R
         ),
       }
     case 'token_usage':
-      return { label: title ?? 'Token usage', icon: 'dots', body: <Output label="Token usage" value={step.data} /> }
+      return { label: title ?? 'Token usage', icon: 'usage', body: <Output label="Token usage" value={step.data} /> }
     case 'notification':
     case 'system_notice':
       return {

@@ -40,11 +40,16 @@ describe('Project provider admission and capacity', () => {
       const project = await run(
         projects.createProject(owner.employeeId, {
           title: 'Local',
+          emoji: '🚀',
           provider,
           model: 'test',
           source_node_id: owner.nodeId,
         }),
       )
+      await run(projects.patchProject(owner.employeeId, project.id, { emoji: '🛠️', source_node_id: owner.nodeId }))
+      const saved = await run(projects.getProject(owner.employeeId, project.id))
+      expect(saved.emoji).toBe('🛠️')
+      expect(saved.agent.source_node_id).toBe(owner.nodeId)
       await run(
         projects.acceptProjectMessage(owner.employeeId, project.id, {
           client_message_id: randomUUID(),

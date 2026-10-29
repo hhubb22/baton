@@ -4,6 +4,7 @@ import { ClientError } from '../data/client'
 import { pendingInbox, threadView } from '../data/derive'
 import { useInbox, useSetProjectStatus, useThreads, useUpdateProject } from '../data/queries'
 import type { Device, Project, ProjectPatch, Thread } from '../data/types'
+import { ProjectEmojiPicker, validProjectEmoji } from '../ui/ProjectEmojiPicker'
 import { text } from '../theme/text'
 import { colors, space } from '../theme/tokens.stylex'
 import { Banner } from '../ui/Banner'
@@ -128,12 +129,14 @@ export function ProjectSettings({
     const selected = { ...project, ...snapshot }
     const invalid = !selected.name.trim()
       ? nameError
-      : !selected.subscription.trim() || !selected.model.trim()
-        ? 'Enter a provider and model.'
-        : selected.memoryEmbedding &&
-            (!selected.memoryEmbedding.base_url.trim() || !selected.memoryEmbedding.model.trim())
-          ? 'Enter an embedding base URL and model.'
-          : null
+      : !validProjectEmoji(selected.emoji ?? '📁')
+        ? 'Choose or enter one emoji.'
+        : !selected.subscription.trim() || !selected.model.trim()
+          ? 'Enter a provider and model.'
+          : selected.memoryEmbedding &&
+              (!selected.memoryEmbedding.base_url.trim() || !selected.memoryEmbedding.model.trim())
+            ? 'Enter an embedding base URL and model.'
+            : null
     setSaved(false)
     setError(invalid)
     if (invalid) return
@@ -240,6 +243,12 @@ export function ProjectSettings({
             />
           )}
         </Field>
+        <ProjectEmojiPicker
+          value={values.emoji ?? '📁'}
+          readOnly={archived}
+          error={error === 'Choose or enter one emoji.' ? error : undefined}
+          onChange={(emoji) => change({ emoji })}
+        />
         <Field label="Goal" optional>
           {(props) => (
             <TextArea

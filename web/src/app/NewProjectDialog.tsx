@@ -9,6 +9,7 @@ import { colors } from '../theme/tokens.stylex'
 import { Button } from '../ui/Button'
 import { Dialog, DialogClose } from '../ui/Dialog'
 import { Field, Input, TextArea } from '../ui/Field'
+import { ProjectEmojiPicker, validProjectEmoji } from '../ui/ProjectEmojiPicker'
 import { ProjectModelFields, useProjectModelCatalog } from './ProjectModelFields'
 
 const styles = stylex.create({
@@ -23,6 +24,8 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
   const create = useCreateProject()
   const nameRef = useRef<HTMLInputElement>(null)
   const [name, setName] = useState('')
+  const [emoji, setEmoji] = useState('📁')
+  const [emojiError, setEmojiError] = useState<string | null>(null)
   const [goal, setGoal] = useState('')
   const [selection, setSelection] = useState<{
     subscription: string
@@ -62,13 +65,17 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
       nameRef.current?.focus()
       return
     }
+    if (!validProjectEmoji(emoji)) {
+      setEmojiError('Choose or enter one emoji.')
+      return
+    }
     if (!subscription.trim() || !model.trim()) {
       setFailure('Choose a provider and model, or enter them manually.')
       return
     }
     setFailure(null)
     create.mutate(
-      { name, goal, subscription: subscription.trim(), model: model.trim(), sourceNodeId, clientId },
+      { name, emoji, goal, subscription: subscription.trim(), model: model.trim(), sourceNodeId, clientId },
       {
         onSuccess: (project) => {
           onClose()
@@ -128,6 +135,14 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
           )}
         </Field>
       </form>
+      <ProjectEmojiPicker
+        value={emoji}
+        error={emojiError ?? undefined}
+        onChange={(value) => {
+          setEmoji(value)
+          setEmojiError(null)
+        }}
+      />
       <Field label="Goal" optional>
         {(props) => (
           <TextArea

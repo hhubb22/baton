@@ -36,8 +36,16 @@ export const Compaction = Schema.Struct({
 })
 export type Compaction = typeof Compaction.Type
 
+export const ProjectEmoji = summary(128).check(
+  Schema.makeFilter((value) => {
+    const segments = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(value)]
+    return segments.length === 1 && /\p{Extended_Pictographic}|\p{Regional_Indicator}|[#*0-9]\uFE0F?\u20E3/u.test(value)
+  }),
+)
+
 export const CreateProjectInput = Schema.Struct({
   client_project_id: Schema.optionalKey(Text),
+  emoji: Schema.optionalKey(ProjectEmoji),
   title: summary(1024).check(
     Schema.isMaxCodePoints(200),
     Schema.makeFilter((value) => value.trim().length > 0),
@@ -54,6 +62,7 @@ export * from './project-memory.ts'
 
 export const PatchProjectInput = Schema.Struct({
   source_node_id: Schema.optionalKey(Schema.NullOr(UUID)),
+  emoji: Schema.optionalKey(ProjectEmoji),
   memory_embedding: Schema.optionalKey(Schema.NullOr(MemoryEmbeddingConfigInput)),
   title: Schema.optionalKey(
     Schema.NullOr(
@@ -95,6 +104,7 @@ export type ProjectConversation = typeof ProjectConversation.Type
 export const Project = Schema.Struct({
   memory_embedding: Schema.NullOr(MemoryEmbeddingConfig),
   id: UUID,
+  emoji: ProjectEmoji,
   title: summary(1024).check(
     Schema.isMaxCodePoints(200),
     Schema.makeFilter((value) => value.trim().length > 0),

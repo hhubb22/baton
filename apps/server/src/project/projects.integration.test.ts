@@ -60,6 +60,20 @@ const result = <S extends Schema.ConstraintDecoder<unknown>>(schema: S, value: u
 
 describe('Project creation and messages', () => {
   it(
+    'persists a project emoji across reads and updates',
+    async () =>
+      withTestDatabase(async ({ run }) => {
+        const a = await fixture(run)
+        const project = await run(projects.createProject(a.employee, { ...a.input, emoji: '🚀' }))
+        expect((await run(projects.getProject(a.employee, project.id))).emoji).toBe('🚀')
+        await run(projects.patchProject(a.employee, project.id, { emoji: '🛠️' }))
+        expect((await run(projects.listProjects(a.employee))).projects[0]?.emoji).toBe('🛠️')
+        await expect(run(projects.patchProject(a.employee, project.id, { emoji: 'hello' }))).rejects.toBeDefined()
+      }),
+    30_000,
+  )
+
+  it(
     'keeps Project identities and the original creation request across edits',
     async () =>
       withTestDatabase(async ({ run }) => {

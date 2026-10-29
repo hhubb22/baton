@@ -19,6 +19,7 @@ import { text } from '../theme/text'
 import { colors, radius, space } from '../theme/tokens.stylex'
 import { Button, focusRing, IconButton } from '../ui/Button'
 import { Icon } from '../ui/Icon'
+import { ResizablePane } from '../ui/ResizablePane'
 import { useWorkspace } from './workspace'
 import { copySelection, copyText, SelectionArea } from './SelectionMenu'
 
@@ -64,7 +65,8 @@ const styles = stylex.create({
     display: 'flex',
     flexDirection: 'column',
     flexShrink: 0,
-    width: '240px',
+    width: '100%',
+    height: '100%',
     minHeight: 0,
     backgroundColor: colors.panel,
     borderRightWidth: '1px',
@@ -231,17 +233,26 @@ export function FilePreview({
             <BaseDialog.Close render={<IconButton icon="close" label="Close preview" />} />
           </div>
           <div {...stylex.props(styles.split)}>
-            <FolderPane
-              deviceId={deviceId}
-              dir={dir}
-              root={root}
-              file={file}
-              onDir={setDir}
-              onFile={(next) => {
-                setFile(next)
-                setCopied(false)
-              }}
-            />
+            <ResizablePane
+              label="Resize file list"
+              storageKey="baton.width.file-list"
+              defaultWidth={240}
+              min={160}
+              max={480}
+              reserve={320}
+            >
+              <FolderPane
+                deviceId={deviceId}
+                dir={dir}
+                root={root}
+                file={file}
+                onDir={setDir}
+                onFile={(next) => {
+                  setFile(next)
+                  setCopied(false)
+                }}
+              />
+            </ResizablePane>
             {file ? (
               <FileContent
                 key={`${deviceId}:${file}:${preview.dataUpdatedAt}`}

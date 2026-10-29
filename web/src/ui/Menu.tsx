@@ -71,15 +71,17 @@ export function Menu({
   narrow,
   align = 'start',
   side = 'bottom',
+  onOpenChange,
 }: {
   trigger: ReactElement
   children: ReactNode
   narrow?: boolean
   align?: 'start' | 'center' | 'end'
   side?: 'top' | 'bottom' | 'left' | 'right'
+  onOpenChange?: (open: boolean) => void
 }) {
   return (
-    <BaseMenu.Root>
+    <BaseMenu.Root onOpenChange={onOpenChange}>
       <BaseMenu.Trigger render={trigger} />
       <BaseMenu.Portal>
         <BaseMenu.Positioner side={side} align={align} sideOffset={6} {...stylex.props(styles.positioner)}>
@@ -92,6 +94,7 @@ export function Menu({
 
 export function MenuOption({
   children,
+  leading,
   note,
   detail,
   dot,
@@ -99,6 +102,7 @@ export function MenuOption({
   onSelect,
 }: {
   children: ReactNode
+  leading?: ReactNode
   note?: ReactNode
   detail?: ReactNode
   dot?: Tone
@@ -118,6 +122,7 @@ export function MenuOption({
         ).className ?? ''
       }
     >
+      {leading}
       {dot && <StatusDot tone={dot} />}
       <span {...stylex.props(styles.name, text.truncate)}>{children}</span>
       {note && <span {...stylex.props(text.caption, styles.note)}>{note}</span>}

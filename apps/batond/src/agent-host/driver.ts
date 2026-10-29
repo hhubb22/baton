@@ -126,7 +126,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
     const emit = (event: ExecutionEvent) =>
       Effect.gen(function* () {
         if (event.type === 'delta') {
-          output.offer(event)
+          output.offer({ ...event, replyId: event.id })
           return
         }
         yield* Queue.offer(control, event)
@@ -627,7 +627,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
             Stream.map((event): ExecutionEvent => ({
               ...event,
               type: 'delta',
-              id: event.executionId,
+              id: event.replyId ?? event.executionId,
             })),
           ),
         ),

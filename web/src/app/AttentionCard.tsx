@@ -22,7 +22,7 @@ import { useWorkspace, type ItemDraft } from './workspace'
 const styles = stylex.create({
   item: { display: 'flex', flexDirection: 'column', gap: '10px', minWidth: 0, overflowWrap: 'anywhere' },
   row: { display: 'flex', alignItems: 'center', gap: space.sm, minWidth: 0 },
-  project: { flexShrink: 0, color: colors.text, fontWeight: weight.medium, textDecoration: 'none' },
+  project: { minWidth: 0, color: colors.text, fontWeight: weight.medium, textDecoration: 'none' },
   meta: { minWidth: 0, color: colors.faint, textDecoration: 'none' },
   close: { marginLeft: 'auto', width: size.compact, height: size.compact },
   body: { color: colors.muted },
@@ -78,11 +78,13 @@ export function AttentionCard({
   onHandled,
   feedback,
   showProject = false,
+  detail = false,
 }: {
   item: InboxItem
   showProject?: boolean
   onHandled?: (itemId: string, feedback: string | null) => void
   feedback?: string | null
+  detail?: boolean
 }) {
   const projects = useProjects()
   const threads = useThreads()
@@ -164,8 +166,12 @@ export function AttentionCard({
       <div {...stylex.props(text.caption, styles.row)}>
         {showProject && project && (
           <>
-            <Avatar name={project.name} hue={project.hue} />
-            <Link to="/projects/$projectId" params={{ projectId: project.id }} {...stylex.props(styles.project)}>
+            <Avatar name={project.name} hue={project.hue} emoji={project.emoji} />
+            <Link
+              to="/projects/$projectId"
+              params={{ projectId: project.id }}
+              {...stylex.props(styles.project, text.truncate)}
+            >
               {project.name}
             </Link>
           </>
@@ -192,7 +198,7 @@ export function AttentionCard({
           />
         )}
       </div>
-      <h2 {...stylex.props(text.heading)}>{item.title}</h2>
+      <h2 {...stylex.props(text.heading, detail && text.title)}>{item.title}</h2>
       {!done && (
         <SelectionArea
           label={archived ? 'Copy selection' : 'Ask project assistant'}

@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex'
 import { useNavigate } from '@tanstack/react-router'
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject, type UIEvent } from 'react'
 import { ClientError } from '../data/client'
 import {
   agentNames,
@@ -17,6 +17,7 @@ import {
   useCancelMessage,
   useDevices,
   useMessages,
+  useClient,
   useInbox,
   useProjects,
   useOperation,
@@ -47,7 +48,6 @@ import { FullOutput } from './FullOutput'
 import { Page, pane } from './Page'
 import { ActivityTrace, Attachments, LiveOutput } from './ReplyParts'
 import { copySelection, SelectionArea } from './SelectionMenu'
-import { ThreadExecutionLimit } from './ThreadExecutionLimit'
 import { ThreadQuestionForm } from './ThreadQuestionForm'
 import { ThreadQuestionAnswerStatus } from './ThreadQuestionAnswerStatus'
 import { ThreadModelMenu } from './ThreadModelMenu'
@@ -59,7 +59,7 @@ const styles = stylex.create({
     display: 'flex',
     flexDirection: 'column',
     flexShrink: 0,
-    width: size.detail,
+    width: '100%',
     minWidth: 0,
     height: '100%',
     backgroundColor: colors.surface,
@@ -79,7 +79,7 @@ const styles = stylex.create({
   headerTitle: { flexShrink: 1 },
   headerStatus: { display: 'inline-flex', alignItems: 'center', gap: '6px', flexGrow: 1, whiteSpace: 'nowrap' },
   split: { display: 'flex', height: '100%', minHeight: 0 },
-  main: { display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0, minHeight: 0 },
+  main: { position: 'relative', display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0, minHeight: 0 },
   timeline: { flexGrow: 1, minHeight: 0, overflowY: 'auto', outline: 'none' },
   messages: {
     display: 'flex',
@@ -89,6 +89,7 @@ const styles = stylex.create({
     maxWidth: size.measure,
     marginInline: 'auto',
     padding: space.xl,
+    paddingBottom: 'calc(var(--thread-dock-height, 160px) + 16px)',
   },
   messagesPanel: { paddingInline: space.lg },
   userItem: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' },
@@ -117,13 +118,38 @@ const styles = stylex.create({
   danger: { color: colors.danger },
   attention: { color: colors.attentionText },
   dock: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 1,
+    pointerEvents: 'none',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    paddingTop: '24px',
+    paddingInline: space.xl,
+    paddingBottom: space.md,
+    backgroundImage: `linear-gradient(to bottom, transparent, color-mix(in srgb, ${colors.surface} 70%, transparent))`,
+    opacity: 1,
+    transform: 'translateY(0)',
+    transition: 'opacity 180ms cubic-bezier(0.23, 1, 0.32, 1), transform 180ms cubic-bezier(0.23, 1, 0.32, 1)',
+    '@media (prefers-reduced-motion: reduce)': { transition: 'opacity 120ms ease', transform: 'none' },
+  },
+  dockHidden: {
+    opacity: 0,
+    transform: 'translateY(12px)',
+    transition: 'opacity 280ms ease, transform 280ms cubic-bezier(0.23, 1, 0.32, 1)',
+    '@media (prefers-reduced-motion: reduce)': { transition: 'opacity 120ms ease', transform: 'none' },
+  },
+  dockContent: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     gap: space.sm,
-    flexShrink: 0,
-    paddingInline: space.xl,
-    paddingBottom: space.md,
+    width: '100%',
+    maxWidth: size.measure,
+    pointerEvents: 'auto',
   },
   dockPanel: { paddingInline: space.lg },
   notice: {
@@ -269,7 +295,7 @@ function MessageItem({
       <article id={`message-${message.id}`} {...stylex.props(text.body, styles.agent)}>
         <ActivityTrace message={message} device={device} command={command} />
         <div data-reply={reply}>
-          <MessageBody body={message.body} onOpenPath={onOpenPath} />
+          <MessageBody body={message.body} onOpenPath={onOpenPath} streaming={message.streaming} />
         </div>
         {message.fullOutput && <FullOutput threadId={message.threadId} reference={message.fullOutput} />}
         <Attachments attachments={message.attachments} devices={devices} onOpen={onOpen} />
@@ -398,6 +424,7 @@ export function ThreadDetail({
   onRecover: (action: RecoverAction, thread: Thread) => void
 }) {
   const navigate = useNavigate()
+  const client = useClient()
   const threadQuery = useThread(threadId)
   const devices = useDevices()
   const messages = useMessages(threadId)
@@ -417,6 +444,15 @@ export function ThreadDetail({
   const [resumeId, setResumeId] = useState<string | null>(null)
   const [preview, setPreview] = useState<{ deviceId: ID; path: string; reply: number | null } | null>(null)
   const timelineRef = useRef<HTMLDivElement | null>(null)
+  const dockRef = useRef<HTMLDivElement | null>(null)
+  const scrollAnchor = useRef(0)
+  const [dockState, setDockState] = useState({ threadId, hidden: false })
+  if (dockState.threadId !== threadId) setDockState({ threadId, hidden: false })
+  const dockHidden = dockState.threadId === threadId && dockState.hidden
+  const setDockHidden = (hidden: boolean) =>
+    setDockState((current) =>
+      current.threadId === threadId && current.hidden === hidden ? current : { threadId, hidden },
+    )
   const workspace = useWorkspace()
   const resumeOperation = useOperation(resumeId)
 
@@ -437,8 +473,29 @@ export function ThreadDetail({
   // 新消息出现时滚到最后。
   useEffect(() => {
     const node = timelineRef.current
-    if (node) node.scrollTop = node.scrollHeight
-  }, [list.length])
+    if (node) {
+      node.scrollTop = node.scrollHeight
+      scrollAnchor.current = node.scrollTop
+    }
+  }, [list.length, threadId])
+
+  useLayoutEffect(() => {
+    const dock = dockRef.current
+    const main = dock?.parentElement
+    if (!dock || !main) return
+    const update = () => main.style.setProperty('--thread-dock-height', `${dock.offsetHeight}px`)
+    update()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update)
+    observer?.observe(dock)
+    return () => {
+      observer?.disconnect()
+      main.style.removeProperty('--thread-dock-height')
+    }
+  }, [thread?.id, layout])
+
+  useEffect(() => {
+    if (thread?.unread && messages.isSuccess && !messages.isFetching) client.markThreadRead?.(threadId)
+  }, [client, threadId, thread?.unread, messages.isSuccess, messages.isFetching])
 
   if (threadQuery.error instanceof ClientError && threadQuery.error.code === 'notFound') {
     return (
@@ -594,6 +651,28 @@ export function ThreadDetail({
   else if (thread.pending === 'stop' && view.live) status = 'Stopping…'
   else if (running) status = mode === 'now' ? 'Sends during the current reply' : 'Sends after current reply'
 
+  const canHideDock =
+    !!view.composer &&
+    !view.notice &&
+    !thread.pendingQuestions?.length &&
+    !thread.questionAnswers?.length &&
+    !error &&
+    !resumeFailed
+  const hideDock = dockHidden && canHideDock
+  function onTimelineScroll(event: UIEvent<HTMLDivElement>) {
+    const timeline = event.currentTarget
+    const top = timeline.scrollTop
+    const delta = top - scrollAnchor.current
+    if (timeline.scrollHeight - timeline.clientHeight - top <= 2) {
+      scrollAnchor.current = top
+      setDockHidden(false)
+    } else if (Math.abs(delta) >= 12) {
+      scrollAnchor.current = top
+      if (delta > 0) setDockHidden(false)
+      else if (canHideDock && !dockRef.current?.contains(document.activeElement)) setDockHidden(true)
+    }
+  }
+
   const menuItems = [
     (running || thread.starting || thread.resumePending) && !thread.pending && (
       <MenuOption key="stop" onSelect={() => setConfirm('stop')}>
@@ -622,7 +701,14 @@ export function ThreadDetail({
   const body = (
     <div {...stylex.props(styles.split)}>
       <div {...stylex.props(styles.main)}>
-        <div ref={timelineRef} tabIndex={-1} aria-label="Messages" role="region" {...stylex.props(styles.timeline)}>
+        <div
+          ref={timelineRef}
+          tabIndex={-1}
+          aria-label="Messages"
+          role="region"
+          onScroll={onTimelineScroll}
+          {...stylex.props(styles.timeline)}
+        >
           <SelectionArea
             label={canAsk ? 'Ask project assistant' : 'Copy selection'}
             icon={canAsk ? 'reply' : 'copy'}
@@ -668,115 +754,131 @@ export function ThreadDetail({
                   />
                 )
               })}
-            <LiveOutput thread={thread} device={device} live={view.live} now={now} />
+            <LiveOutput
+              thread={thread}
+              device={device}
+              live={view.live}
+              now={now}
+              messages={list}
+              onOpenPath={(path) => openFile(null)(thread.deviceId, path)}
+            />
           </SelectionArea>
         </div>
-        <div {...stylex.props(styles.dock, layout === 'panel' && styles.dockPanel)}>
-          {thread.pendingQuestions?.map((question) => (
-            <ThreadQuestionForm
-              key={`${thread.id}:${question.request_id}`}
-              question={question}
-              onAnswer={async (answer) => {
-                await answerQuestion.mutateAsync({ threadId: thread.id, answer })
-              }}
-            />
-          ))}
-          {thread.questionAnswers?.[0] && (
-            <ThreadQuestionAnswerStatus answer={thread.questionAnswers[0]} offline={device?.connection !== 'online'} />
-          )}
-          {view.notice && (
-            <NoticeCard
-              notice={view.notice}
-              action={
-                view.notice.action && (
-                  <Button small onClick={() => onAction(view.notice!.action!)}>
-                    {view.notice.action === 'resume' && thread.retryOpenAllowed
-                      ? 'Retry opening'
-                      : actionLabels[view.notice.action]}
-                  </Button>
-                )
-              }
-            />
-          )}
-          {view.composer && (
-            <Composer
-              value={draft}
-              onChange={setDraft}
-              onSend={onSend}
-              placeholder={`Message ${agentName}…`}
-              style={styles.composer}
-              chips={
-                <>
-                  <ModelMenu thread={thread} agent={agent} onSelect={onModel} />
-                  {thread.agent && (
-                    <ThreadAccessMenu side="top" agent={thread.agent} user={device?.commandAccess.user ?? ''} />
-                  )}
-                  <ThreadExecutionLimit key={thread.id} thread={thread} />
-                </>
-              }
-              actions={
-                running && (
+        <div
+          ref={dockRef}
+          inert={hideDock || undefined}
+          aria-hidden={hideDock || undefined}
+          {...stylex.props(styles.dock, layout === 'panel' && styles.dockPanel, hideDock && styles.dockHidden)}
+        >
+          <div {...stylex.props(styles.dockContent)}>
+            {thread.pendingQuestions?.map((question) => (
+              <ThreadQuestionForm
+                key={`${thread.id}:${question.request_id}`}
+                question={question}
+                onAnswer={async (answer) => {
+                  await answerQuestion.mutateAsync({ threadId: thread.id, answer })
+                }}
+              />
+            ))}
+            {thread.questionAnswers?.[0] && (
+              <ThreadQuestionAnswerStatus
+                answer={thread.questionAnswers[0]}
+                offline={device?.connection !== 'online'}
+              />
+            )}
+            {view.notice && (
+              <NoticeCard
+                notice={view.notice}
+                action={
+                  view.notice.action && (
+                    <Button small onClick={() => onAction(view.notice!.action!)}>
+                      {view.notice.action === 'resume' && thread.retryOpenAllowed
+                        ? 'Retry opening'
+                        : actionLabels[view.notice.action]}
+                    </Button>
+                  )
+                }
+              />
+            )}
+            {view.composer && (
+              <Composer
+                value={draft}
+                onChange={setDraft}
+                onSend={onSend}
+                placeholder={`Message ${agentName}…`}
+                style={styles.composer}
+                chips={
                   <>
-                    <div role="group" aria-label="Send mode" {...stylex.props(styles.segmented)}>
-                      <button
-                        type="button"
-                        aria-pressed={mode === 'next'}
-                        onClick={() => {
-                          setMode('next')
-                          setError(null)
-                        }}
-                        {...stylex.props(
-                          text.caption,
-                          styles.segment,
-                          mode === 'next' && styles.segmentOn,
-                          focusRing.ring,
-                        )}
-                      >
-                        Send next
-                      </button>
-                      <button
-                        type="button"
-                        aria-pressed={mode === 'now'}
-                        onClick={onSendNow}
-                        {...stylex.props(
-                          text.caption,
-                          styles.segment,
-                          mode === 'now' && styles.segmentOn,
-                          focusRing.ring,
-                        )}
-                      >
-                        Send now
-                      </button>
-                    </div>
-                    <IconButton
-                      icon="stop"
-                      label="Stop current reply"
-                      onClick={() => setConfirm('stop')}
-                      style={styles.stop}
-                    />
+                    <ModelMenu thread={thread} agent={agent} onSelect={onModel} />
+                    {thread.agent && (
+                      <ThreadAccessMenu side="top" agent={thread.agent} user={device?.commandAccess.user ?? ''} />
+                    )}
                   </>
-                )
-              }
-            />
-          )}
-          <span
-            role="status"
-            {...stylex.props(text.caption, styles.status, (error !== null || resumeFailed !== null) && styles.danger)}
-          >
-            {status}
-          </span>
-          <div {...stylex.props(text.caption, styles.footer)}>
-            <span {...stylex.props(styles.footerItem)}>
-              <Icon name="laptop" size={12} />
-              {device?.name ?? 'Removed device'}
+                }
+                actions={
+                  running && (
+                    <>
+                      <div role="group" aria-label="Send mode" {...stylex.props(styles.segmented)}>
+                        <button
+                          type="button"
+                          aria-pressed={mode === 'next'}
+                          onClick={() => {
+                            setMode('next')
+                            setError(null)
+                          }}
+                          {...stylex.props(
+                            text.caption,
+                            styles.segment,
+                            mode === 'next' && styles.segmentOn,
+                            focusRing.ring,
+                          )}
+                        >
+                          Send next
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={mode === 'now'}
+                          onClick={onSendNow}
+                          {...stylex.props(
+                            text.caption,
+                            styles.segment,
+                            mode === 'now' && styles.segmentOn,
+                            focusRing.ring,
+                          )}
+                        >
+                          Send now
+                        </button>
+                      </div>
+                      <IconButton
+                        icon="stop"
+                        label="Stop current reply"
+                        onClick={() => setConfirm('stop')}
+                        style={styles.stop}
+                      />
+                    </>
+                  )
+                }
+              />
+            )}
+            <span
+              role="status"
+              {...stylex.props(text.caption, styles.status, (error !== null || resumeFailed !== null) && styles.danger)}
+            >
+              {status}
             </span>
-            <span {...stylex.props(styles.footerItem)}>
-              <Icon name="folder" size={12} />
-              <span title={thread.folder} {...stylex.props(text.mono, text.truncate)}>
-                {thread.folder}
+            <div {...stylex.props(text.caption, styles.footer)}>
+              <span {...stylex.props(styles.footerItem)}>
+                <Icon name="laptop" size={12} />
+                {device?.name ?? 'Removed device'}
               </span>
-            </span>
-            <LocalThreadActions key={thread.id} thread={thread} />
+              <span {...stylex.props(styles.footerItem)}>
+                <Icon name="folder" size={12} />
+                <span title={thread.folder} {...stylex.props(text.mono, text.truncate)}>
+                  {thread.folder}
+                </span>
+              </span>
+              <LocalThreadActions key={thread.id} thread={thread} />
+            </div>
           </div>
         </div>
       </div>

@@ -56,6 +56,21 @@ describe('mock downloads', () => {
 })
 
 describe('mock scenarios', () => {
+  it('streams Markdown and restarts it on reset', async () => {
+    const { client, scheduler } = setup('streamingMarkdown')
+    expect((await client.listMessages('thr-webui'))[0]).toMatchObject({ body: '', streaming: true })
+    scheduler.advance(1600)
+    const partial = (await client.listMessages('thr-webui'))[0]
+    expect(partial.body).toContain('检查结果')
+    expect(partial.streaming).toBe(true)
+    scheduler.advance(60000)
+    const complete = (await client.listMessages('thr-webui'))[0]
+    expect(complete.body).toContain('```sh')
+    expect(complete.streaming).toBe(false)
+    client.controls.reset()
+    expect((await client.listMessages('thr-webui'))[0]).toMatchObject({ body: '', streaming: true })
+  })
+
   it.each(scenarioIds)('reset reproduces %s', async (id) => {
     const { client } = setup(id)
     const first = await state(client)
@@ -943,6 +958,7 @@ describe('projects', () => {
     const { client, scheduler } = setup('modelSources')
     const project = await client.createProject({
       name: 'API',
+      emoji: '🚀',
       goal: '',
       subscription: 'api-11111111-1111-4111-8111-111111111111',
       sourceNodeId: 'dev-ubuntu',
@@ -955,11 +971,13 @@ describe('projects', () => {
     await client.updateProject({
       projectId: project.id,
       patch: {
+        emoji: '🛠️',
         subscription: 'api-22222222-2222-4222-8222-222222222222',
         sourceNodeId: 'dev-ubuntu',
         model: 'claude-model',
       },
     })
+    expect((await client.listProjects()).find((item) => item.id === project.id)?.emoji).toBe('🛠️')
     expect((await client.listProjects()).find((item) => item.id === project.id)?.agent).toMatchObject({
       state: 'running',
       deviceId: 'dev-ubuntu',

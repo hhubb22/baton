@@ -1,8 +1,8 @@
 import * as stylex from '@stylexjs/stylex'
 import { Link, useLocation, useNavigate } from '@tanstack/react-router'
-import type { ReactNode } from 'react'
-import { liveThreads, onlineSummary, pendingInbox } from '../data/derive'
-import { useDevices, useInbox, useProjects, useSession, useThreads } from '../data/queries'
+import { useState, type ReactNode } from 'react'
+import { liveThreads, pendingInbox } from '../data/derive'
+import { useInbox, useProjects, useSession, useThreads } from '../data/queries'
 import type { Project } from '../data/types'
 import { weight } from '../theme/base.stylex'
 import { useTheme, type ThemeMode } from '../theme/ThemeProvider'
@@ -10,8 +10,7 @@ import { text } from '../theme/text'
 import { colors, radius, size, space } from '../theme/tokens.stylex'
 import { Avatar, PersonAvatar } from '../ui/Avatar'
 import { Count } from '../ui/Badge'
-import { BrandMark } from '../ui/BrandMark'
-import { Button, focusRing, IconButton } from '../ui/Button'
+import { focusRing, IconButton } from '../ui/Button'
 import { Icon, type IconName } from '../ui/Icon'
 import { Menu, MenuHeading, MenuOption, MenuRule } from '../ui/Menu'
 import { StatusDot } from '../ui/Status'
@@ -22,36 +21,49 @@ const styles = stylex.create({
     display: 'flex',
     flexDirection: 'column',
     flexShrink: 0,
-    width: size.sidebar,
+    width: '100%',
     height: '100%',
+    overflow: 'hidden',
     paddingTop: 0,
     paddingInline: space.sm,
     paddingBottom: space.sm,
   },
-  sidebarCollapsed: { width: '64px' },
-  brand: {
+  sidebarCollapsed: { width: '52px' },
+  header: {
     display: 'flex',
     alignItems: 'center',
-    gap: space.sm,
+    flexShrink: 0,
+    gap: space.xs,
     height: size.header,
-    paddingInline: space.sm,
+    paddingInline: space.xs,
   },
-  brandName: { flexGrow: 1 },
-  nav: { display: 'flex', flexDirection: 'column', gap: space.xxs, marginTop: space.sm },
+  headerCollapsed: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    height: '76px',
+    paddingTop: '10px',
+  },
+  nav: { display: 'flex', flexDirection: 'column', gap: space.xxs, marginTop: space.md },
   row: {
     display: 'flex',
     alignItems: 'center',
     gap: space.sm,
     height: size.row,
     paddingInline: space.sm,
+    paddingLeft: '9px',
     borderRadius: radius.sm,
-    color: colors.text,
+    color: colors.muted,
+    fontWeight: weight.medium,
+    lineHeight: 'normal',
+    letterSpacing: 'normal',
     textDecoration: 'none',
+    whiteSpace: 'nowrap',
     backgroundColor: { default: 'transparent', ':hover': colors.hover },
   },
-  projectRow: { height: '30px' },
+  projectRow: { height: size.row, gap: '6px' },
   active: {
     backgroundColor: { default: colors.raised, ':hover': colors.raised },
+    color: colors.text,
     fontWeight: weight.medium,
   },
   rowIcon: { color: colors.muted },
@@ -61,24 +73,27 @@ const styles = stylex.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     height: size.compact,
-    marginTop: space.lg,
+    marginTop: space.xl,
     paddingInline: space.sm,
-    color: colors.faint,
+    color: colors.muted,
   },
   addProject: {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    width: '20px',
-    height: '20px',
+    width: '24px',
+    height: '24px',
     padding: 0,
     borderWidth: 0,
     borderRadius: radius.inner,
     backgroundColor: { default: 'transparent', ':hover': colors.hover },
     color: colors.faint,
+    opacity: { default: 0, ':focus-visible': 1, '@media (hover: none)': 1 },
+    transition: 'opacity 150ms ease',
+    '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
   },
+  addProjectVisible: { opacity: 1 },
   spacer: { flexGrow: 1 },
-  plainButton: { width: '100%', borderWidth: 0, cursor: 'pointer' },
   projects: {
     display: 'flex',
     flexDirection: 'column',
@@ -89,34 +104,24 @@ const styles = stylex.create({
     overflowY: 'auto',
   },
   empty: { paddingInline: space.sm, color: colors.faint },
-  pausedName: { color: colors.muted },
-  footerCollapsed: { paddingInline: 0 },
-  footer: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space.sm,
-    height: '40px',
-    paddingTop: space.sm,
-    paddingInline: space.sm,
-    borderTopWidth: '1px',
-    borderTopStyle: 'solid',
-    borderTopColor: colors.borderSoft,
-  },
+  pausedName: { color: colors.faint },
   account: {
     display: 'flex',
     alignItems: 'center',
+    justifyContent: 'flex-end',
     gap: space.sm,
     flexGrow: 1,
     minWidth: 0,
     height: size.row,
     paddingInline: space.xs,
-    marginInlineStart: `calc(-1 * ${space.xs})`,
+    paddingLeft: '2px',
     borderWidth: 0,
     borderRadius: radius.sm,
     backgroundColor: { default: 'transparent', ':hover': colors.hover },
     color: colors.text,
     textAlign: 'start',
   },
+  accountCollapsed: { flexGrow: 0, width: '28px' },
   accountMenu: {
     display: 'flex',
     flexDirection: 'column',
@@ -124,6 +129,8 @@ const styles = stylex.create({
     padding: space.xs,
   },
   accountName: { display: 'flex', flexDirection: 'column' },
+  accountLabel: { minWidth: 0, fontWeight: 550, lineHeight: '23px', letterSpacing: '-0.1px' },
+  accountCaret: { color: colors.faint },
 })
 
 // 收起时只留图标，名称放进 aria-label 和悬停提示。
@@ -150,7 +157,7 @@ function NavRow({
       title={collapsed ? label : undefined}
       {...stylex.props(text.small, styles.row, active && styles.active, focusRing.ring)}
     >
-      <Icon name={icon} size={16} style={styles.rowIcon} />
+      <Icon name={icon} size={18} style={styles.rowIcon} />
       {!collapsed && <span {...stylex.props(styles.rowLabel)}>{label}</span>}
       {!collapsed && trailing}
     </Link>
@@ -158,7 +165,7 @@ function NavRow({
 }
 
 function ProjectTrailing({ project, pending }: { project: Project; pending: number }) {
-  if (project.status === 'paused') return <Icon name="pause" size={14} label="Paused" style={styles.rowIcon} />
+  if (project.status === 'paused') return null
   if (pending > 0) return <Count value={pending} label={`${pending} waiting for your reply`} />
   if (project.agent.state === 'running') return <StatusDot tone="agent" label="Running" />
   if (project.agent.state === 'stopping') return <StatusDot tone="agent" label="Stopping" />
@@ -174,9 +181,11 @@ function ProjectRow({ project, pending }: { project: Project; pending: number })
       to="/projects/$projectId"
       params={{ projectId: project.id }}
       aria-current={active ? 'page' : undefined}
+      aria-label={project.status === 'paused' ? `${project.name}, Paused` : undefined}
+      title={project.status === 'paused' ? 'Paused' : undefined}
       {...stylex.props(text.small, styles.row, styles.projectRow, active && styles.active, focusRing.ring)}
     >
-      <Avatar name={project.name} hue={project.hue} />
+      <Avatar name={project.name} hue={project.hue} emoji={project.emoji} small />
       <span {...stylex.props(styles.rowLabel, text.truncate, project.status === 'paused' && styles.pausedName)}>
         {project.name}
       </span>
@@ -190,11 +199,10 @@ const themeLabels: Record<ThemeMode, string> = { system: 'Match system', light: 
 export function Sidebar() {
   const navigate = useNavigate()
   const session = useSession()
-  const devices = useDevices()
   const projects = useProjects()
   const threads = useThreads()
   const inbox = useInbox()
-  const { collapsed, signingOut, signOut } = useWorkspace()
+  const { collapsed, toggleSidebar, signingOut, signOut } = useWorkspace()
   const { mode, setMode } = useTheme()
 
   const account = session.data?.account
@@ -204,74 +212,28 @@ export function Sidebar() {
 
   return (
     <nav aria-label="Workspace" {...stylex.props(styles.sidebar, collapsed && styles.sidebarCollapsed)}>
-      <div {...stylex.props(styles.brand)}>
-        <BrandMark />
-        {!collapsed && <span {...stylex.props(text.bodyMedium, styles.brandName)}>Baton</span>}
-        {!collapsed && (
-          <IconButton
-            icon="pen"
-            label="New thread"
-            onClick={() => void navigate({ to: '/threads', search: { compose: 'focus' } })}
-          />
-        )}
-      </div>
-
-      <div {...stylex.props(styles.nav)}>
-        {collapsed && (
-          <button
-            type="button"
-            aria-label="New thread"
-            title="New thread"
-            onClick={() => void navigate({ to: '/threads', search: { compose: 'focus' } })}
-            {...stylex.props(styles.row, styles.plainButton, focusRing.ring)}
-          >
-            <Icon name="pen" size={16} style={styles.rowIcon} />
-          </button>
-        )}
-        <NavRow
-          to="/inbox"
-          icon="inbox"
-          label="Inbox"
-          collapsed={collapsed}
-          trailing={pending.length > 0 && <Count value={pending.length} />}
+      <div {...stylex.props(styles.header, collapsed && styles.headerCollapsed)}>
+        <IconButton
+          icon="sidebar"
+          iconSize={18}
+          label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-expanded={!collapsed}
+          onClick={toggleSidebar}
         />
-        <NavRow
-          to="/threads"
-          icon="terminal"
-          label="Threads"
-          collapsed={collapsed}
-          trailing={unread > 0 && <Count value={unread} quiet label={`${unread} unread`} />}
-        />
-        <NavRow
-          to="/devices"
-          icon="laptop"
-          label="Devices"
-          collapsed={collapsed}
-          trailing={
-            devices.data && <span {...stylex.props(text.caption, text.faint)}>{onlineSummary(devices.data)}</span>
-          }
-        />
-      </div>
-
-      {collapsed ? (
-        <div {...stylex.props(styles.spacer)} />
-      ) : (
-        <ProjectList projects={visibleProjects} loaded={projects.data !== undefined} unavailable={projects.isError} />
-      )}
-
-      {account && (
-        <div {...stylex.props(styles.footer, collapsed && styles.footerCollapsed)}>
+        {account && (
           <Menu
-            side="top"
+            narrow
+            side="bottom"
             trigger={
               <button
                 type="button"
                 aria-label={collapsed ? account.name : undefined}
                 title={collapsed ? account.name : undefined}
-                {...stylex.props(text.small, styles.account, focusRing.ring)}
+                {...stylex.props(text.small, styles.account, collapsed && styles.accountCollapsed, focusRing.ring)}
               >
                 <PersonAvatar name={account.name} />
-                {!collapsed && <span {...stylex.props(text.truncate)}>{account.name}</span>}
+                {!collapsed && <span {...stylex.props(text.truncate, styles.accountLabel)}>{account.name}</span>}
+                {!collapsed && <Icon name="chevron-down" size={12} style={styles.accountCaret} />}
               </button>
             }
           >
@@ -280,24 +242,46 @@ export function Sidebar() {
                 <span {...stylex.props(text.label)}>{account.name}</span>
                 <span {...stylex.props(text.caption, text.faint)}>{account.username}</span>
               </div>
-              <Button small block onClick={signOut}>
-                {signingOut ? 'Signing out…' : 'Sign out'}
-              </Button>
             </div>
+            <MenuRule />
+            <MenuHeading>Theme</MenuHeading>
+            {(['system', 'light', 'dark'] as const).map((value) => (
+              <MenuOption key={value} selected={mode === value} onSelect={() => setMode(value)}>
+                {themeLabels[value]}
+              </MenuOption>
+            ))}
+            <MenuRule />
+            <MenuOption onSelect={() => void navigate({ to: '/devices' })}>Devices</MenuOption>
+            <MenuOption onSelect={() => void navigate({ to: '/projects/archived' })}>Archived projects</MenuOption>
+            <MenuRule />
+            <MenuOption onSelect={signOut}>{signingOut ? 'Signing out…' : 'Sign out'}</MenuOption>
           </Menu>
-          {!collapsed && (
-            <Menu side="top" align="end" narrow trigger={<IconButton icon="settings" label="Settings" />}>
-              <MenuHeading>Theme</MenuHeading>
-              {(['system', 'light', 'dark'] as const).map((value) => (
-                <MenuOption key={value} selected={mode === value} onSelect={() => setMode(value)}>
-                  {themeLabels[value]}
-                </MenuOption>
-              ))}
-              <MenuRule />
-              <MenuOption onSelect={() => void navigate({ to: '/devices' })}>Devices</MenuOption>
-            </Menu>
-          )}
-        </div>
+        )}
+      </div>
+      <div {...stylex.props(styles.nav)}>
+        <NavRow
+          to="/inbox"
+          icon="inbox"
+          label="Inbox"
+          collapsed={collapsed}
+          trailing={
+            pending.length > 0 && <Count value={pending.length} label={`${pending.length} waiting for your reply`} />
+          }
+        />
+        <NavRow
+          to="/threads"
+          icon="threads"
+          label="Threads"
+          collapsed={collapsed}
+          trailing={unread > 0 && <Count value={unread} label={`${unread} unread`} />}
+        />
+        <NavRow to="/devices" icon="laptop" label="Devices" collapsed={collapsed} />
+      </div>
+
+      {collapsed ? (
+        <div {...stylex.props(styles.spacer)} />
+      ) : (
+        <ProjectList projects={visibleProjects} loaded={projects.data !== undefined} unavailable={projects.isError} />
       )}
     </nav>
   )
@@ -314,16 +298,21 @@ function ProjectList({
 }) {
   const inbox = useInbox()
   const { newProject } = useWorkspace()
+  const [headerHovered, setHeaderHovered] = useState(false)
   return (
     <>
-      <div {...stylex.props(styles.sectionHead)}>
+      <div
+        onMouseEnter={() => setHeaderHovered(true)}
+        onMouseLeave={() => setHeaderHovered(false)}
+        {...stylex.props(styles.sectionHead)}
+      >
         <span {...stylex.props(text.captionMedium)}>Projects</span>
         <button
           type="button"
           aria-label="New project"
           title="New project"
           onClick={newProject}
-          {...stylex.props(styles.addProject, focusRing.ring)}
+          {...stylex.props(styles.addProject, headerHovered && styles.addProjectVisible, focusRing.ring)}
         >
           <Icon name="plus" size={14} />
         </button>
@@ -334,9 +323,6 @@ function ProjectList({
         {projects.map((project) => (
           <ProjectRow key={project.id} project={project} pending={pendingInbox(inbox.data ?? [], project.id).length} />
         ))}
-        <Link to="/projects/archived" {...stylex.props(text.caption, text.muted, styles.row, focusRing.ring)}>
-          Archived projects
-        </Link>
       </div>
     </>
   )

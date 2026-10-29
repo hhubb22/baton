@@ -37,7 +37,14 @@ export function ThreadAccessMenu({
 }) {
   const access = threadAccess(agent, user)
   return (
-    <Menu side={side} trigger={<Chip icon="shield">{access.label}</Chip>}>
+    <Menu
+      side={side}
+      trigger={
+        <Chip icon="shield" composer>
+          {access.label}
+        </Chip>
+      }
+    >
       <MenuOption selected detail={access.detail}>
         {access.label}
       </MenuOption>

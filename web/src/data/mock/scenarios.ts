@@ -15,6 +15,7 @@ import { fileKey, type DeviceFile, type World } from './world'
 
 export const scenarioIds = [
   'normal',
+  'streamingMarkdown',
   'downloads',
   'noDownloads',
   'empty',
@@ -37,6 +38,7 @@ export type ScenarioId = (typeof scenarioIds)[number]
 
 export const scenarioLabels: Record<ScenarioId, string> = {
   normal: 'Normal',
+  streamingMarkdown: 'Streaming Markdown',
   downloads: 'Device downloads',
   noDownloads: 'No device downloads',
   empty: 'Empty',
@@ -485,7 +487,33 @@ function messages(now: number): Message[] {
       threadId: 'thr-webui',
       role: 'agent',
       sender: 'agent',
-      body: 'Scaffold is in place. Setup notes are in `~/src/baton/README.md`.',
+      body: `## Web UI scaffold is ready
+
+Scaffold is in place. The workspace uses **React, TypeScript and StyleX**. Setup notes are in \`~/src/baton/README.md\`.
+
+### What changed
+
+- Added a shared page layout and navigation.
+- Defined light and dark theme tokens.
+- Added a mock client for local development.
+
+### Checks
+
+| Check | Result | Details |
+| --- | --- | --- |
+| TypeScript | Passed | No type errors |
+| Tests | Passed | 24 tests |
+| Build | Passed | Output in \`dist/\` |
+
+Start the mock interface locally:
+
+\`\`\`sh
+pnpm --dir web dev
+\`\`\`
+
+Open the app with \`?mock=1\`. See the [React documentation](https://react.dev/) for framework details.
+
+> The mock data resets when the page reloads.`,
       createdAt: now - 20 * minute,
       delivery: 'delivered',
       activity: { commands: 2, tools: 1, files: 2 },
@@ -897,6 +925,24 @@ export function createWorld(id: ScenarioId, now: number): World {
           keyNeeded: false,
         },
       ]
+      return world
+    }
+    case 'streamingMarkdown': {
+      const target = findThread(world, 'thr-webui')
+      target.title = 'Streaming Markdown demo'
+      world.messages = world.messages.filter((item) => item.threadId !== target.id)
+      world.messages.push(
+        message({
+          id: 'msg-stream-demo',
+          threadId: target.id,
+          role: 'agent',
+          sender: 'agent',
+          body: '',
+          streaming: true,
+          createdAt: now,
+          delivery: 'delivered',
+        }),
+      )
       return world
     }
     case 'normal':

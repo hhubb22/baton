@@ -46,6 +46,7 @@ export interface AgentEventIdentity {
 export interface AgentOutput extends AgentEventIdentity {
   readonly text: string
   readonly gap?: boolean
+  readonly replyId?: string
 }
 
 export type AgentEvent =

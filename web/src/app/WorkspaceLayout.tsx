@@ -6,6 +6,7 @@ import type { ID, ProjectPatch, Reference } from '../data/types'
 import { text } from '../theme/text'
 import { colors, size, space } from '../theme/tokens.stylex'
 import { Button } from '../ui/Button'
+import { ResizablePane } from '../ui/ResizablePane'
 import { createDraftStore } from './drafts'
 import { DesktopWorkspace } from './DesktopWorkspace'
 import { NewProjectDialog } from './NewProjectDialog'
@@ -23,6 +24,7 @@ const styles = stylex.create({
     padding: size.gutter,
     backgroundColor: colors.panel,
   },
+  shellCollapsed: { gap: '2px' },
   problem: {
     display: 'flex',
     flexDirection: 'column',
@@ -39,6 +41,7 @@ const collapsedKey = 'baton.sidebar.collapsed'
 
 function readCollapsed() {
   try {
+    if (typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 700px)').matches) return true
     return localStorage.getItem(collapsedKey) === 'true'
   } catch {
     return false
@@ -154,8 +157,20 @@ export function WorkspaceLayout() {
     <WorkspaceContext value={workspace}>
       <DesktopWorkspace>
         <WorkspaceTitle />
-        <div {...stylex.props(styles.shell)}>
-          <Sidebar />
+        <div {...stylex.props(styles.shell, collapsed && styles.shellCollapsed)}>
+          <ResizablePane
+            acrossGutter
+            animateCollapse
+            label="Resize sidebar"
+            storageKey="baton.width.sidebar"
+            defaultWidth={228}
+            min={200}
+            max={400}
+            reserve={480}
+            collapsed={collapsed}
+          >
+            <Sidebar />
+          </ResizablePane>
           <Main failedAt={failedAt} onRetry={workspace.signOut} />
         </div>
         {creatingProject && <NewProjectDialog onClose={() => setCreatingProject(false)} />}

@@ -77,7 +77,7 @@ type EventDTO = {
     count?: number
     item_count?: number
     attachments?: AttachmentDTO[]
-    metadata?: { activity?: Message['activity']; full_output?: unknown }
+    metadata?: { activity?: Message['activity']; full_output?: unknown; reply_id?: string }
   } & Partial<MessageDTO>
 }
 type AttachmentDTO = {
@@ -429,6 +429,8 @@ export function createThreadAPI(
           role: 'agent',
           sender: 'agent',
           body: event.payload.content ?? '',
+          replyId: event.payload.metadata?.reply_id,
+          workerTurnSeq: event.payload.worker_turn_seq,
           createdAt: timestamp(event.created_at),
           delivery: 'delivered',
           activity: event.payload.metadata?.activity ?? null,

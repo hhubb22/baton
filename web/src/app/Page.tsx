@@ -1,9 +1,7 @@
 import * as stylex from '@stylexjs/stylex'
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode, type UIEventHandler } from 'react'
 import { text } from '../theme/text'
 import { colors, radius, size, space } from '../theme/tokens.stylex'
-import { IconButton } from '../ui/Button'
-import { useWorkspace } from './workspace'
 import { DesktopTargetNotice } from './DesktopWorkspace'
 
 // 主内容和 Thread 详情面板共用的圆角细边框。
@@ -19,6 +17,7 @@ export const pane = stylex.create({
 
 const styles = stylex.create({
   page: {
+    position: 'relative',
     display: 'flex',
     flexDirection: 'column',
     flexGrow: 1,
@@ -40,6 +39,21 @@ const styles = stylex.create({
   title: { flexShrink: 1, minWidth: 0 },
   spacer: { flexGrow: 1 },
   body: { flexGrow: 1, minHeight: 0, overflowY: 'auto' },
+  sizedBody: { containerType: 'size' },
+  scrollEnd: { height: '1px' },
+  bottomFade: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: '48px',
+    pointerEvents: 'none',
+    backgroundImage: `linear-gradient(to bottom, transparent, ${colors.canvas})`,
+    opacity: 0,
+    transition: 'opacity 160ms ease',
+    '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+  },
+  bottomFadeVisible: { opacity: 1 },
   notice: { paddingBlock: space.md, paddingInline: space.xl, ':empty': { display: 'none' } },
   column: {
     display: 'flex',
@@ -53,39 +67,76 @@ const styles = stylex.create({
   },
 })
 
-// 工作区里的主内容卡片：48px 标题栏，最左边是收起或展开侧栏的按钮，名称后紧跟状态，动作靠右，下面是可滚动的内容。
+// 工作区里的主内容卡片：标题和状态在左，动作靠右，下面是可滚动的内容。
 export function Page({
   title,
   status,
   actions,
   children,
+  embedded = false,
+  sizedBody = false,
+  bottomFade = false,
+  onBodyScroll,
+  onBodyScrollEnd,
 }: {
   title: ReactNode
   status?: ReactNode
   actions?: ReactNode
   children: ReactNode
+  embedded?: boolean
+  sizedBody?: boolean
+  bottomFade?: boolean
+  onBodyScroll?: UIEventHandler<HTMLDivElement>
+  onBodyScrollEnd?: (body: HTMLDivElement) => void
 }) {
-  const { collapsed, toggleSidebar } = useWorkspace()
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const endRef = useRef<HTMLDivElement>(null)
+  const [canScrollDown, setCanScrollDown] = useState(false)
+  useEffect(() => {
+    const body = bodyRef.current
+    if (!body || !onBodyScrollEnd) return
+    const onEnd = () => onBodyScrollEnd(body)
+    body.addEventListener('scrollend', onEnd)
+    return () => body.removeEventListener('scrollend', onEnd)
+  }, [onBodyScrollEnd])
+  useEffect(() => {
+    const body = bodyRef.current
+    if (!bottomFade || !body) return
+    const update = () => setCanScrollDown(body.scrollHeight - body.clientHeight - body.scrollTop > 1)
+    update()
+    body.addEventListener('scroll', update, { passive: true })
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update)
+    observer?.observe(body)
+    for (const child of body.children) observer?.observe(child)
+    const intersection =
+      typeof IntersectionObserver === 'undefined'
+        ? null
+        : new IntersectionObserver(([entry]) => setCanScrollDown(!entry.isIntersecting), { root: body })
+    if (endRef.current) intersection?.observe(endRef.current)
+    return () => {
+      body.removeEventListener('scroll', update)
+      observer?.disconnect()
+      intersection?.disconnect()
+    }
+  }, [bottomFade])
   return (
-    <section {...stylex.props(styles.page, pane.card)}>
+    <section {...stylex.props(styles.page, !embedded && pane.card)}>
       <header {...stylex.props(styles.header)}>
-        <IconButton
-          icon={collapsed ? 'chevron-right' : 'chevron-left'}
-          label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          aria-expanded={!collapsed}
-          onClick={toggleSidebar}
-        />
         <h1 {...stylex.props(text.bodyMedium, styles.title, text.truncate)}>{title}</h1>
         {status}
         <span {...stylex.props(styles.spacer)} />
         {actions}
       </header>
-      <div {...stylex.props(styles.body)}>
+      <div ref={bodyRef} onScroll={onBodyScroll} {...stylex.props(styles.body, sizedBody && styles.sizedBody)}>
         <div {...stylex.props(styles.notice)}>
           <DesktopTargetNotice />
         </div>
         {children}
+        {bottomFade && <div ref={endRef} aria-hidden="true" {...stylex.props(styles.scrollEnd)} />}
       </div>
+      {bottomFade && (
+        <div aria-hidden="true" {...stylex.props(styles.bottomFade, canScrollDown && styles.bottomFadeVisible)} />
+      )}
     </section>
   )
 }

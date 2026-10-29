@@ -8,20 +8,11 @@ const styles = stylex.create({
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: '16px',
-    height: '16px',
-    paddingInline: '5px',
-    borderRadius: radius.pill,
-    backgroundColor: colors.attention,
-    color: '#fff',
-    fontSize: '11px',
+    color: colors.muted,
+    fontSize: '12px',
     lineHeight: 1,
     fontWeight: weight.medium,
     fontVariantNumeric: 'tabular-nums',
-  },
-  countQuiet: {
-    backgroundColor: colors.subtle,
-    color: colors.muted,
   },
   tag: {
     display: 'inline-flex',
@@ -46,9 +37,9 @@ const styles = stylex.create({
   },
 })
 
-export function Count({ value, quiet, label }: { value: number; quiet?: boolean; label?: string }) {
+export function Count({ value, label }: { value: number; label?: string }) {
   return (
-    <span {...stylex.props(styles.count, quiet && styles.countQuiet)} aria-label={label}>
+    <span {...stylex.props(styles.count)} aria-label={label}>
       {value > 9 ? '9+' : value}
     </span>
   )
