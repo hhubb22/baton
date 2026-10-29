@@ -56,6 +56,7 @@ export interface OutboxEntry {
   itemId?: string
 }
 interface PendingQuestion {
+  startedAtMs?: number
   question: ThreadQuestion
   messageId: string
   executionId: string

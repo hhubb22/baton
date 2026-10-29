@@ -37,6 +37,25 @@ export const traceParent = (input: unknown): Tracer.ExternalSpan | undefined => 
   return trace ? Option.getOrUndefined(HttpTraceContext.fromHeaders(Headers.fromInput(trace))) : undefined
 }
 
+export const waitEvent = (
+  phase: 'start' | 'end',
+  reason: 'device_offline' | 'approval' | 'credential_missing' | 'queue' | 'lease' | 'backoff',
+  attributes: Record<string, string | number>,
+  trace?: unknown,
+  durationMs?: number,
+) =>
+  withTraceSpan(
+    Effect.logInfo(`baton.wait.${phase}`).pipe(
+      Effect.annotateLogs({
+        ...attributes,
+        'baton.wait.reason': reason,
+        ...(durationMs === undefined ? {} : { 'baton.wait.duration_ms': Math.max(0, durationMs) }),
+      }),
+    ),
+    'baton.wait',
+    trace,
+  ).pipe(Effect.catchCause((cause) => (Cause.hasInterrupts(cause) ? Effect.failCause(cause) : Effect.void)))
+
 /** Queue consumers use the durable producer as parent, including after restart. */
 export const withTraceSpan = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
@@ -354,6 +373,7 @@ export const telemetryLayer = (serviceName: string, env: Record<string, string |
       OTEL_TRACES_EXPORTER: env.OTEL_TRACES_EXPORTER ?? 'otlp',
       OTEL_LOGS_EXPORTER: env.OTEL_LOGS_EXPORTER ?? 'otlp',
       OTEL_METRICS_EXPORTER: env.OTEL_METRICS_EXPORTER ?? 'otlp',
+      OTEL_METRIC_EXPORT_INTERVAL: env.OTEL_METRIC_EXPORT_INTERVAL ?? '30000',
       OTEL_EXPORTER_OTLP_TRACES_TIMEOUT: String(timeoutFor('TRACES')),
       OTEL_EXPORTER_OTLP_LOGS_TIMEOUT: String(timeoutFor('LOGS')),
       OTEL_EXPORTER_OTLP_METRICS_TIMEOUT: String(timeoutFor('METRICS')),

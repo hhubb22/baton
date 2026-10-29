@@ -1,6 +1,6 @@
 export const PROTOCOL_VERSION = 1
-export const SCHEMA_VERSION = '0016_project_trace.sql'
-export const LEDGER_VERSIONS = Object.freeze({ node: 1, project: 1, thread: 1 })
+export const SCHEMA_VERSION = '0017_outbox_created_at.sql'
+export const LEDGER_VERSIONS = Object.freeze({ node: 2, project: 1, thread: 1 })
 
 // 构建时注入同一份身份；源码运行和未指定身份的构建明确标为开发版本。
 export const BUNDLED = typeof __BATON_BUILD__ !== 'undefined'

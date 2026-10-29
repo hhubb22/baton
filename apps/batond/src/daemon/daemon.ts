@@ -4,9 +4,9 @@ import { unlink, chmod, lstat } from 'node:fs/promises'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { Cause, Context, Effect, Exit, Option, Schema, Tracer } from 'effect'
+import { Cause, Clock, Context, Effect, Exit, Option, Schema, Tracer } from 'effect'
 import { HttpTraceContext } from 'effect/http'
-import { traceParent } from '@baton/telemetry'
+import { traceParent, waitEvent } from '@baton/telemetry'
 import type * as Scope from 'effect/Scope'
 import {
   ControlToNodeBody,
@@ -36,6 +36,7 @@ import { readLedger } from '../worker/ledger.ts'
 import { workerPaths } from './paths.ts'
 import { readPrivateFile } from '../platform/private.ts'
 import { listenWorker, IPCError } from './ipc.ts'
+import { nodeMetricsLoop } from './telemetry.ts'
 import {
   readUpgradeState,
   prepareUpgradeRequest,
@@ -126,6 +127,7 @@ async function connected(options: {
   signal: AbortSignal
   identity: NodeIdentity
   tracer: Tracer.Tracer
+  connectivity: (online: boolean) => void
   incarnation: string
   heartbeatMs: number
   controlTimeoutMs: number
@@ -342,6 +344,7 @@ async function connected(options: {
         if (env.correlation_id === syncId) {
           if (body.ok) {
             synced = true
+            options.connectivity(true)
             projects?.setTransport(projectRPC.request)
             options.refreshDevices()
           } else if (terminal(body.code)) throw new NeedsReauthentication()
@@ -476,6 +479,7 @@ async function connected(options: {
     if (failure) throw failure
     if (!signal.aborted) throw new Error('节点连接已断开')
   } finally {
+    options.connectivity(false)
     for (const sent of sentReports.values()) sent.span.end(BigInt(Date.now()) * 1_000_000n, Exit.fail('disconnected'))
     abort()
     projectRPC.close()
@@ -546,6 +550,31 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
     yield* attempt(() => writeDaemonStatus(options.dataDirectory, 'connecting'))
     const identity = options.identity ?? (yield* attempt(() => loadIdentity(options.dataDirectory)))
     const tracer = yield* Tracer.Tracer
+    const telemetry = yield* Effect.context<never>()
+    const clock = yield* Clock.Clock
+    let offlineSince: number | undefined = clock.currentTimeMillisUnsafe()
+    void Effect.runPromiseWith(telemetry)(
+      waitEvent('start', 'device_offline', { 'baton.node.id': identity.node_id }),
+    ).catch(() => {})
+    const connectivity = (online: boolean) => {
+      try {
+        const now = clock.currentTimeMillisUnsafe()
+        if (online && offlineSince !== undefined) {
+          const duration = now - offlineSince
+          offlineSince = undefined
+          void Effect.runPromiseWith(telemetry)(
+            waitEvent('end', 'device_offline', { 'baton.node.id': identity.node_id }, undefined, duration),
+          ).catch(() => {})
+        } else if (!online && offlineSince === undefined) {
+          offlineSince = now
+          void Effect.runPromiseWith(telemetry)(
+            waitEvent('start', 'device_offline', { 'baton.node.id': identity.node_id }),
+          ).catch(() => {})
+        }
+      } catch {
+        // Telemetry must not change connection handling.
+      }
+    }
     let address = options.relayURL
     if (!address) {
       if (!identity.coordinator_url) return yield* Effect.fail(new Error('身份缺少中心地址，需要 --relay'))
@@ -631,6 +660,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
                 signal,
                 identity,
                 tracer,
+                connectivity,
                 incarnation,
                 heartbeatMs,
                 controlTimeoutMs: controlTimeoutSeconds * 1000,
@@ -745,6 +775,11 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
                 options.project?.onReportChanged?.()
               },
             }),
+          )
+          yield* Effect.forkScoped(
+            nodeMetricsLoop(options.dataDirectory, ledger, projects, () =>
+              offlineSince === undefined ? 0 : Math.max(0, (clock.currentTimeMillisUnsafe() - offlineSince) / 1000),
+            ),
           )
           const devices = yield* Effect.acquireRelease(
             attempt(() =>

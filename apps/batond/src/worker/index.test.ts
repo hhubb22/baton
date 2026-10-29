@@ -12,7 +12,7 @@ import {
   type WorkerOpenConfig,
   type WorkerRequest,
 } from '@baton/protocol'
-import { Clock, Deferred, Effect, Exit, Fiber, Logger, Option, Queue, Schema, Stream, Tracer } from 'effect'
+import { Clock, Deferred, Effect, Exit, Fiber, Logger, Option, Queue, References, Schema, Stream, Tracer } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { vi } from 'vite-plus/test'
 import { TestClock } from 'effect/testing'
@@ -285,6 +285,7 @@ describe('reliable Worker', () => {
   it.effect('starts the Turn timing at message receipt after a queued wait', () =>
     fixture((dbPath) => {
       const spans: Tracer.NativeSpan[] = []
+      const logs: Array<{ message: unknown; attributes: Readonly<Record<string, unknown>>; traceId?: string }> = []
       const tracer = Tracer.make({
         span(options) {
           const span = new Tracer.NativeSpan(options)
@@ -298,7 +299,7 @@ describe('reliable Worker', () => {
         f.prepareTask = Deferred.await(release)
         const clock = yield* Clock.Clock
         const before = clock.currentTimeMillisUnsafe()
-        const input = message(cfg)
+        const input = { ...message(cfg), trace_context: { traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01` } }
         yield* worker.handle(input)
         yield* called(f, `prepare:${input.client_message_id}`)
         expect(spans.some((span) => span.name === 'baton.turn')).toBe(false)
@@ -307,7 +308,29 @@ describe('reliable Worker', () => {
         yield* completed(worker, input.command_id!)
         const turn = spans.find((span) => span.name === 'baton.turn')!
         expect(turn.status.startTime).toBe(BigInt(before) * 1_000_000n)
-      }).pipe(Effect.provideService(Tracer.Tracer, tracer))
+        const waits = logs.filter(
+          (entry) => Array.isArray(entry.message) && String(entry.message[0]).startsWith('baton.wait.'),
+        )
+        expect(waits.map((entry) => entry.message)).toEqual([['baton.wait.start'], ['baton.wait.end']])
+        expect(waits[1]!.attributes['baton.wait.duration_ms']).toBe(5000)
+        expect(
+          waits.every((entry) => entry.attributes['baton.wait.reason'] === 'queue' && entry.traceId === 'a'.repeat(32)),
+        ).toBe(true)
+      }).pipe(
+        Effect.provideService(Tracer.Tracer, tracer),
+        Effect.provideService(
+          Logger.CurrentLoggers,
+          new Set([
+            Logger.make(({ message, fiber }) =>
+              logs.push({
+                message,
+                attributes: fiber.getRef(References.CurrentLogAnnotations),
+                ...(fiber.cache.span ? { traceId: fiber.cache.span.traceId } : {}),
+              }),
+            ),
+          ]),
+        ),
+      )
     }),
   )
   it.effect('returns the current execution identity only while a freshly queried turn is active', () =>
@@ -697,7 +720,9 @@ describe('reliable Worker', () => {
           if (timeout) yield* TestClock.adjust('1 second')
           const output = yield* until(reports(worker), (rows) => rows.some((row) => row.kind === 'reply'))
           expect(output.find((row) => row.kind === 'reply')?.content).toBe('answer')
-          expect(diagnostics).toEqual([
+          expect(
+            diagnostics.filter((message) => Array.isArray(message) && message[0] === 'Attachment extraction failed'),
+          ).toEqual([
             [
               'Attachment extraction failed',
               { thread_id: cfg.thread_id, code: timeout ? 'TimeoutError' : 'AgentError' },

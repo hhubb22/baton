@@ -11,7 +11,7 @@ import {
 } from '@baton/protocol'
 import { CommitUnknown } from '@baton/sqlite'
 import { HttpTraceContext } from 'effect/http'
-import { captureTrace, traceParent, withTraceSpan } from '@baton/telemetry'
+import { captureTrace, traceParent, waitEvent, withTraceSpan } from '@baton/telemetry'
 import {
   Cause,
   Clock,
@@ -384,7 +384,44 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
           cause instanceof WorkerFailure ? cause : new WorkerFailure('invalid_state', reasonOf(cause), cause),
       })
       yield* ledger.save(draft).pipe(Effect.catch((cause) => freeze(cause).pipe(Effect.andThen(Effect.fail(frozen!)))))
+      const previous = state
       state = draft
+      const waitAttributes = {
+        'baton.thread.id': state.config?.thread_id ?? '',
+        'baton.node.id': state.config?.node_id ?? '',
+      }
+      for (const message of Object.values(state.messages)) {
+        if (message.input.mode !== 'queue') continue
+        const old = previous.messages[message.input.id]
+        if (!old && message.state === 'queued')
+          yield* waitEvent('start', 'queue', waitAttributes, message.trace_context)
+        if (old?.state === 'queued' && message.state !== 'queued')
+          yield* waitEvent(
+            'end',
+            'queue',
+            waitAttributes,
+            message.trace_context,
+            clock.currentTimeMillisUnsafe() - (message.receivedAtMs ?? clock.currentTimeMillisUnsafe()),
+          )
+      }
+      for (const question of state.questions ?? []) {
+        const old = previous.questions?.find(
+          (entry) =>
+            entry.messageId === question.messageId && entry.question.request_id === question.question.request_id,
+        )
+        const pending = (value: string) => !['resolved', 'cancelled'].includes(value)
+        const message = state.messages[question.messageId]
+        const attributes = { ...waitAttributes, 'baton.turn.seq': question.turn }
+        if (!old && pending(question.state)) yield* waitEvent('start', 'approval', attributes, message?.trace_context)
+        if (old && pending(old.state) && !pending(question.state))
+          yield* waitEvent(
+            'end',
+            'approval',
+            attributes,
+            message?.trace_context,
+            clock.currentTimeMillisUnsafe() - (question.startedAtMs ?? clock.currentTimeMillisUnsafe()),
+          )
+      }
       for (const message of Object.values(state.messages)) {
         if (message.input.mode !== 'queue') continue
         let turn = turns.get(message.input.id)
@@ -823,6 +860,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
           draft.questions ??= []
           if (draft.questions.some((q) => q.question.request_id === event.question.request_id)) return
           draft.questions.push({
+            startedAtMs: clock.currentTimeMillisUnsafe(),
             question: event.question,
             messageId: event.messageId,
             executionId: event.executionId,

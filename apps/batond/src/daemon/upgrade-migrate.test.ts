@@ -181,9 +181,9 @@ it('checks actual package identity, local formats, center compatibility and back
   await writePrivateFileAtomic(join(f.target, 'version.json'), JSON.stringify({ ...original, commit: 'different' }))
   expect(await checkUpgrade(f.path, f.target)).toMatchObject({ ok: false, code: 'upgrade_package_invalid' })
   await writeUpgradePackage(f.target)
-  edit(join(f.path, 'node.db'), 'UPDATE storage_format SET version=2')
+  edit(join(f.path, 'node.db'), 'UPDATE storage_format SET version=999')
   expect(await checkUpgrade(f.path, f.target)).toMatchObject({ ok: false, code: 'storage_version_unsupported' })
-  edit(join(f.path, 'node.db'), 'UPDATE storage_format SET version=1')
+  edit(join(f.path, 'node.db'), 'UPDATE storage_format SET version=2')
   const published = { ...original, version: 'v2', commit: 'a'.repeat(40), supported_daemon_versions: ['v2'] }
   await writeUpgradePackage(f.target, published)
   f.center.setRelease({ ...original, version: 'v1', supported_daemon_versions: ['v1'] })

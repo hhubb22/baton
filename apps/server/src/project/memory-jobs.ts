@@ -115,7 +115,7 @@ export const scheduleMemoryJobs = Effect.fn('scheduleMemoryJobs')(function* () {
         const foreground =
           yield* sql`SELECT 1 FROM project_agents a JOIN conversations c ON c.agent_id=a.id JOIN projects p ON p.id=a.project_id WHERE a.employee_id=${job.employee_id} AND p.status='active' AND (a.lease_run_id IS NOT NULL OR ${recoveryWorkSQL(sql)}) LIMIT 1`
         if (foreground.length) {
-          yield* sql`UPDATE project_memory_jobs SET waiting_reason='foreground_priority' WHERE id=${job.id}`
+          yield* sql`UPDATE project_memory_jobs SET updated_at=CASE WHEN waiting_reason<>'foreground_priority' THEN clock_timestamp() ELSE updated_at END,waiting_reason='foreground_priority' WHERE id=${job.id}`
           continue
         }
         const busy =
@@ -155,7 +155,7 @@ export const scheduleMemoryJobs = Effect.fn('scheduleMemoryJobs')(function* () {
           break
         }
         if (!chosen) {
-          yield* sql`UPDATE project_memory_jobs SET waiting_reason=${waiting} WHERE id=${job.id}`
+          yield* sql`UPDATE project_memory_jobs SET updated_at=CASE WHEN waiting_reason<>${waiting} THEN clock_timestamp() ELSE updated_at END,waiting_reason=${waiting} WHERE id=${job.id}`
           continue
         }
         const attempt = randomUUID()

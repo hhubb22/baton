@@ -26,6 +26,7 @@ import { createRevocationCompensator } from './control-maintenance.ts'
 import { cookieToken, httpApplication } from './http/index.ts'
 import { notifyThreadChanged } from './notifications.ts'
 import { claimNotificationBroadcasts } from './desktop-notifications.ts'
+import { makeMemoryWaitObserver, makeProjectWaitObserver, serverMetricsLoop } from './telemetry.ts'
 
 export interface ServerOptions {
   readonly host?: string
@@ -58,6 +59,11 @@ export const startServer = (
     const services = yield* Effect.context<SqlClient.SqlClient>()
     const scope = yield* Effect.scope
     const tracer = yield* Tracer.Tracer
+    const projectWaits = makeProjectWaitObserver()
+    const memoryWaits = makeMemoryWaitObserver()
+    yield* Effect.forkIn(serverMetricsLoop(projectWaits), scope)
+    yield* Effect.forkIn(projectWaits.poll.pipe(Effect.andThen(Effect.sleep('1 second')), Effect.forever), scope)
+    yield* Effect.forkIn(memoryWaits.pipe(Effect.andThen(Effect.sleep('1 second')), Effect.forever), scope)
     const controller = new AbortController()
     const controlGate = yield* Semaphore.make(4)
     const httpGate = yield* Semaphore.make(16)

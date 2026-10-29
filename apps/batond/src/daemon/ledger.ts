@@ -9,7 +9,7 @@ import type {
   WorkerOpenConfig,
   WorkerRequest,
 } from '@baton/protocol'
-import { Effect } from 'effect'
+import { Clock, Effect } from 'effect'
 import * as Reactivity from 'effect/reactivity/Reactivity'
 
 export const contentHash = (value: unknown): string => {
@@ -53,11 +53,12 @@ export const storageBaseline = [
   'CREATE TABLE node_commands (id TEXT PRIMARY KEY, hash TEXT NOT NULL, payload TEXT NOT NULL)',
   'CREATE TABLE node_workers (thread_id TEXT PRIMARY KEY, generation TEXT NOT NULL, payload TEXT NOT NULL)',
   'CREATE TABLE node_open_attempts (thread_id TEXT PRIMARY KEY)',
-  'CREATE TABLE node_outbox (thread_id TEXT NOT NULL, seq INTEGER NOT NULL, event_id TEXT NOT NULL UNIQUE, hash TEXT NOT NULL, payload TEXT NOT NULL, acked INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(thread_id,seq))',
+  'CREATE TABLE node_outbox (thread_id TEXT NOT NULL, seq INTEGER NOT NULL, event_id TEXT NOT NULL UNIQUE, hash TEXT NOT NULL, payload TEXT NOT NULL, created_ms INTEGER NOT NULL, acked INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(thread_id,seq))',
 ] as const
 
 /** node.db 保留已确认报告，用于补齐中心的序号缺口。 */
 export const makeNodeLedger = Effect.fn('Daemon.makeNodeLedger')(function* (filename: string) {
+  const clock = yield* Clock.Clock
   yield* Effect.try({
     try: () => checkStorageFormat(filename, 'node', storageBaseline),
     catch: (error) => error as Error,
@@ -156,13 +157,17 @@ export const makeNodeLedger = Effect.fn('Daemon.makeNodeLedger')(function* (file
           [report.thread_id],
         )
         if (report.worker_seq !== seqs[0].seq + 1) return yield* Effect.fail(new Error('Worker 报告序号存在缺口'))
-        yield* sql.unsafe('INSERT INTO node_outbox(thread_id,seq,event_id,hash,payload) VALUES(?,?,?,?,?)', [
-          report.thread_id,
-          report.worker_seq,
-          report.event_id,
-          hash,
-          JSON.stringify(report),
-        ])
+        yield* sql.unsafe(
+          'INSERT INTO node_outbox(thread_id,seq,event_id,hash,payload,created_ms) VALUES(?,?,?,?,?,?)',
+          [
+            report.thread_id,
+            report.worker_seq,
+            report.event_id,
+            hash,
+            JSON.stringify(report),
+            clock.currentTimeMillisUnsafe(),
+          ],
+        )
       }),
     )
   const markWorkerLaunch = (threadId: string) =>
@@ -258,6 +263,12 @@ export const makeNodeLedger = Effect.fn('Daemon.makeNodeLedger')(function* (file
       sql
         .unsafe<{ payload: string }>('SELECT payload FROM node_outbox WHERE acked=0 ORDER BY thread_id,seq LIMIT 128')
         .pipe(Effect.map((rows) => rows.map((r) => JSON.parse(r.payload) as ThreadReport))),
+    reportBacklog: () =>
+      sql
+        .unsafe<{ count: number; oldest_ms: number | null }>(
+          'SELECT count(*) AS count, min(created_ms) AS oldest_ms FROM node_outbox WHERE acked=0',
+        )
+        .pipe(Effect.map((rows) => rows[0]!)),
     pragmas: () =>
       Effect.gen(function* () {
         const journal = yield* sql.unsafe<{ journal_mode: string }>('PRAGMA journal_mode')

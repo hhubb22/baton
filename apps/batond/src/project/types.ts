@@ -31,6 +31,7 @@ export const DeviceLoginCode = Schema.Struct({
 })
 export type DeviceLoginCode = typeof DeviceLoginCode.Type
 export interface ProjectManager {
+  leaseWaitAge?(): number
   setTransport(request?: ProjectTransport): void
   onDisconnect(): void
   command(command: ProjectRunCommand): Promise<void>

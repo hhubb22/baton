@@ -4,7 +4,8 @@ import { IPCError } from '../daemon/ipc.ts'
 import { join } from 'node:path'
 import { rm, open } from 'node:fs/promises'
 import { constants } from 'node:fs'
-import { Effect, Schema, Predicate } from 'effect'
+import { Context, Effect, Schema, Predicate } from 'effect'
+import { waitEvent } from '@baton/telemetry'
 import { ProjectRunCommand, ProjectRuntimeRequest, ProjectRuntimeResult } from '@baton/protocol'
 import { readProjectRuntimeConfig } from '../devices/config.ts'
 import { ensurePrivateDirectory, openPrivateFile } from '../platform/private.ts'
@@ -64,6 +65,7 @@ class Manager implements ProjectManager {
     private readonly options: ProjectManagerOptions,
     private readonly ledger: ProjectLedger,
     private readonly watchdog?: ProcessWatchdog,
+    private readonly telemetry?: Context.Context<never>,
   ) {
     this.clock = new LeaseClock(options.clock)
     this.renewMs = options.timing?.renewMs ?? 20000
@@ -210,6 +212,14 @@ class Manager implements ProjectManager {
     }
   }
   private async renew(run: Run, started: number) {
+    const attributes = {
+      'baton.project.run.id': run.command.run_id,
+      ...(run.command.project_id ? { 'baton.project.id': run.command.project_id } : {}),
+    }
+    if (this.telemetry)
+      await Effect.runPromiseWith(this.telemetry)(waitEvent('start', 'lease', attributes, run.command.trace)).catch(
+        () => {},
+      )
     try {
       this.lease(run)
       if (!run.owned || !(await identityMatches(run.owned.record))) throw new Error('runtime_lost')
@@ -229,7 +239,23 @@ class Manager implements ProjectManager {
       else if (['lease_lost', 'claim_lost', 'node_idle_expired'].includes(result.code ?? '')) this.stop(run)
     } catch {
       this.stop(run)
+    } finally {
+      try {
+        if (this.telemetry)
+          await Effect.runPromiseWith(this.telemetry)(
+            waitEvent('end', 'lease', attributes, run.command.trace, Math.max(0, this.clock.now() - started)),
+          )
+      } catch {
+        // Telemetry must not change lease handling.
+      }
     }
+  }
+  leaseWaitAge() {
+    const now = this.clock.now()
+    return Math.max(
+      0,
+      ...[...this.runs.values()].filter((run) => run.renewing).map((run) => (now - run.lastAttempt) / 1000),
+    )
   }
   private stop(run: Run) {
     run.cancel.abort()
@@ -701,6 +727,7 @@ class Manager implements ProjectManager {
 }
 
 export const makeProjectManager = Effect.fn('Project.makeProjectManager')(function* (options: ProjectManagerOptions) {
+  const telemetry = yield* Effect.context<never>()
   yield* Effect.tryPromise(() => ensurePrivateDirectory(options.dataDir))
   const filename = join(options.dataDir, 'project-runtime.db')
   // 创建数据库文件后再连接，沿用节点私有目录与文件权限。
@@ -724,7 +751,7 @@ export const makeProjectManager = Effect.fn('Project.makeProjectManager')(functi
           (watchdog) => Effect.promise(() => watchdog.close()).pipe(Effect.orDie),
         )
   const manager = yield* Effect.acquireRelease(
-    Effect.sync(() => new Manager(options, ledger, watchdog)),
+    Effect.sync(() => new Manager(options, ledger, watchdog, telemetry)),
     (manager) => Effect.promise(() => manager.close()).pipe(Effect.orDie),
   )
   yield* Effect.tryPromise(() => manager.recover())

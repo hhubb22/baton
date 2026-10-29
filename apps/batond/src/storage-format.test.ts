@@ -7,6 +7,7 @@ import { afterEach, expect, it } from 'vite-plus/test'
 import { makeNodeLedger } from './daemon/ledger.ts'
 import { makeProjectLedger } from './project/ledger.ts'
 import { openWorkerLedger } from './worker/ledger.ts'
+import { LEDGER_VERSIONS } from '@baton/protocol/release'
 
 const roots: string[] = []
 afterEach(async () => {
@@ -48,7 +49,7 @@ it.each(stores)('$kind baseline is durable and repeated opens do not reapply it'
   const filename = join(root, 'ledger.db')
   await run(Effect.scoped(open(filename)))
   const saved = metadata(filename)
-  expect(saved.format).toEqual([{ id: 1, kind, version: 1 }])
+  expect(saved.format).toEqual([{ id: 1, kind, version: LEDGER_VERSIONS[kind] }])
   expect(saved.migrations).toEqual([
     {
       id: '0001_baseline',
@@ -62,7 +63,7 @@ it.each(stores)('$kind baseline is durable and repeated opens do not reapply it'
 })
 
 for (const mutation of [
-  { sql: 'UPDATE storage_format SET version=2', code: 'storage_version_unsupported' },
+  { sql: 'UPDATE storage_format SET version=999', code: 'storage_version_unsupported' },
   { sql: "UPDATE storage_format SET kind='unknown'", code: 'storage_version_unsupported' },
   { sql: 'DELETE FROM storage_migrations', code: 'storage_version_unsupported' },
   { sql: 'DROP TABLE storage_format', code: 'storage_version_unsupported' },
