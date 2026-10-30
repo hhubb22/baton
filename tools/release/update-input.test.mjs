@@ -30,7 +30,7 @@ void test('collects all CLI targets and only opted-in desktop feeds with a pinne
     await assert.rejects(makeUpdateInput(dir, version, commit, { cliOnly: true, windowsAutoUpdate: true }))
     await assert.rejects(makeUpdateInput(dir, version, commit, { macAutoUpdate: true }))
     await writeFile(join(dir, 'server-image.txt'), 'ghcr.io/other/image@sha256:' + 'b'.repeat(64))
-    await assert.rejects(makeUpdateInput(dir, version, commit))
+    await assert.rejects(makeUpdateInput(dir, version, commit, { cliOnly: true }), /中心镜像摘要无效/)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

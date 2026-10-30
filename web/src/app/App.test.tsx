@@ -1021,9 +1021,8 @@ describe('devices', () => {
     if (phase !== 'cancelled' && phase !== 'completed')
       expect(within(row).queryByText('正在运行 Baton Dev')).not.toBeInTheDocument()
     await user.click(row)
-    const cancellation = screen.queryByText('正在等待取消升级。')
-    if (phase === 'failed') expect(cancellation).toBeInTheDocument()
-    else expect(cancellation).not.toBeInTheDocument()
+    expect(screen.getByText(/^0\.9\.2 · /)).toBeInTheDocument()
+    if (phase === 'failed') expect(screen.getByText('0.9.2 · 更新失败')).toBeInTheDocument()
   })
 
   it.each([

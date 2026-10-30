@@ -135,6 +135,7 @@ it('opens each local Agent with a custom model and budget and reuses its saved c
 })
 
 it('sends a steer message and rejects a model change with steer before handing it to the Worker', async () => {
+  const directory = await makePrivateTempDirectory('baton-cli-steer-')
   const requests: WorkerRequest[] = []
   const thread = randomUUID()
   const generation = randomUUID()
@@ -148,7 +149,7 @@ it('sends a steer message and rejects a model change with steer before handing i
     },
   }
   try {
-    const args = ['message', '--thread-id', thread, '--text', 'check tests', '--mode', 'steer']
+    const args = ['message', '--data-dir', directory, '--thread-id', thread, '--text', 'check tests', '--mode', 'steer']
     await runLocalCLI(args, dependencies)
     expect(requests.at(-1)).toMatchObject({
       type: 'thread_message',
@@ -164,5 +165,6 @@ it('sends a steer message and rejects a model change with steer before handing i
     expect(requests).toEqual([])
   } finally {
     output.mockRestore()
+    await rm(directory, { recursive: true, force: true })
   }
 })

@@ -27,7 +27,13 @@ it('SDK 和 host driver 加载即抛错的实际 CLI bundle 中 Worker 仍通过
       platform: 'node',
       target: 'node26',
       format: 'cjs',
-      external: ['@cursor/sdk', '@napi-rs/keyring', '@earendil-works/pi-ai', '@earendil-works/pi-agent-core'],
+      external: [
+        '@cursor/sdk',
+        '@napi-rs/keyring',
+        '@earendil-works/pi-ai',
+        '@earendil-works/pi-agent-core',
+        '@aws-sdk/client-s3',
+      ],
       define: { 'import.meta.url': '__baton_import_meta_url__' },
       banner: {
         js: `require = require('node:module').createRequire(${JSON.stringify(runtimePackage)});

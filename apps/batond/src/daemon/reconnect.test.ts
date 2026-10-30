@@ -20,6 +20,7 @@ import { acquireProcessLock } from '../platform/lock.ts'
 import { DeploymentInvalid } from './deployment.ts'
 import { NeedsReauthentication } from './daemon.ts'
 import { startTelemetryRelay } from './telemetry-relay.ts'
+import { requestUpgrade } from './upgrade.ts'
 
 vi.mock('../project/index.ts', () => ({
   makeProjectManager: () => {
@@ -910,7 +911,7 @@ it.each(['unavailable', undefined, 'incarnation_conflict'])(
   },
 )
 
-it('stops after version rejection, reports both versions and retains local commands and unsent reports', async () => {
+it('retains upgrade management, local commands and unsent reports after protocol rejection', async () => {
   const { path, wss, start } = await setup()
   const threadId = randomUUID(),
     commandId = randomUUID(),
@@ -983,34 +984,21 @@ it('stops after version rejection, reports both versions and retains local comma
     })
   })
   const daemon = start()
-  await daemon.running
-  expect(connections).toBe(1)
-  expect(sent).toMatchObject([{ kind: 'auth', daemon_version: 'development', protocol_version: 1 }])
-  expect(snapshot()).toEqual(before)
-  expect(daemon.failure()).toMatchObject({ code: 'node_version_incompatible' })
-  const output = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-  const exitCode = process.exitCode
-  try {
-    reportBatondError(daemon.failure(), 'run')
-    expect(JSON.parse(String(output.mock.calls[0]?.[0]))).toMatchObject({
-      code: 'node_version_incompatible',
-      version_incompatibility: {
-        center_version: 'v1.0.0',
-        daemon_version: 'development',
-        reason: 'protocol_version_unsupported',
-      },
-    })
-    expect(process.exitCode).toBe(78)
+  await vi.waitFor(async () => {
     expect(JSON.parse(await readFile(join(path, 'daemon-status.json'), 'utf8'))).toMatchObject({
       pid: process.pid,
       state: 'rejected',
       batond_version: BUILD.version,
       code: 'node_version_incompatible',
     })
-  } finally {
-    output.mockRestore()
-    process.exitCode = exitCode
-  }
+  })
+  expect(connections).toBeGreaterThanOrEqual(1)
+  for (const frame of sent)
+    expect(frame).toMatchObject({ kind: 'auth', daemon_version: 'development', protocol_version: 1 })
+  expect(snapshot()).toEqual(before)
+  expect(daemon.failure()).toBeUndefined()
+  expect(await requestUpgrade(path, 'upgrade_status')).toMatchObject({ state: null })
+  await daemon.stop()
 })
 
 it.each(['invalid_node_credential', 'node_source_rejected', 'credential_revoked'])(

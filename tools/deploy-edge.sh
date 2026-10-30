@@ -64,5 +64,7 @@ docker compose -f compose.yaml -f compose.release.json up -d --no-build --no-dep
 docker compose -f compose.yaml -f compose.release.json exec -T baton-server node -e \
   'fetch("http://127.0.0.1:8080/api/v1/release").then(r=>r.json()).then(r=>{if(r.version!==process.argv[1]||r.commit!==process.argv[2])process.exit(1)}).catch(()=>process.exit(1))' "$version" "$image_commit"
 curl --fail --silent --show-error http://127.0.0.1:18082/api/v1/release > "$backup/release.json"
+docker compose -f compose.yaml -f compose.release.json exec -T baton-server node -e \
+  'const r=JSON.parse(require("node:fs").readFileSync(0,"utf8"));if(r.version!==process.argv[1]||r.commit!==process.argv[2])process.exit(1)' "$version" "$image_commit" < "$backup/release.json"
 trap - ERR
 echo "Deployed $version; backup: /opt/services/baton/$backup"
