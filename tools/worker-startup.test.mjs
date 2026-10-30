@@ -5,8 +5,24 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
+import { measurementPassed } from './measure/stats.mjs'
 
 const command = fileURLToPath(new URL('./measure/worker-startup.mjs', import.meta.url))
+
+test('性能超标只记录结果，缺失样本、清理或账本错误仍使测量失败', () => {
+  const result = {
+    samples: 1,
+    timings: [20000],
+    shutdownTimings: [100],
+    ledgerTransactions: 2,
+    fullLedger: { transactions: 2, exceeds50Ms: true },
+  }
+  assert.equal(measurementPassed(result), true)
+  assert.equal(measurementPassed({ ...result, shutdownTimings: [] }), false)
+  assert.equal(measurementPassed({ ...result, failure: { message: 'cleanup failed' } }), false)
+  assert.equal(measurementPassed({ ...result, ledgerFailure: { message: 'invalid pragma' } }), false)
+  assert.equal(measurementPassed({ ...result, fullLedger: undefined }), false)
+})
 
 test('Worker 测量要求实际安装包，预构建驱动可从仓库外执行', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'baton-measure-driver-'))

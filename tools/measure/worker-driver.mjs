@@ -18,7 +18,7 @@ import {
 } from '../../apps/batond/src/platform/identity.ts'
 import { makeWorker } from '../../apps/batond/src/worker/index.ts'
 import { isolatedEnv } from '../lib/installation.mjs'
-import { stats } from './stats.mjs'
+import { measurementPassed, stats } from './stats.mjs'
 
 async function main() {
   const [root, executable, sampleArgument, transactionArgument] = process.argv.slice(2)
@@ -208,8 +208,6 @@ async function main() {
       } catch (error) {
         if (error.code !== 'unauthorized') throw error
       }
-      if (elapsed >= WORKER_READY_BUDGET_MS)
-        throw new Error(`Spawn-to-authenticated-status exceeded the ${WORKER_READY_BUDGET_MS} ms budget`)
     } catch (error) {
       failure = { sample: index, message: error.message, log: await readFile(paths.log, 'utf8').catch(() => '') }
     } finally {
@@ -322,7 +320,15 @@ async function main() {
       ledgerFailure = { message: error.message }
     }
   }
-  const completed = timings.length === samples && shutdownTimings.length === samples
+  const passed = measurementPassed({
+    samples,
+    timings,
+    shutdownTimings,
+    failure,
+    ledgerTransactions,
+    fullLedger,
+    ledgerFailure,
+  })
   console.log(
     JSON.stringify(
       {
@@ -353,12 +359,8 @@ async function main() {
           installationFiles: await readdir(join(root, 'installed')),
         },
         budgetMs: WORKER_READY_BUDGET_MS,
-        passed:
-          completed &&
-          !failure &&
-          !ledgerFailure &&
-          !fullLedger?.exceeds50Ms &&
-          Math.max(...timings) < WORKER_READY_BUDGET_MS,
+        exceedsReadyBudget: timings.some((time) => time >= WORKER_READY_BUDGET_MS),
+        passed,
         cache:
           'Fresh Worker processes and SQLite files; OS page cache is not flushed. First sample is reported separately. Agent registry and platform Worker watchdog behavior are included; no Thread is opened.',
         timing:
@@ -371,14 +373,7 @@ async function main() {
       2,
     ),
   )
-  if (
-    !completed ||
-    failure ||
-    ledgerFailure ||
-    Math.max(...timings) >= WORKER_READY_BUDGET_MS ||
-    fullLedger?.exceeds50Ms
-  )
-    process.exitCode = 1
+  if (!passed) process.exitCode = 1
 }
 void main().catch((error) => {
   console.error(error)

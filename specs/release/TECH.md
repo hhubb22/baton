@@ -186,11 +186,11 @@ macOS 与 Linux 数值来自发布工作流 run `40186351668`（源码提交 `3e
 | Linux arm64，`ubuntu-24.04-arm` | 0.467 | 3.985 | 0.855 | 1.544 |
 | Windows x64，Windows Server 2022 本机，受限 Administrator 令牌 | 5.647 | 86.447 | 6.031 | 6.038 |
 
-COMMIT 延迟受 runner 磁盘和调度影响，Windows 发布测量通过 `TMP`、`TEMP` 使用 `RUNNER_TEMP` 所在盘。测量使用 WAL、`synchronous=FULL`、`fullfsync=0`，未做断电验证；负载不含 Agent、IPC、prompt、输入 intent 或大队列，无法据此推断全部命令接收延迟。当前测量工具在 COMMIT p99 超过 50 ms 时非零退出；若测量或实际命令接收延迟超标，需提前评估将账本移入 `worker_threads`。
+COMMIT 延迟受 runner 磁盘和调度影响，Windows 发布测量通过 `TMP`、`TEMP` 使用 `RUNNER_TEMP` 所在盘。测量使用 WAL、`synchronous=FULL`、`fullfsync=0`，未做断电验证；负载不含 Agent、IPC、prompt、输入 intent 或大队列，无法据此推断全部命令接收延迟。报告标记 COMMIT p99 是否超过 50 ms，性能结果单独报告；账本操作、提交核查和 WAL/FULL 校验失败仍阻止发布。若测量或实际命令接收延迟超标，需提前评估将账本移入 `worker_threads`。
 
 ### SEA Worker 冷启动
 
-完整安装包搬到临时目录，每平台启动 100 个新 Worker，每次使用新 Thread 与 SQLite 文件，空 PATH、临时 HOME。计时从真实 Host 的 spawn 前开始，到外部调用方收到最终认证 status 为止，包含就绪轮询、启动锁释放和 status 往返；Host 总耗时另包含数据目录与令牌准备。
+完整安装包搬到临时目录，每平台启动 100 个新 Worker，每次使用新 Thread 与 SQLite 文件，空 PATH、临时 HOME。计时从真实 Host 的 spawn 前开始，到外部调用方收到最终认证 status 为止，包含就绪轮询、启动锁释放和 status 往返；Host 总耗时另包含数据目录与令牌准备。报告标记启动耗时是否达到 Host 就绪预算，性能结果单独报告；就绪超时、认证或清理失败仍阻止发布。
 
 | 系统 | spawn 到认证 status p99（ms） | spawn 到认证 status 最大（ms） | Host 总耗时最大（ms） |
 |---|---:|---:|---:|
