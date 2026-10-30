@@ -125,7 +125,11 @@ jobs:
       - name: Check installed package
         run: node tools/check-package.mjs bin/package > bin/releases/package-check.json
       - name: Measure Worker startup and FULL ledger
-        run: node tools/measure/worker-startup.mjs 100 --package bin/package --ledger 2000 > bin/releases/worker-startup.json
+        run: |
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            export TMP="$RUNNER_TEMP" TEMP="$RUNNER_TEMP"
+          fi
+          node tools/measure/worker-startup.mjs 100 --package bin/package --ledger 2000 > bin/releases/worker-startup.json
       - name: Check Windows process recovery
         if: runner.os == 'Windows'
         run: node tools/verify/windows-processes.mjs > bin/releases/windows-processes.json

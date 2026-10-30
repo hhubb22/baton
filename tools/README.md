@@ -75,7 +75,7 @@ POSIX 核对 watchdog 身份，发送 SIGTERM 后等待 Worker、watchdog 退出
 
 报告第一样本、p50、p99、最大值与清理方式；任一样本达到 Host 就绪预算（Windows 10 秒，其余系统 3 秒）、就绪超时或清理失败时非零退出。不清空系统页缓存，不测已有会话的恢复耗时。
 
-`--ledger` 在驱动包含的真实 `makeWorker` 串行队列中交替执行 `records.add/remove`，预热 200 次，测量实际 WAL/FULL 提交、队列操作和事件循环延迟。该项使用当前源码，与被测 SEA 分别运行；负载不包含 Agent、IPC、prompt 或 intent，未验证断电持久性。COMMIT p99 超过 50 ms 时非零退出。
+`--ledger` 在驱动包含的真实 `makeWorker` 串行队列中交替执行 `records.add/remove`，预热 200 次，测量实际 WAL/FULL 提交、队列操作和事件循环延迟。该项使用当前源码，与被测 SEA 分别运行；负载不包含 Agent、IPC、prompt 或 intent，未验证断电持久性。Windows 发布测量通过 `TMP`、`TEMP` 使用 `RUNNER_TEMP` 作为临时根。COMMIT p99 超过 50 ms 时非零退出。
 
 ## 预构建测量驱动
 
