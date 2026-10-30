@@ -217,6 +217,26 @@ describe('Project DTO mapping', () => {
     ])
   })
 
+  it('shows a failed thread message as a thread failure and hides routine updates', async () => {
+    const events = [
+      inputEvent(1, [
+        {
+          id: 92,
+          source_type: 'thread_message_failed',
+          source_key: `thread:${threadId}:message:m1:failed`,
+          payload: {
+            thread_id: threadId,
+            reason: 'Cursor ensure thread failed (CursorAgentSdkRunnerError > NetworkError > TypeError)\n    at fail13',
+          },
+        },
+        { id: 93, source_type: 'memory_updated', source_key: 'memory:m:rev:2', payload: { title: 'Notes' } },
+      ]),
+    ]
+    expect(await mapProjectEntries(projectId, events, [])).toMatchObject([
+      { kind: 'threadFailure', threadId, cause: 'network' },
+    ])
+  })
+
   it('merges claimed input and queued messages using stable UUIDs', async () => {
     const claimed = inputEvent(1, [
       { id: 81, source_type: 'user_message', source_key: 'user:client-1', payload: { content: message.content } },

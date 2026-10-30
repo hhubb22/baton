@@ -1,7 +1,7 @@
 import type { ProjectMemory, MemoryRevision, MemoryWorkStatus, ProjectMessageReference } from '@baton/protocol'
 import { ClientError, type BatonClient } from '../client'
 import { shortenExcerpt } from '../derive'
-import type { MemoryNote, ProcessStep, Project, ProjectEntry, Reference } from '../types'
+import type { MemoryNote, ProcessStep, Project, ProjectEntry, Reference, ThreadFailureCause } from '../types'
 import { apiPath, timestamp, type HttpContext } from './context'
 import { HttpError } from './transport'
 
@@ -157,6 +157,31 @@ function text(content: Block[] | string | undefined): string {
         .filter((b) => b.type === 'text')
         .map((b) => b.text ?? '')
         .join('\n')
+}
+
+function failureCause(payload: Record<string, unknown>): ThreadFailureCause {
+  if (payload.status === 'unknown') return 'unknown'
+  const reason = typeof payload.reason === 'string' ? payload.reason : ''
+  if (/NetworkError|fetch failed|ECONN|ENOTFOUND|ETIMEDOUT|EAI_AGAIN/.test(reason)) return 'network'
+  if (/timeout|TimeoutError|timed out/i.test(reason)) return 'timeout'
+  if (/ensure thread failed|EnsureThread|Startup|start failed/i.test(reason)) return 'start'
+  return 'other'
+}
+
+// 交给项目助手的系统输入在主对话里只写用户需要知道的异常，正常的更新不显示。
+function inputNote(input: InputDTO): string | null {
+  const reason = typeof input.payload.reason === 'string' ? input.payload.reason.split('\n')[0]!.trim() : ''
+  switch (input.source_type) {
+    case 'turn_ended': {
+      const ended = typeof input.payload.end_reason === 'string' ? input.payload.end_reason : reason
+      return ended ? `Thread 没有回复就结束了：${ended}` : 'Thread 没有回复就结束了'
+    }
+    case 'memory_updated':
+    case 'project_updated':
+      return null
+    default:
+      return input.source_type
+  }
 }
 
 function messageReference(reference?: Reference | null): ProjectMessageReference | undefined {
@@ -344,8 +369,17 @@ export async function mapProjectEntries(
                 : [],
               threads: { action: 'replies', threadIds: [input.payload.thread_id] },
             })
-          } else
-            entries.push({ ...inputBase, kind: 'note', body: `${input.source_type}\n${JSON.stringify(input.payload)}` })
+          } else if (input.source_type === 'thread_message_failed' && typeof input.payload.thread_id === 'string') {
+            entries.push({
+              ...inputBase,
+              kind: 'threadFailure',
+              threadId: input.payload.thread_id,
+              cause: failureCause(input.payload),
+            })
+          } else {
+            const body = inputNote(input)
+            if (body) entries.push({ ...inputBase, kind: 'note', body })
+          }
         }
       }
     } else if (event.kind === 'assistant' && message) {
@@ -363,6 +397,7 @@ export async function mapProjectEntries(
         const step: Extract<ProcessStep, { kind: 'tool' }> = {
           kind: 'tool',
           name: block.name || '工具',
+          ...(block.name === 'nodes.exec' ? { toolCallId: block.id, conversationId: event.conversation_id } : {}),
           input: JSON.stringify(block.arguments ?? {}, null, 2),
           output: null,
           status: 'pending',

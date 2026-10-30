@@ -37,6 +37,12 @@ describe('parseConnectLink', () => {
     expect(parseConnectLink(`baton://connect?url=${encodeURIComponent(url)}`).coordinator_url).toBe(url)
   })
 
+  // Windows 的 ShellExecute 把 baton://connect?… 改写成 baton://connect/?…，两种形式都必须能接入。
+  it('接受 Windows ShellExecute 补斜杠后的路由', () => {
+    expect(parseConnectLink(`baton://connect/?url=${encodeURIComponent(origin)}`)).toEqual(systemTrust)
+    expect(parseConnectLink(`baton://connect/?url=${encodeURIComponent(origin)}&ca=${encodedCA}`)).toEqual(customTrust)
+  })
+
   it.each([
     'http://coordinator.test',
     'file:///tmp/example',
@@ -57,7 +63,6 @@ describe('parseConnectLink', () => {
     'baton://other?url=https://coordinator.test',
     'baton://CONNECT?url=https://coordinator.test',
     'BATON://connect?url=https://coordinator.test',
-    'baton://connect/?url=https://coordinator.test',
     'baton://connect/path?url=https://coordinator.test',
     'baton://connect:123?url=https://coordinator.test',
     'baton://user@connect?url=https://coordinator.test',

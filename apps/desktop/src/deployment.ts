@@ -24,10 +24,17 @@ function validateDeployment(input: unknown): DeploymentConfig {
 
 export function parseConnectLink(raw: string): DeploymentConfig {
   if (Buffer.byteLength(raw, 'utf8') > 8192) throw new Error('接入链接超过 8KB')
-  if (!raw.startsWith('baton://connect?') || /[\s#]/u.test(raw)) throw new Error('接入链接路由无效')
+  // Windows 的 ShellExecute 会在 scheme 与主机名后补一个斜杠，把 baton://connect?… 改写成
+  // baton://connect/?…。两种形式都要接受，否则从浏览器打开接入链接会一律被判为无效路由。
+  const prefix = raw.startsWith('baton://connect?')
+    ? 'baton://connect?'
+    : raw.startsWith('baton://connect/?')
+      ? 'baton://connect/?'
+      : undefined
+  if (prefix === undefined || /[\s#]/u.test(raw)) throw new Error('接入链接路由无效')
 
   const parameters = new Map<string, string>()
-  for (const entry of raw.slice('baton://connect?'.length).split('&')) {
+  for (const entry of raw.slice(prefix.length).split('&')) {
     const separator = entry.indexOf('=')
     if (separator < 1) throw new Error('接入链接参数无效')
     const key = decodeURIComponent(entry.slice(0, separator))
