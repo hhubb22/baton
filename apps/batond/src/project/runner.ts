@@ -86,6 +86,11 @@ export class RuntimeRunner {
     if (config.revision) {
       resolved = {
         ...resolveEnvironment(config, baseEnvironment(process.env), project ? { project } : {}).env,
+        ...Object.fromEntries(
+          Object.entries(process.env).filter(
+            ([name]) => name.startsWith('OTEL_') || name === 'BATON_TELEMETRY_LOCAL_RELAY',
+          ),
+        ),
         ...(process.env.BATON_PROJECT_RUNTIME_DATA_DIR
           ? { BATON_PROJECT_RUNTIME_DATA_DIR: process.env.BATON_PROJECT_RUNTIME_DATA_DIR }
           : {}),

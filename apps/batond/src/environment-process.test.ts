@@ -12,6 +12,8 @@ const script = `process.stdout.write(JSON.stringify({
   combined: process.env.ENV_TEST_COMBINED,
   old: process.env.ENV_TEST_OLD,
   removed: process.env.ENV_TEST_REMOVED,
+  telemetry: process.env.OTEL_SERVICE_NAME,
+  relay: process.env.BATON_TELEMETRY_LOCAL_RELAY,
   parentSecret: process.env.PARENT_SECRET_FOR_TEST
 }))`
 
@@ -43,7 +45,12 @@ it('passes scoped environment to real child processes and removes stale parent v
         [`project:${project}:agent:pi`]: { ENV_TEST_COMBINED: 'combined' },
       },
     }))
-    const inherited = applyEnvironment(config, { ...process.env, PARENT_SECRET_FOR_TEST: 'private' })
+    const inherited = applyEnvironment(config, {
+      ...process.env,
+      PARENT_SECRET_FOR_TEST: 'private',
+      OTEL_SERVICE_NAME: 'runtime-fixture',
+      BATON_TELEMETRY_LOCAL_RELAY: '1',
+    })
     Object.assign(process.env, inherited)
     delete process.env.BATON_ENV_DATA_DIR
     const run = async () => {
@@ -74,6 +81,8 @@ it('passes scoped environment to real child processes and removes stale parent v
       combined: 'project',
       old: 'old',
       removed: 'old',
+      telemetry: 'runtime-fixture',
+      relay: '1',
     })
     const agentEnv = resolveEnvironment(config, baseEnvironment(process.env), { project, agent: 'pi' }).env
     const child = spawn(process.execPath, ['-e', script], { env: agentEnv, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -93,7 +102,14 @@ it('passes scoped environment to real child processes and removes stale parent v
       device.ENV_TEST_REMOVED = null
       return { ...current, scopes: { ...current.scopes, device } }
     })
-    expect(await run()).toEqual({ device: 'device', project: 'project', agent: 'device', combined: 'project' })
+    expect(await run()).toEqual({
+      device: 'device',
+      project: 'project',
+      agent: 'device',
+      combined: 'project',
+      telemetry: 'runtime-fixture',
+      relay: '1',
+    })
   } finally {
     await runner.close()
     for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key]
