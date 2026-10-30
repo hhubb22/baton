@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { lstat, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vite-plus/test'
 import type { FileRequest, FileResult } from '@baton/protocol'
@@ -29,6 +29,15 @@ async function setup() {
     ...query,
   })
   return { data, root, registered, request }
+}
+
+async function churn(path: string) {
+  const before = await lstat(path)
+  for (let i = 0; i < 1000; i++) {
+    await writeFile(join(path, `unrelated-${randomUUID()}`), '')
+    if ((await lstat(path)).ctimeMs !== before.ctimeMs) return
+  }
+  throw new Error('Directory ctime did not change after file creation')
 }
 
 it('continues past the scan limit without omitting or duplicating directory entries', async () => {
@@ -109,7 +118,7 @@ it('discards a read after unrelated directory churn and reopens under full autho
   const content = await withAuthorizedRead(registered, 'log.txt', async (file) => {
     attempts++
     if (attempts === 1) {
-      await writeFile(join(root, 'unrelated'), '')
+      await churn(root)
       return 'discard this read'
     }
     return file.handle.readFile('utf8')
@@ -121,10 +130,9 @@ it('discards a read after unrelated directory churn and reopens under full autho
 it('bounds repeated ctime churn and refuses ancestor replacement with an outside symlink', async () => {
   const { root, registered } = await setup()
   await writeFile(join(root, 'log.txt'), 'inside')
-  let attempts = 0
   await expect(
     withAuthorizedRead(registered, 'log.txt', async () => {
-      await writeFile(join(root, `churn-${attempts++}`), '')
+      await churn(root)
       return 'unverified'
     }),
   ).rejects.toMatchObject({ code: 'path_changed' })
