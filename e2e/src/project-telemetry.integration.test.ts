@@ -135,7 +135,16 @@ test('exports the center placement and real Project Runtime model call in one tr
           probe: async () => [],
           heartbeatMs: 1000,
           pollIntervalMs: 20,
-          transport: (_url, options) => connectWebSocket(`ws://127.0.0.1:${running.port}/v1/node`, options),
+          transport: async (_url, options) => {
+            const connection = await connectWebSocket(`ws://127.0.0.1:${running.port}/v1/node`, options)
+            return {
+              ...connection,
+              // 追踪集成测试验证传播链路；传输拥塞丢弃由 transport 单测覆盖。
+              tryTelemetry: (frame) => {
+                void connection.send(frame).catch(() => {})
+              },
+            }
+          },
           project: { runtimeCommand: { file: process.execPath, args: ['--import', loader, fileURLToPath(entry)] } },
         }),
       ).pipe(

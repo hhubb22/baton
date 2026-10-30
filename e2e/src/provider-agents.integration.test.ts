@@ -364,7 +364,9 @@ async function withProviderThread(
                   traceDiagnostics.batondBatchAttempts++
                   if (trace && encoded.includes(trace)) traceDiagnostics.batondTraceBatchAttempts++
                 }
-                connection.tryTelemetry?.(frame)
+                // 追踪集成测试验证传播链路；传输拥塞丢弃由 transport 单测覆盖。
+                if (trace) void connection.send(frame).catch(() => {})
+                else connection.tryTelemetry?.(frame)
               },
               frames: {
                 async *[Symbol.asyncIterator]() {
