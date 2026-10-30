@@ -383,6 +383,18 @@ it.skipIf(process.platform === 'win32')('restores private ledger permissions dur
   expect((await lstat(f.dbPath)).mode & 0o777).toBe(0o600)
 })
 
+it('does not save full output for a short reply', async () => {
+  const f = await fixture()
+  await withLedger(f, (ledger) =>
+    Effect.gen(function* () {
+      const next = { ...ledger.initial, config: f.config }
+      next.outbox.push({ acked: false, report: report(f, { kind: 'reply', content: 'short reply' }) })
+      yield* ledger.save(next)
+      expect(next.outbox[0]!.report.metadata?.full_output).toBeUndefined()
+    }),
+  )
+})
+
 it('writes complete replies before clipping their reports and persists the same reference across saves and reopening', async () => {
   const f = await fixture()
   const text = 'START' + '正文🙂中间'.repeat(20000) + 'END'
@@ -478,7 +490,7 @@ it('leaves the committed database unchanged when complete output cannot be writt
       const next: State = {
         ...ledger.initial,
         epoch: 1,
-        outbox: [{ acked: false, report: report(f, { kind: 'reply', content: 'new complete output' }) }],
+        outbox: [{ acked: false, report: report(f, { kind: 'reply', content: 'new complete output'.repeat(3000) }) }],
       }
       const failure = yield* ledger.save(next).pipe(Effect.flip)
       expect(failure).toMatchObject({ code: 'storage_error' })

@@ -1,4 +1,10 @@
-import type { ThreadAnswerInput, ThreadQuestion, ThreadTurnItem, WorkerOpenConfig } from '@baton/protocol'
+import type {
+  ThreadAnswerInput,
+  ThreadQuestion,
+  ThreadTraceStep,
+  ThreadTurnItem,
+  WorkerOpenConfig,
+} from '@baton/protocol'
 import type { Effect, Schema, Stream } from 'effect'
 
 export type JsonValue = typeof Schema.Json.Type
@@ -48,6 +54,8 @@ export interface AgentOutput extends AgentEventIdentity {
   readonly text: string
   readonly gap?: boolean
   readonly replyId?: string
+  readonly runningSteps?: readonly ThreadTraceStep[]
+  readonly runningStepsTruncated?: boolean
 }
 
 export type AgentEvent =

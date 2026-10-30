@@ -7,13 +7,13 @@ export const itemDataBudget = 192 * 1024
 const itemReportBudget = 224 * 1024
 const bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value))
 
-const itemId = (id: string) =>
+export const itemId = (id: string) =>
   Buffer.byteLength(id) > 512 || displayText(id) !== id || id.startsWith('baton:item:sha256:')
     ? `baton:item:sha256:${createHash('sha256').update(JSON.stringify(id)).digest('hex')}`
     : id
 
 /** JSON escaping and multibyte characters count toward the budget. */
-const shortenLongest = (value: JsonValue): JsonValue => {
+export const shortenLongest = (value: JsonValue): JsonValue => {
   let longest = ''
   let longestBytes = 0
   let selected: readonly (string | number)[] = []

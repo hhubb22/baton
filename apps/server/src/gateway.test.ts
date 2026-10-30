@@ -775,6 +775,18 @@ test('switching subscriptions while output is pending replaces the old Thread', 
         text: 'new Thread',
         reply_id: 'native-reply',
         worker_turn_seq: 2,
+        running_steps: [
+          {
+            item_id: 'tool',
+            type: 'dynamic_tool',
+            status: 'running',
+            ordinal: 0,
+            data: {},
+            truncated: false,
+            original_bytes: 2,
+          },
+        ],
+        running_steps_truncated: false,
         gap: false,
       }
     },
@@ -806,6 +818,18 @@ test('switching subscriptions while output is pending replaces the old Thread', 
   expect(frames.find((frame) => frame.thread_id === secondThread && frame.text === 'new Thread')).toMatchObject({
     reply_id: 'native-reply',
     worker_turn_seq: 2,
+    running_steps: [
+      {
+        item_id: 'tool',
+        type: 'dynamic_tool',
+        status: 'running',
+        ordinal: 0,
+        data: {},
+        truncated: false,
+        original_bytes: 2,
+      },
+    ],
+    running_steps_truncated: false,
   })
   expect(frames.some((frame) => frame.text === 'old Thread')).toBe(false)
 })

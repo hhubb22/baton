@@ -76,4 +76,23 @@ describe('current turn output', () => {
     const result = await Effect.runPromise(Stream.runCollect(mailbox.stream.pipe(Stream.take(1))))
     expect(result[0]).toMatchObject({ replyId: 'second', text: 'second reply' })
   })
+
+  it('coalesces snapshots without discarding buffered reply text', async () => {
+    const mailbox = makeOutputMailbox()
+    const identity = { nativeSessionId: 'native', messageId: 'input', executionId: 'run' }
+    const step = {
+      item_id: 'tool',
+      type: 'dynamic_tool',
+      status: 'running',
+      ordinal: 0,
+      data: {},
+      truncated: false,
+      original_bytes: 2,
+    }
+    mailbox.offer({ ...identity, replyId: 'reply', text: 'hello' })
+    mailbox.offer({ ...identity, text: '', runningSteps: [step], runningStepsTruncated: false })
+    mailbox.offer({ ...identity, text: '', runningSteps: [], runningStepsTruncated: false })
+    const result = await Effect.runPromise(Stream.runCollect(mailbox.stream.pipe(Stream.take(1))))
+    expect(result[0]).toMatchObject({ replyId: 'reply', text: 'hello', runningSteps: [] })
+  })
 })

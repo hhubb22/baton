@@ -39,6 +39,8 @@ import {
   type ThreadAgent,
 } from './agent.ts'
 import { OutputBuffer } from './output.ts'
+import { itemId as displayItemId } from './items.ts'
+import { boundRunningSteps } from './running-steps.ts'
 import { boundReason, displayText, pendingResult } from './reports.ts'
 import {
   openWorkerLedger,
@@ -187,6 +189,9 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
   let outputTurn: string | undefined
   let outputExecution: string | undefined
   let outputReplyId: string | undefined
+  let liveSteps: NonNullable<AgentOutput['runningSteps']> = []
+  let liveStepsTruncated = false
+  const finishedSteps = new Set<string>()
   let stopEvidence: Deferred.Deferred<void> | undefined
   let frozen: WorkerFailure | undefined
   let closed = false
@@ -506,11 +511,17 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         outputTurn = turn
         outputExecution = undefined
         outputReplyId = undefined
+        liveSteps = []
+        liveStepsTruncated = false
+        finishedSteps.clear()
       }
       if (active?.executionId && outputExecution && active.executionId !== outputExecution) {
         output.reset()
         outputExecution = active.executionId
         outputReplyId = undefined
+        liveSteps = []
+        liveStepsTruncated = false
+        finishedSteps.clear()
       }
       return value
     }).pipe(Effect.uninterruptible)
@@ -588,11 +599,20 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
     )
       return
     outputExecution = event.executionId
+    if (event.runningSteps !== undefined) {
+      const snapshot = boundRunningSteps(
+        event.runningSteps.filter((step) => !finishedSteps.has(step.item_id)),
+        event.runningStepsTruncated,
+      )
+      liveSteps = snapshot.steps
+      liveStepsTruncated = snapshot.truncated
+    }
     const turn = turns.get(message.input.id)
     if (turn && !turn.output && event.text) {
       turn.output = true
       turn.span.attribute('baton.turn.first_output_ms', Math.max(0, clock.currentTimeMillisUnsafe() - turn.started))
     }
+    if (!event.text && event.runningSteps !== undefined && !event.gap) return
     const replyId = event.replyId === undefined ? undefined : safeReplyId(event.replyId)
     if (replyId !== outputReplyId) {
       output.reset()
@@ -978,6 +998,11 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
           if (draft.phase !== 'stopping') draft.phase = 'idle'
         }
       })
+      if (event.type === 'item') {
+        const id = displayItemId(event.item.id)
+        finishedSteps.add(id)
+        liveSteps = liveSteps.filter((step) => step.item_id !== id)
+      }
       if (event.type === 'end' && state.phase === 'stopping' && stopEvidence)
         yield* Deferred.succeed(stopEvidence, undefined)
     })
@@ -1871,6 +1896,8 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
               : {
                   ...output.read(request.cursor),
                   ...(outputReplyId === undefined ? {} : { reply_id: outputReplyId }),
+                  running_steps: liveSteps,
+                  running_steps_truncated: liveStepsTruncated,
                 }),
         }
         return { type: 'result', ok: result.ok, session_result: result }

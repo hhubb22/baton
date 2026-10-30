@@ -180,9 +180,26 @@ it.each([false, true])(
               },
             })
           yield* Queue.offer(events, item('finished', 'running', 0, 'old'))
+          while (
+            !received.some(
+              (event) => event.type === 'running_steps' && event.steps.some((step) => step.item_id === 'finished'),
+            )
+          )
+            yield* Effect.yieldNow
           yield* Queue.offer(events, item('late', 'running', 9, 'old'))
           yield* Queue.offer(events, item('early', 'waiting', 2, 'waiting'))
           yield* Queue.offer(events, item('finished', 'completed', 0, 'first terminal'))
+          while (!received.some((event) => event.type === 'item' && event.item.id === 'finished'))
+            yield* Effect.yieldNow
+          while (
+            !received.some(
+              (event) =>
+                event.type === 'running_steps' &&
+                event.steps.some((step) => step.item_id === 'late') &&
+                !event.steps.some((step) => step.item_id === 'finished'),
+            )
+          )
+            yield* Effect.yieldNow
           yield* Queue.offer(events, item('finished', 'failed', 0, 'ignored terminal'))
           yield* Queue.offer(events, item('late', 'running', 9, 'latest'))
           yield* Queue.offer(events, item('foreign', 'completed', 3, '', 'other-run' as typeof input.runId))
@@ -208,7 +225,7 @@ it.each([false, true])(
             }),
           )
           yield* Fiber.join(collector)
-          expect(received.map((event) => event.type)).toEqual(
+          expect(received.filter((event) => event.type !== 'running_steps').map((event) => event.type)).toEqual(
             abort ? ['item', 'item', 'item', 'barrier', 'end'] : ['item', 'item', 'item', 'end'],
           )
           expect(

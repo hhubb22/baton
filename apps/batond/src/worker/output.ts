@@ -74,24 +74,37 @@ export const makeOutputMailbox = () => {
   let identity: AgentEventIdentity | undefined
   let replyId: string | undefined
   let cursor: string | undefined
+  let running: Pick<AgentOutput, 'runningSteps' | 'runningStepsTruncated'> | undefined
+  let runningChanged = false
   const offer = (event: AgentOutput) => {
     if (
       !identity ||
       event.nativeSessionId !== identity.nativeSessionId ||
       event.messageId !== identity.messageId ||
-      event.executionId !== identity.executionId ||
-      event.replyId !== replyId
+      event.executionId !== identity.executionId
     ) {
       buffer.reset()
       cursor = undefined
       replyId = event.replyId
+      running = undefined
+      runningChanged = false
       identity = {
         nativeSessionId: event.nativeSessionId,
         messageId: event.messageId,
         executionId: event.executionId,
       }
     }
-    buffer.append(event.text, event.gap)
+    if (event.runningSteps !== undefined) {
+      running = { runningSteps: event.runningSteps, runningStepsTruncated: event.runningStepsTruncated ?? false }
+      runningChanged = true
+    } else {
+      if (event.replyId !== replyId) {
+        buffer.reset()
+        cursor = undefined
+        replyId = event.replyId
+      }
+      buffer.append(event.text, event.gap)
+    }
     Queue.offerUnsafe(wake, undefined)
   }
   const stream = Stream.fromQueue(wake).pipe(
@@ -102,7 +115,15 @@ export const makeOutputMailbox = () => {
         cursor = page.cursor
         const next = buffer.read(cursor)
         if (next.ok && next.text.length > 0) Queue.offerUnsafe(wake, undefined)
-        return { ...identity, text: page.text, gap: page.gap, ...(replyId === undefined ? {} : { replyId }) }
+        const snapshot = runningChanged ? running : undefined
+        runningChanged = false
+        return {
+          ...identity,
+          text: page.text,
+          gap: page.gap,
+          ...(replyId === undefined ? {} : { replyId }),
+          ...snapshot,
+        }
       }),
     ),
   )

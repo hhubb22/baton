@@ -390,19 +390,20 @@ export const openWorkerLedger = Effect.fn('Worker.openWorkerLedger')(function* (
         const report = entry.report
         const config = state.config
         if (report.kind === 'reply' && config && report.content !== undefined) {
+          const bounded = boundReport(report)
           const existing = report.metadata?.full_output
-          const reference = Schema.is(FullOutputReference)(existing)
-            ? existing
-            : yield* Effect.tryPromise({
-                try: async () =>
-                  fullOutput.put(
-                    config,
-                    Buffer.from(report.content ?? '', report.metadata?.encoding === 'base64' ? 'base64' : 'utf8'),
-                    await readOutputRetentionDays(dataDirectory),
-                  ),
-                catch: (cause) => new WorkerFailure('storage_error', 'Cannot save full reply', cause),
-              })
-          entry.report = boundReport({ ...report, metadata: { ...report.metadata, full_output: reference } })
+          if (bounded.truncated && !Schema.is(FullOutputReference)(existing)) {
+            const reference = yield* Effect.tryPromise({
+              try: async () =>
+                fullOutput.put(
+                  config,
+                  Buffer.from(report.content ?? '', report.metadata?.encoding === 'base64' ? 'base64' : 'utf8'),
+                  await readOutputRetentionDays(dataDirectory),
+                ),
+              catch: (cause) => new WorkerFailure('storage_error', 'Cannot save full reply', cause),
+            })
+            entry.report = boundReport({ ...bounded, metadata: { ...bounded.metadata, full_output: reference } })
+          } else entry.report = bounded
         } else if (report.kind === 'turn.item' && report.item && config) {
           const bounded = boundReport(report)
           const existing = report.metadata?.full_output

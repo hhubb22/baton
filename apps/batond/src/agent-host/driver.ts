@@ -23,6 +23,7 @@ import { isThreadAnswerAllowed, ThreadQuestion, type WorkerOpenConfig } from '@b
 import * as IdAllocator from '@t3tools/provider-core/server/IdAllocator'
 import * as ProviderAdapter from '@t3tools/provider-core/server/ProviderAdapter'
 import { makeOutputMailbox } from '../worker/output.ts'
+import { runningSteps } from '../worker/running-steps.ts'
 import { ensurePrivateDirectory, readPrivateFile } from '../platform/private.ts'
 import { findSent, validatePreparation, type SnapshotMessage } from './evidence.ts'
 import { loadMapping, mappingFor, mappingThread, persistMapping, RuntimeModeConflict, statePath } from './mapping.ts'
@@ -197,24 +198,31 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
             ),
           )
       })
+    const toItem = (item: OrchestrationV2TurnItem) => ({
+      id: item.id,
+      type: item.type,
+      status: item.status,
+      ordinal: item.ordinal,
+      ...(item.parentItemId === null ? {} : { parent_id: item.parentItemId }),
+      ...(item.title === null ? {} : { title: item.title }),
+      ...(item.startedAt === null ? {} : { started_at: DateTime.formatIso(item.startedAt) }),
+      ...(item.completedAt === null ? {} : { completed_at: DateTime.formatIso(item.completedAt) }),
+      data: Schema.encodeSync(Schema.toCodecJson(TurnItemSchema))(item),
+    })
+    const emitSnapshot = (turn: ActiveTurn) => {
+      const snapshot = runningSteps([...turn.items.values()].map(toItem))
+      output.offer({
+        ...identity(turn),
+        text: '',
+        runningSteps: snapshot.steps,
+        runningStepsTruncated: snapshot.truncated,
+      })
+    }
     const emitItem = (turn: ActiveTurn, item: OrchestrationV2TurnItem) => {
       turn.items.delete(item.id)
       turn.emittedItems.add(item.id)
-      return emit({
-        ...identity(turn),
-        type: 'item',
-        item: {
-          id: item.id,
-          type: item.type,
-          status: item.status,
-          ordinal: item.ordinal,
-          ...(item.parentItemId === null ? {} : { parent_id: item.parentItemId }),
-          ...(item.title === null ? {} : { title: item.title }),
-          ...(item.startedAt === null ? {} : { started_at: DateTime.formatIso(item.startedAt) }),
-          ...(item.completedAt === null ? {} : { completed_at: DateTime.formatIso(item.completedAt) }),
-          data: Schema.encodeSync(Schema.toCodecJson(TurnItemSchema))(item),
-        },
-      })
+      emitSnapshot(turn)
+      return emit({ ...identity(turn), type: 'item', item: toItem(item) })
     }
     const flushItems = (turn: ActiveTurn) =>
       Effect.forEach(
@@ -245,7 +253,10 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
             ) {
               if (['completed', 'failed', 'cancelled', 'interrupted'].includes(item.status))
                 yield* emitItem(active, item)
-              else active.items.set(item.id, item)
+              else {
+                active.items.set(item.id, item)
+                emitSnapshot(active)
+              }
             }
             if (item.type !== 'user_input_request' && item.type !== 'approval_request') return
             const question = yield* Schema.decodeUnknownEffect(ThreadQuestion)({
@@ -664,11 +675,35 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
       events: Stream.fromQueue(control).pipe(
         Stream.merge(
           output.stream.pipe(
-            Stream.map((event): ExecutionEvent => ({
-              ...event,
-              type: 'delta',
-              id: event.replyId ?? event.executionId,
-            })),
+            Stream.flatMap((event) =>
+              Stream.fromIterable<ExecutionEvent>([
+                ...(event.runningSteps === undefined
+                  ? []
+                  : [
+                      {
+                        nativeSessionId: event.nativeSessionId,
+                        messageId: event.messageId,
+                        executionId: event.executionId,
+                        type: 'running_steps' as const,
+                        steps: event.runningSteps,
+                        truncated: event.runningStepsTruncated ?? false,
+                      },
+                    ]),
+                ...(event.text || event.gap || event.runningSteps === undefined
+                  ? [
+                      {
+                        nativeSessionId: event.nativeSessionId,
+                        messageId: event.messageId,
+                        executionId: event.executionId,
+                        type: 'delta' as const,
+                        id: event.replyId ?? event.executionId,
+                        text: event.text,
+                        ...(event.gap === undefined ? {} : { gap: event.gap }),
+                      },
+                    ]
+                  : []),
+              ]),
+            ),
           ),
         ),
       ),

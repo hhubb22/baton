@@ -167,7 +167,7 @@ Windows 第一版按账本保存的 PID 与创建时间核对身份，再用 `ta
 | Worker 账本 | 截断结果与 outbox `turn.item` 事件在同一事务提交。同一 Turn 的 `turn.item` 都在 `turn.ended` 之前（Worker 账本不变量 3）。停止或状态不确定后的清理在退役前，由 host 在控制事件流末尾发确认标记，Worker 持久化此前事件后才确认；清理任务在串行账本队列外等待该确认，再退役消费端，避免已入队的过程项随强制回收丢失。确认失败冻结 Worker，不报告停止成功；已确认接受的活动 Turn 在排空事件前不写结束记录，核对输入接受身份后，先处理缓冲事件，再写结束报告 |
 | token 用量 | driver 记下本轮最后一次 `provider_turn.updated` 的 `tokenUsage`，随 `end` 事件交给 Worker，再由 `turn.ended` 报告的 `token_usage` 字段原样送到中心 |
 
-`turn.item` 报告携带 `worker_turn_seq` 和 `item:{id, type, status, ordinal, parent_id?, title?, started_at?, completed_at?, data}`。`data` 是上游 TurnItem 的 JSON；另附 `truncated`、`original_bytes`，`metadata.full_output` 保存完整输出引用。中心不深度解码 `data`，它的结构跟随 submodule 固定的上游版本，实验室阶段不做跨版本兼容（R-25）。`data` 和 `token_usage` 使用 PostgreSQL `json`，读取时保留原 JSON，不转换为 `jsonb`，以支持字符串中的 NUL、孤立 UTF-16 代理项转义和嵌套 `null`。这些内容按原文保存，不做脱敏。
+`turn.item` 报告携带 `worker_turn_seq` 和 `item:{id, type, status, ordinal, parent_id?, title?, started_at?, completed_at?, data}`。`data` 是上游 TurnItem 的 JSON；ACP 工具调用的原生工具标识（Kiro 为 `_meta.kiro.toolId`）随 `dynamic_tool` 保存，Agent 未提供 `rawInput` 时不写入 `input`；另附 `truncated`、`original_bytes`，`metadata.full_output` 保存完整输出引用。中心不深度解码 `data`，它的结构跟随 submodule 固定的上游版本，实验室阶段不做跨版本兼容（R-25）。`data` 和 `token_usage` 使用 PostgreSQL `json`，读取时保留原 JSON，不转换为 `jsonb`，以支持字符串中的 NUL、孤立 UTF-16 代理项转义和嵌套 `null`。这些内容按原文保存，不做脱敏。
 
 中心把每一项写入 `thread_turn_items`，以 `(employee_id, thread_id, worker_turn_seq, item_id)` 为主键，冲突时保留首次写入的版本，报告照常 ACK。`turn.item` 不写 Project Agent 输入队列，也不进入 `thread_events` 时间线；时间线的 Turn 结束事件附带该轮的过程项数量，网页据此显示过程记录这一行。
 
@@ -483,15 +483,17 @@ CLI 在 `identity.lock` 下将原请求和摘要写入私有 `reauth-pending.jso
 
 ## 历史读取与实时输出
 
-Thread Worker 在裁剪回复报告前保存 UTF-8 全文；Execution Worker 将 stdout/stderr 原始数据块写入完整输出。文件位于各自的私有目录，中心保存 `{id, storage_generation, total_bytes, expires_at}` 引用。Thread 和 Execution 的输出接口分别检查员工及对象归属并转发到原设备；节点核对输出 ID 和存储代次，验证私有目录与普通文件，不接受符号链接。读取无需启动 Worker。
+Thread Worker 只在回复需要裁剪时，于裁剪报告前保存 UTF-8 全文，未裁剪的回复不生成完整输出引用；Execution Worker 将 stdout/stderr 原始数据块写入完整输出。文件位于各自的私有目录，中心保存 `{id, storage_generation, total_bytes, expires_at}` 引用。Thread 和 Execution 的输出接口分别检查员工及对象归属并转发到原设备；节点核对输出 ID 和存储代次，验证私有目录与普通文件，不接受符号链接。读取无需启动 Worker。
 
-完整输出按字节偏移分页，每页最多 12 KiB 原始数据，以 Base64 返回 `full_output:{output_id,storage_generation,offset,next_offset,total_bytes,expires_at,encoding,data,done}`，下一游标为 `next_offset` 的十进制字符串。网页逐段解码，保留跨页 UTF-8 字符，只显示当前页，并支持继续读取、从头读取和下载当前片段。默认保留 30 天，可在设备 `--data-dir/output-retention.json` 设置 `retention_days`（1～3650）；daemon 启动时及每小时清理过期内容，读取过期内容时立即删除并返回 `output_expired`。无元数据的未完成文件在 Worker 不运行且 24 小时未写入后清理。原生 Agent 历史的保留由员工管理。
+完整输出按字节偏移分页，每页最多 12 KiB 原始数据，以 Base64 返回 `full_output:{output_id,storage_generation,offset,next_offset,total_bytes,expires_at,encoding,data,done}`，下一游标为 `next_offset` 的十进制字符串。网页读取被截断步骤的全文和 Execution 输出时逐段解码，保留跨页 UTF-8 字符，只显示当前页，并支持继续读取、从头读取和下载当前片段；被截断的回复只标明已截断和原始大小，暂无读取入口。默认保留 30 天，可在设备 `--data-dir/output-retention.json` 设置 `retention_days`（1～3650）；daemon 启动时及每小时清理过期内容，读取过期内容时立即删除并返回 `output_expired`。无元数据的未完成文件在 Worker 不运行且 24 小时未写入后清理。原生 Agent 历史的保留由员工管理。
 
 `GET /threads/{id}/history` 接受可选 `cursor` 和 `limit`（默认及上限均为 16），校验归属后经 `session.request` 读取设备上的原生历史。响应为 `SessionResult`，成功时包含 `history:{entries,cursor,has_more,gap,code?}`；条目携带 `id`、`parent_id`、`kind`、`text`、本地 `reference`、原字节数 `bytes` 和 `truncated`。调用方按返回游标续读到 `has_more:false`。响应为 `Cache-Control: no-store`，正文不进入 PostgreSQL 或日志。每页最多 16 条、14 KiB，单条 JSON 编码后最多 4 KiB，超出时保留截断标记和 `<agent>:<id>:<偏移>` 形式的本地引用，并设置缺口。
 
 Pi 读取原生 JSONL，Codex 读取 thread 文件并核对 thread ID、cwd 和 CLI 版本；文件读取用 `os.OpenRoot` 限制边界，只接受普通文件。Kiro 通过独立 ACP 连接加载已保存会话，收集原生记录，不发送 prompt，也不触碰执行连接。游标绑定原生会话与已读前缀摘要，前缀被删除、重排或改写时返回 `history_changed`。离线返回 `node_offline`，历史缺失返回 `history_missing`，其他读取错误返回 `history_unavailable`。TS 中心按设备为临时读取保留默认 4 个在途名额，为管理操作另留 2 个名额；每类最多排队 8 个请求，默认排队 2 秒，参数可由中心环境配置调整。排队超时的请求不会发送，已发送的管理请求超时后不自动重发。历史读取不依赖 Worker 存活。
 
 实时输出由 Worker 保留当前 Turn 最近 256 KiB 纯文本，`GET /threads/{id}/output?cursor=...` 每次最多读取 16 KiB。游标为 `epoch:字节偏移`，Turn 切换或 Worker 重启更换 epoch；旧 epoch、超出保留范围或上游输出已丢失时返回 `gap:true` 并从当前保留起点续读。格式错误或偏移落在 UTF-8 字符中间时返回 `invalid_cursor`。查询结果包含当前设备报告的状态与下一游标，成功与设备不可用结果均通过 `ok`、`code` 区分（R-16）。
+
+进行中的步骤走同一条临时读取路径。driver 把未终态项的最新版本从 `turn_item.updated` 经输出流交给 Worker，Worker 只存在内存，不写账本、outbox 或中心。`output` 查询结果附带 `running_steps`，字段与 trace 接口的步骤相同，整份最多 32 项、64 KiB；超限时保留 `ordinal` 最大的项，再把最长字符串缩成首尾两段，并标记 `running_steps_truncated`。这份列表每次是完整快照，没有游标和补读，Turn 切换或 Worker 重启后清空。项进入终态时从列表移除，仍只经 `turn.item` 持久化一次。网页按 `item_id` 合并快照和 trace，同一项以 trace 为准，所以终态报告先到或快照晚到都不会重复显示。
 
 浏览器为当前打开且执行中的 Thread 订阅输出，按 `thread.output` 增量更新该 Thread 的本地输出缓存；连接可用时，定期刷新输出查询只读取缓存。连接尚未就绪或已断开时，通过 HTTP 按游标续读，重连后用最近一次成功读取的游标恢复订阅。Agent 回复的实时输出携带回复 ID 和 Worker 回合序号，网页用它们匹配已保存的回复；新回复开始时实时缓存切换到新回复。输出 epoch 变化时清空旧内容，读取缺口和浏览器 256 KiB 缓存淘汰均显示缺口标记；执行结束后清空输出，离开会话时取消订阅并释放缓存。
 
@@ -557,6 +559,7 @@ trace 从网页贯穿到 agent-host 和 Project Runtime。每个 Turn 和每次 
 | R-12 | Agent 进程退出后发消息；删除原生历史后发消息 | 恢复时 Thread ID 改变；历史缺失时新建了空会话 | Worker 回放 |
 | R-15、R-22 | 一轮结束后让设备离线，检索中心数据库与日志中的随机标记 | 回复或过程项不可见；原生历史或实时输出出现在中心；过程项正文出现在日志或追踪导出中 | 集成 |
 | R-16 | 设备 A 持续输出，设备 B 同时收消息和停止 | 缓冲无界增长；跨设备命令延迟阈值在第一版之后确定与验证 | Gateway 本地流控测试；负载阈值为第一版之后 |
+| R-16 | driver 回放：项先 running 后 completed，查询穿插其间；快照晚于 `turn.item` 到达网页 | 进行中的项写入账本或中心；同一项显示两次；终态项仍留在快照；`running_steps` 超过上限 | driver、Worker 与网页单元测试 |
 | R-18 | 回复里写登记目录内路径、目录外路径、`commit <SHA>` | 目录外路径生成附件；commit 缺少仓库 | 单元测试 |
 | R-19、R-20 | 执行中重启 Coordinator、batond、Worker，短停 PostgreSQL | 消息重发；回复重复；同步前设备显示可用 | 进程测试 |
 | R-24 | 第一版之后验证 500 台设备、100 个执行中 Thread，24 小时 | 第一版之后按 D6 确定容量阈值并判定 | 第一版之后的压测环境 |

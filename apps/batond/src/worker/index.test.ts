@@ -940,8 +940,24 @@ describe('reliable Worker', () => {
               yield* called(f, `send:${first.client_message_id}`)
               const initial = yield* readOutput(worker, cfg)
               const db = new DatabaseSync(dbPath, { readOnly: true })
+              const runningStep = {
+                item_id: 'step',
+                type: 'dynamic_tool',
+                status: 'running',
+                ordinal: 0,
+                data: { input: 'read' },
+                truncated: false,
+                original_bytes: 16,
+              }
               try {
                 const token = db.prepare('SELECT commit_token FROM worker_commit').get()?.commit_token
+                f.output.offer({
+                  ...delta(first.client_message_id!, ''),
+                  runningSteps: [runningStep],
+                  runningStepsTruncated: false,
+                })
+                const steps = yield* until(readOutput(worker, cfg), (result) => result.running_steps?.length === 1)
+                expect(steps.running_steps).toEqual([runningStep])
                 f.output.offer(delta(first.client_message_id!, 'live 😀'))
                 const live = yield* until(
                   readOutput(worker, cfg, initial.cursor),
@@ -949,6 +965,7 @@ describe('reliable Worker', () => {
                 )
                 expect(live.state).toBe('running')
                 expect(live.gap).toBe(false)
+                expect(live.running_steps).toEqual([runningStep])
                 f.output.offer({ ...delta(first.client_message_id!, 'lost'), gap: true })
                 const lost = yield* until(readOutput(worker, cfg, live.cursor), (result) => result.gap)
                 expect(lost.text).toBe('lost')
@@ -967,6 +984,20 @@ describe('reliable Worker', () => {
               }
               yield* Deferred.succeed(gate, undefined)
               yield* completed(worker, first.command_id!)
+              yield* Queue.offer(f.events, {
+                ...delta(first.client_message_id!, ''),
+                type: 'item',
+                item: { id: 'step', type: 'dynamic_tool', status: 'completed', ordinal: 0, data: { output: 'done' } },
+              })
+              yield* until(reports(worker), (rows) => rows.some((row) => row.kind === 'turn.item'))
+              expect((yield* readOutput(worker, cfg)).running_steps).toEqual([])
+              f.output.offer({ ...delta(first.client_message_id!, ''), runningSteps: [runningStep] })
+              f.output.offer(delta(first.client_message_id!, 'late snapshot processed'))
+              const afterLateSnapshot = yield* until(
+                readOutput(worker, cfg),
+                (result) => result.text?.includes('late snapshot processed') === true,
+              )
+              expect(afterLateSnapshot.running_steps).toEqual([])
               const old = yield* readOutput(worker, cfg)
               yield* Queue.offer(f.events, event(first.client_message_id!, 'reply'))
               yield* Queue.offer(f.events, event(first.client_message_id!, 'end'))
@@ -975,7 +1006,11 @@ describe('reliable Worker', () => {
                   expect((await Effect.runPromise(readOutput(worker, cfg, old.cursor))).state).toBe('idle')
                 }),
               )
-              expect(yield* readOutput(worker, cfg, old.cursor)).toMatchObject({ text: '', gap: true })
+              expect(yield* readOutput(worker, cfg, old.cursor)).toMatchObject({
+                text: '',
+                gap: true,
+                running_steps: [],
+              })
               const second = message(cfg)
               yield* worker.handle(second)
               yield* completed(worker, second.command_id!)

@@ -176,6 +176,16 @@ function makeAgent(config: WorkerOpenConfig, options: HostedAgentOptions): Threa
       output.offer({ ...event, replyId: event.id })
       options.onDelta?.(event)
     },
+    runningSteps: (event: Extract<import('./protocol.ts').ExecutionEvent, { type: 'running_steps' }>) => {
+      output.offer({
+        nativeSessionId: event.nativeSessionId,
+        messageId: event.messageId,
+        executionId: event.executionId,
+        text: '',
+        runningSteps: event.steps,
+        runningStepsTruncated: event.truncated,
+      })
+    },
   })
   const start = (openConfig: WorkerOpenConfig, resume?: string) =>
     Effect.gen(function* () {
@@ -364,6 +374,7 @@ interface HostState {
   readonly uncertain: (reason: string) => Effect.Effect<void>
   readonly emit: (event: AgentEvent) => Effect.Effect<void>
   readonly output: (event: AgentDelta) => void
+  readonly runningSteps: (event: Extract<import('./protocol.ts').ExecutionEvent, { type: 'running_steps' }>) => void
 }
 
 /** Map one host frame onto the Worker-facing ThreadAgent events. */
@@ -377,7 +388,11 @@ function receiveEvent(state: HostState, frame: import('./protocol.ts').HostEvent
     if (event.type === 'uncertain') return yield* state.uncertain(event.reason)
     const active = state.active()
     // Delayed text from a completed input cannot belong to the next turn.
-    if (event.type === 'delta' && (!active || active.ended || event.messageId !== active.messageId)) return
+    if (
+      (event.type === 'delta' || event.type === 'running_steps') &&
+      (!active || active.ended || event.messageId !== active.messageId)
+    )
+      return
     if (
       !state.nativeSessionId() ||
       !active ||
@@ -389,7 +404,9 @@ function receiveEvent(state: HostState, frame: import('./protocol.ts').HostEvent
       return yield* state.uncertain('Agent event execution identity mismatch')
     state.setExecutionId(event.executionId)
     if (event.type === 'end') state.markEnded()
-    if (event.type === 'delta') {
+    if (event.type === 'running_steps') {
+      yield* Effect.sync(() => state.runningSteps(event))
+    } else if (event.type === 'delta') {
       yield* Effect.try({
         try: () => state.output(event),
         catch: (cause) => new AgentError('Agent live text sink failed', cause),

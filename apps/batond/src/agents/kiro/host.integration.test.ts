@@ -316,6 +316,15 @@ describe('Kiro Agent host', () => {
           }),
         ])
         expect(persistedReports.filter((report) => report.kind === 'message.sent')).toHaveLength(2)
+        const cloudConfig = persistedReports.find(
+          (report) => report.kind === 'turn.item' && report.item?.title === 'Fetching your cloud config',
+        )
+        expect(cloudConfig?.item?.data).toMatchObject({
+          type: 'dynamic_tool',
+          nativeToolId: 'fetch_cloud_config',
+          output: { kind: 'upToDate' },
+        })
+        expect(cloudConfig?.item?.data).not.toHaveProperty('input')
         expect(persistedReports.filter((report) => report.kind.endsWith('.unknown'))).toEqual([])
         expect(events.filter((event) => event.type === 'end')).toEqual([
           expect.objectContaining({ type: 'end', outcome: 'failed', reason: expectedReason }),

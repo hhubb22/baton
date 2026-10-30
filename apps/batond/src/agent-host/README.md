@@ -45,7 +45,7 @@ host 进程的环境变量只包含系统必需项（`PATH`、`HOME`、`USER`、
 
 ## 过程记录
 
-通用 driver 只接收当前 run 的 `turn_item.updated`。每项首次进入 completed、failed、cancelled 或 interrupted 时发出一次 `item`；后续更新忽略。尚未终态的项只保留最新版本，回合结束、停止或关闭时按 ordinal 补发，保留最后状态并排在 `end` 之前。assistant_message 和 user_message 不生成过程项。用户问题和 MCP elicitation 保留原问题流程，同时作为过程项保存。driver 记录本轮最后一次提供的 `provider_turn.updated.tokenUsage`，由 `end.tokenUsage` 传给 Worker，作为 `turn.ended.token_usage` 原样持久化。
+通用 driver 只接收当前 run 的 `turn_item.updated`。每项首次进入 completed、failed、cancelled 或 interrupted 时发出一次 `item`；后续更新忽略。尚未终态的项保留最新版本，并通过实时输出流发送有界快照；回合结束、停止或关闭时按 ordinal 补发，保留最后状态并排在 `end` 之前。assistant_message 和 user_message 不生成过程项。用户问题和 MCP elicitation 保留原问题流程，同时作为过程项保存。driver 记录本轮最后一次提供的 `provider_turn.updated.tokenUsage`，由 `end.tokenUsage` 传给 Worker，作为 `turn.ended.token_usage` 原样持久化。
 
 Worker 按 Turn 和原始项 ID 去重。原始 ID 独立保存在 outbox，ACK 和账本重开后继续保留。顶层 id、parent_id 超过 512 字节、含无效展示字符或占用映射前缀时稳定映射为 `baton:item:sha256:…`；其他顶层展示文字替换 NUL 和孤立代理，metadata 标记 `item_text_sanitized`。嵌套 data 的字符串和对象键保留原文，JSON 序列化负责转义。
 

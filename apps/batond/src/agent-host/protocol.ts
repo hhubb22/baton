@@ -4,6 +4,7 @@ import { RuntimeMode } from '@t3tools/contracts'
 import {
   ThreadAnswerInput,
   ThreadQuestion,
+  ThreadTraceStep,
   ThinkingCapability,
   ThinkingSelection,
   WorkerOpenConfig,
@@ -58,6 +59,12 @@ export const ExecutionEvent = Schema.Union([
   Schema.Struct({ ...identity, type: Schema.Literal('reply'), id: Schema.String, text: Schema.String }),
   Schema.Struct({ ...identity, type: Schema.Literal('model'), model: Schema.String }),
   Schema.Struct({ ...identity, type: Schema.Literal('item'), item: HostTurnItem }),
+  Schema.Struct({
+    ...identity,
+    type: Schema.Literal('running_steps'),
+    steps: Schema.Array(ThreadTraceStep),
+    truncated: Schema.Boolean,
+  }),
   Schema.Struct({
     ...identity,
     type: Schema.Literal('delta'),
