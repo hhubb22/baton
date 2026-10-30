@@ -65,9 +65,20 @@ it('folds Windows keys and reports conflicting proxy variants', () => {
   }
   expect(resolveEnvironment(config, { Path: 'base' }, { platform: 'win32' }).env).toEqual({ Path: 'second' })
   expect(
-    resolveEnvironment({ ...config, imported: { HTTP_PROXY: 'http://a', http_proxy: 'http://b' }, scopes: {} }, {})
-      .diagnostics,
+    resolveEnvironment(
+      { ...config, imported: { HTTP_PROXY: 'http://a', http_proxy: 'http://b' }, scopes: {} },
+      {},
+      { platform: 'linux' },
+    ).diagnostics,
   ).toHaveLength(1)
+  const windows = resolveEnvironment(
+    { ...config, imported: { HTTP_PROXY: 'http://a', http_proxy: 'http://b' }, scopes: {} },
+    {},
+    { platform: 'win32' },
+  )
+  expect(windows.diagnostics).toEqual([])
+  expect(windows.env.http_proxy).toBe('http://b')
+  expect(windows.env.HTTP_PROXY).toBeUndefined()
 })
 
 it('serializes reads and writes and removes replaced secrets', async () => {

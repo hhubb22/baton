@@ -38,10 +38,17 @@ it('passes certificate and proxy variables unchanged to every Agent', () => {
     all_proxy: 'socks5://proxy:1081',
     no_proxy: '',
   }
+  const expected = { ...network, NODE_USE_ENV_PROXY: '1' }
+  if (process.platform === 'win32') {
+    delete (expected as Partial<typeof expected>).HTTP_PROXY
+    delete (expected as Partial<typeof expected>).HTTPS_PROXY
+    delete (expected as Partial<typeof expected>).ALL_PROXY
+    delete (expected as Partial<typeof expected>).NO_PROXY
+  }
   for (const agent of ['cursor', 'pi', 'codex', 'kiro']) {
     expect(
       agentEnvironment(agent, { ...network, OPENAI_API_KEY: 'secret', NODE_TLS_REJECT_UNAUTHORIZED: '0' }),
-    ).toEqual({ ...network, NODE_USE_ENV_PROXY: '1' })
+    ).toEqual(expected)
   }
 })
 

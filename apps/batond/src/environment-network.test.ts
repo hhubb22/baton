@@ -86,7 +86,7 @@ it('applies imported proxy and CA before child startup for HTTP, HTTPS and coord
     expect(env.NODE_USE_ENV_PROXY).toBe('1')
     const args = [
       '--import',
-      fileURLToPath(new URL('../../../runtimes/project-agent/node_modules/tsx/dist/loader.mjs', import.meta.url)),
+      new URL('../../../runtimes/project-agent/node_modules/tsx/dist/loader.mjs', import.meta.url).href,
       fileURLToPath(new URL('./testing/environment-network.mjs', import.meta.url)),
       `http://127.0.0.1:${plainPort}`,
       `https://127.0.0.1:${securePort}`,
