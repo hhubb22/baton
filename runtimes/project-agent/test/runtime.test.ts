@@ -42,7 +42,7 @@ class ExecBackend extends Backend {
         this.accepted = true
         this.effects++
       }
-      return { pending: true, thread_id: 'exec-thread-1' }
+      return { pending: true, execution_id: 'exec-thread-1' }
     }
     if (req.operation === 'wait_tool') {
       this.calls.push(req.operation)
@@ -50,7 +50,7 @@ class ExecBackend extends Backend {
       assert.equal(req.tool_call_id, 'exec-1')
       assert.equal(req.last_seq, this.events.length)
       if (!req.payload?.finish_wait && this.waits.length <= this.pendingCount)
-        return { pending: true, thread_id: 'exec-thread-1' }
+        return { pending: true, execution_id: 'exec-thread-1' }
       const event = {
         seq: this.events.length + 1,
         kind: 'tool_result' as const,
@@ -64,7 +64,7 @@ class ExecBackend extends Backend {
               {
                 type: 'text',
                 text: JSON.stringify({
-                  thread_id: 'exec-thread-1',
+                  execution_id: 'exec-thread-1',
                   status: req.payload?.finish_wait ? 'running' : this.resultStatus,
                 }),
               },
@@ -106,9 +106,9 @@ class LocalWaitBackend extends ExecBackend {
   }
   async call(req: any): Promise<any> {
     this.requests.push({ request: structuredClone(req), at: this.now })
-    if (req.operation === 'poll_wake' && req.payload.thread_id) {
+    if (req.operation === 'poll_wake' && req.payload.execution_id) {
       this.calls.push(req.operation)
-      assert.equal(req.payload.thread_id, 'exec-thread-1')
+      assert.equal(req.payload.execution_id, 'exec-thread-1')
       assert.ok(Number.isInteger(req.payload.wait_ms))
       assert.ok(req.payload.wait_ms >= 1 && req.payload.wait_ms <= 25_000)
       if (this.onPoll) return this.onPoll(req)
@@ -122,7 +122,7 @@ class LocalWaitBackend extends ExecBackend {
       : response
   }
   threadPolls() {
-    return this.requests.filter(({ request }) => request.operation === 'poll_wake' && request.payload.thread_id)
+    return this.requests.filter(({ request }) => request.operation === 'poll_wake' && request.payload.execution_id)
   }
   waitTimes() {
     return this.requests.filter(({ request }) => request.operation === 'wait_tool').map(({ at }) => at)
@@ -199,8 +199,8 @@ test('本地等待丢失全部通知，30 秒 pending 仅做初始、周期和�
   assert.deepEqual(
     backend.threadPolls().map(({ request }) => request.payload),
     [
-      { thread_id: 'exec-thread-1', after_version: 7, wait_ms: 25_000 },
-      { thread_id: 'exec-thread-1', after_version: 7, wait_ms: 5_000 },
+      { execution_id: 'exec-thread-1', after_version: 7, wait_ms: 25_000 },
+      { execution_id: 'exec-thread-1', after_version: 7, wait_ms: 5_000 },
     ],
   )
   assert.deepEqual(backend.sleeps, [])
@@ -209,7 +209,7 @@ test('本地等待丢失全部通知，30 秒 pending 仅做初始、周期和�
   assert.equal(backend.events.filter((event) => event.kind === 'tool_result').length, 1)
   assert.match(backend.events.find((event) => event.kind === 'tool_result')!.payload.message.content[0].text, /running/)
   const idlePolls = backend.requests.filter(
-    ({ request }) => request.operation === 'poll_wake' && !request.payload.thread_id,
+    ({ request }) => request.operation === 'poll_wake' && !request.payload.execution_id,
   )
   assert.ok(idlePolls.length > 0)
   assert.ok(idlePolls.every(({ request }) => Object.keys(request.payload).join() === 'wait_ms'))
@@ -250,12 +250,12 @@ test('节点过滤重复和无关通知后，Thread 变化仍须查询中心并�
   backend.waitUntil = 60_000
   backend.completeAt = 28_000
   const notifications = [
-    { at: 1_000, thread_id: 'other-thread', version: 99 },
-    { at: 2_000, thread_id: 'exec-thread-1', version: 7 },
-    { at: 3_000, thread_id: 'exec-thread-1', version: 8 },
-    { at: 4_000, thread_id: 'exec-thread-1', version: 8 },
-    { at: 5_000, thread_id: 'exec-thread-1', version: 6 },
-    { at: 6_000, thread_id: 'other-thread', version: 100 },
+    { at: 1_000, execution_id: 'other-thread', version: 99 },
+    { at: 2_000, execution_id: 'exec-thread-1', version: 7 },
+    { at: 3_000, execution_id: 'exec-thread-1', version: 8 },
+    { at: 4_000, execution_id: 'exec-thread-1', version: 8 },
+    { at: 5_000, execution_id: 'exec-thread-1', version: 6 },
+    { at: 6_000, execution_id: 'other-thread', version: 100 },
   ]
   backend.onPoll = async ({ payload }) => {
     // 模拟节点过滤通知后的 IPC 边界，Runtime 只收到目标 Thread 的新版本。
@@ -263,9 +263,9 @@ test('节点过滤重复和无关通知后，Thread 变化仍须查询中心并�
     while (notifications.length && notifications[0].at <= until) {
       const notification = notifications.shift()!
       backend.now = notification.at
-      if (notification.thread_id === payload.thread_id && notification.version > payload.after_version) {
+      if (notification.execution_id === payload.execution_id && notification.version > payload.after_version) {
         backend.threadVersion = notification.version
-        return { reason: 'thread_changed', version: notification.version }
+        return { reason: 'execution_changed', version: notification.version }
       }
     }
     backend.now = until
@@ -375,9 +375,9 @@ test('预算耗尽后的退避受剩余运行预算限制，到期使用 finish_
 test('pending 响应在调用和后续查询时均校验 Thread、版本和剩余预算', async () => {
   for (const phase of ['call_tool', 'wait_tool']) {
     for (const fields of [
-      { thread_id: undefined },
-      { thread_id: '' },
-      { thread_id: 1 },
+      { execution_id: undefined },
+      { execution_id: '' },
+      { execution_id: 1 },
       { version: undefined },
       { version: -1 },
       { version: 0.5 },
@@ -408,12 +408,12 @@ test('pending 响应在调用和后续查询时均校验 Thread、版本和剩�
 })
 
 test('未声明等待协议的 pending 仍要求非空 Thread ID', async () => {
-  for (const thread_id of [undefined, '', 1]) {
+  for (const execution_id of [undefined, '', 1]) {
     const backend = new ExecBackend()
     const call = backend.call.bind(backend)
     backend.call = async (request) => {
       const response = await call(request)
-      return response?.pending ? { ...response, thread_id } : response
+      return response?.pending ? { ...response, execution_id } : response
     }
     await assert.rejects(setup(backend, execResponses()).runtime.start(), { code: 'invalid_tool_result' })
     assert.equal(backend.waits.length, 0)
@@ -425,7 +425,7 @@ test('只有 nodes.exec 可以返回 pending', async () => {
   const call = backend.call.bind(backend)
   backend.call = async (request) =>
     request.operation === 'call_tool'
-      ? { pending: true, thread_id: 'thread-1', version: 0, wait_remaining_ms: 30_000, wait_protocol: 1 }
+      ? { pending: true, execution_id: 'thread-1', version: 0, wait_remaining_ms: 30_000, wait_protocol: 1 }
       : call(request)
   await assert.rejects(setup(backend).runtime.start(), { code: 'invalid_tool_result' })
   assert.equal(backend.events.at(-1)?.kind, 'assistant')
@@ -446,7 +446,7 @@ test('Thread 版本允许为零，亚毫秒运行预算将本地等待取整为 
   await setup(backend, execResponses()).runtime.start()
   assert.deepEqual(
     backend.threadPolls().map(({ request }) => request.payload),
-    [{ thread_id: 'exec-thread-1', after_version: 0, wait_ms: 1 }],
+    [{ execution_id: 'exec-thread-1', after_version: 0, wait_ms: 1 }],
   )
   assert.deepEqual(backend.waits.at(-1).payload, { finish_wait: true })
 })
@@ -509,7 +509,7 @@ test('Thread 变化通知可无 version，停止结果由中心保存后返回�
   backend.resultStatus = 'stopped'
   backend.onPoll = async () => {
     backend.now += 1_000
-    return { reason: 'thread_changed' }
+    return { reason: 'execution_changed' }
   }
   const fixture = setup(backend, execResponses())
   await fixture.runtime.start()
@@ -549,7 +549,7 @@ test('nodes.exec 工具声明等待范围、默认时限和执行权限', () => 
   assert.match(messages[0].content, /通过 nodes.exec 管理环境/)
   assert.match(messages[0].content, /退出 Runtime 不停止已开启的 Thread/)
   assert.match(messages[0].content, /不向用户已停止或归档的 Thread 继续发消息，除非用户在对话里要求/)
-  assert.match(definition.description, /结果可用 threads.read 查询/)
+  assert.match(definition.description, /结果可用 executions.get 查询/)
 })
 
 test('nodes.exec pending 期间轮询，结果保存后继续模型', async () => {

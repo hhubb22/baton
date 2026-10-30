@@ -4,6 +4,7 @@ import type {
   AgentKind,
   Device,
   Enrollment,
+  Execution,
   FilePreview,
   FileReadOptions,
   FolderListing,
@@ -30,11 +31,11 @@ import type {
 } from './types'
 
 // 数据变化按主题通知；带对象的通知只刷新该对象及共享列表。
-export type Topic = 'session' | 'devices' | 'projects' | 'threads' | 'messages' | 'files' | 'operations'
+export type Topic = 'session' | 'devices' | 'projects' | 'threads' | 'messages' | 'files' | 'operations' | 'executions'
 
 export interface ChangeEvent {
   topics: Topic[]
-  target?: { type: 'thread' | 'project'; id: ID }
+  target?: { type: 'thread' | 'project' | 'execution'; id: ID }
   browserEvent?: BrowserEvent
 }
 
@@ -87,7 +88,9 @@ export interface BatonClient {
   listProjectMemory(projectId: ID): Promise<MemoryNote[]>
   getMemoryStatus(projectId: ID): Promise<MemoryWorkStatus>
   listThreads(): Promise<Thread[]>
-  listProjectExecutions?(projectId: ID): Promise<Thread[]>
+  listProjectExecutions?(projectId: ID): Promise<Execution[]>
+  getExecution?(executionId: ID): Promise<Execution>
+  stopExecution?(executionId: ID): Promise<Execution>
   getThread(threadId: ID): Promise<Thread>
   listMessages(threadId: ID): Promise<Message[]>
   // 客户端支持已读状态时，在消息显示后清除未读标记。

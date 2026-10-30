@@ -112,7 +112,6 @@ type Phase = { phase: OperationPhase; detail?: string | null }
 type ThreadAPI = Pick<
   BatonClient,
   | 'listThreads'
-  | 'listProjectExecutions'
   | 'getThread'
   | 'listMessages'
   | 'createThread'
@@ -209,13 +208,7 @@ function mapThread(t: ThreadDTO, events: EventDTO[]): Thread {
     unknown: 'unknown',
     archived: 'archived',
   }
-  if (
-    t.agent_type !== 'pi' &&
-    t.agent_type !== 'codex' &&
-    t.agent_type !== 'kiro' &&
-    t.agent_type !== 'cursor' &&
-    t.agent_type !== 'shell'
-  ) {
+  if (t.agent_type !== 'pi' && t.agent_type !== 'codex' && t.agent_type !== 'kiro' && t.agent_type !== 'cursor') {
     throw new ClientError('invalid', `Unsupported thread agent: ${t.agent_type}`)
   }
   const latestStop = events.findLastIndex(
@@ -237,13 +230,12 @@ function mapThread(t: ThreadDTO, events: EventDTO[]): Thread {
     pendingQuestions: t.pending_questions ?? [],
     questionAnswers: t.question_answers ?? [],
     id: t.id,
-    executionReason: t.agent_type === 'shell' ? t.status_reason : undefined,
     originConversationId: t.origin_conversation_id,
     originToolCallId: t.origin_tool_call_id,
     title: t.title || first?.split('\n')[0].slice(0, 120) || t.working_directory || t.id,
     deviceId: t.node_id,
     folder: t.working_directory,
-    agent: t.agent_type === 'shell' ? null : t.agent_type,
+    agent: t.agent_type,
     model: t.next_model || t.model,
     thinking: t.next_thinking ?? null,
     runtimeMode: t.runtime_mode,
@@ -649,16 +641,12 @@ export function createThreadAPI(
         return null
     }
   }
-  async function listThreads(projectId?: string) {
+  async function listThreads() {
     const all: ThreadDTO[] = []
     const cursors = new Set<string>()
     let cursor = ''
     do {
       const query = new URLSearchParams({ limit: '100' })
-      if (projectId) {
-        query.set('project_id', projectId)
-        query.set('kind', 'execution')
-      }
       if (cursor) query.set('cursor', cursor)
       const page = await ctx.request<{ threads: ThreadDTO[]; next_cursor?: string }>(`${base}?${query}`)
       all.push(...page.threads)
@@ -675,7 +663,6 @@ export function createThreadAPI(
       return mapThread(updated, await timeline(threadId))
     },
     listThreads: () => listThreads(),
-    listProjectExecutions: (projectId) => listThreads(projectId),
     async getThread(threadId) {
       const { t, events } = await readThread(threadId)
       return mapThread(t, events)

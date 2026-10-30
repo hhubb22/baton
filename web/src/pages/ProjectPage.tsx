@@ -2,6 +2,7 @@ import * as stylex from '@stylexjs/stylex'
 import { SyncStatus } from '../app/SyncStatus'
 import { ProjectRecovery } from '../app/ProjectRecovery'
 import { ProjectMemory } from '../app/ProjectMemory'
+import { ExecutionDetail, executionStatus } from '../app/ExecutionDetail'
 import { ArchivedNotice, ProjectSettings } from '../app/ProjectSettings'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
@@ -59,6 +60,7 @@ import {
 import type {
   Delivery,
   Device,
+  Execution,
   EntryThreads,
   MemoryNote,
   ProcessStep,
@@ -406,7 +408,7 @@ function ProcessItem({
 }: {
   step: ProcessStep
   devices: Device[]
-  executions: Thread[]
+  executions: Execution[]
   onOpen: (id: string) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -456,13 +458,7 @@ function ProcessItem({
         <div {...stylex.props(styles.stepDetail)}>
           {execution && (
             <button type="button" onClick={() => onOpen(execution.id)}>
-              查看执行详情 ·{' '}
-              {execution.status === 'unknown'
-                ? '结果未知'
-                : threadView(
-                    execution,
-                    devices.find((item) => item.id === execution.deviceId),
-                  ).status.label}
+              查看执行详情 · {executionStatus[execution.status]}
             </button>
           )}
           {isCommand && (
@@ -503,7 +499,7 @@ function ProcessLine({
 }: {
   steps: ProcessStep[]
   devices: Device[]
-  executions: Thread[]
+  executions: Execution[]
   onOpen: (id: string) => void
   children?: ReactNode
 }) {
@@ -639,7 +635,6 @@ function ThreadFailure({
   const detail = useThread(threadId)
   thread = detail.data ?? thread
   const unknown = cause === 'unknown'
-  const executionUnknown = unknown && thread?.agent === null
   const agent = thread?.agent ? agentNames[thread.agent] : '助手'
   return (
     <button
@@ -651,15 +646,11 @@ function ThreadFailure({
       <Icon name="threads" size={16} style={styles.threadIcon} />
       <span {...stylex.props(styles.threadTitle, text.truncate)}>{thread?.title ?? 'Thread'}</span>
       <span {...stylex.props(text.caption, styles.failureStatus, statusTextStyle(unknown ? 'attention' : 'danger'))}>
-        {unknown ? (executionUnknown ? '无法确认执行结果' : thread ? '无法确认送达' : '无法确认结果') : '没有送达'}
+        {unknown ? (thread ? '无法确认送达' : '无法确认结果') : '没有送达'}
         <Icon name="chevron-right" size={14} />
       </span>
       <span {...stylex.props(styles.failureReason)}>
-        {executionUnknown
-          ? '命令可能已经产生副作用，助手不会自动重发。'
-          : unknown && !thread
-            ? '打开 Thread 查看原因。'
-            : failureReasons[cause](agent)}
+        {unknown && !thread ? '打开 Thread 查看原因。' : failureReasons[cause](agent)}
       </span>
     </button>
   )
@@ -756,18 +747,24 @@ function Overview({
   project,
   devices,
   threads,
+  executions,
+  executionsError,
   memory,
   onOpenThread,
+  onOpenExecution,
   tab,
   onTabChange,
 }: {
   project: Project
   devices: Device[]
   threads: Thread[]
+  executions: Execution[]
+  executionsError: boolean
   memory: MemoryNote[] | undefined
   onOpenThread: (threadId: string) => void
-  tab: 'threads' | 'memory'
-  onTabChange: (tab: 'threads' | 'memory') => void
+  onOpenExecution: (id: string) => void
+  tab: 'threads' | 'memory' | 'executions'
+  onTabChange: (tab: 'threads' | 'memory' | 'executions') => void
 }) {
   const [showAll, setShowAll] = useState(false)
   const [folded, setFolded] = useState<string[]>([])
@@ -854,6 +851,7 @@ function Overview({
         onChange={onTabChange}
         options={[
           { value: 'threads', label: '对话', count: live.length },
+          { value: 'executions', label: '执行', count: executions.length },
           { value: 'memory', label: '记忆', count: memory?.length ?? 0 },
         ]}
       />
@@ -901,6 +899,23 @@ function Overview({
         </>
       )}
       {tab === 'memory' && <ProjectMemory key={project.id} project={project} />}
+      {tab === 'executions' && (
+        <section aria-label="执行列表">
+          {executionsError && <p role="alert">无法加载执行列表，请稍后重试。</p>}
+          {!executionsError && executions.length === 0 && <p {...stylex.props(text.small, styles.faint)}>暂无执行</p>}
+          {executions.map((execution) => (
+            <button
+              key={execution.id}
+              type="button"
+              onClick={() => onOpenExecution(execution.id)}
+              {...stylex.props(text.small, styles.overviewRow, focusRing.ring)}
+            >
+              <span {...stylex.props(styles.threadTitle, text.truncate)}>{execution.command}</span>
+              <span>{executionStatus[execution.status]}</span>
+            </button>
+          ))}
+        </section>
+      )}
     </aside>
   )
 }
@@ -1047,7 +1062,18 @@ export function ProjectPage() {
       void navigate({
         to: '/projects/$projectId',
         params: { projectId },
-        search: (prev: ProjectSearch) => ({ ...prev, thread: threadId }),
+        search: (prev: ProjectSearch) => ({ ...prev, thread: threadId, execution: undefined }),
+      })
+    },
+    [navigate, projectId],
+  )
+  const onOpenExecution = useCallback(
+    (id: string) => {
+      setOverviewState({ projectId, open: true })
+      void navigate({
+        to: '/projects/$projectId',
+        params: { projectId },
+        search: (prev: ProjectSearch) => ({ ...prev, thread: undefined, execution: id }),
       })
     },
     [navigate, projectId],
@@ -1504,7 +1530,7 @@ export function ProjectPage() {
             <span {...stylex.props(text.caption, styles.day)}>{day}</span>
           )}
           {(steps.length > 0 || threadGroups.length > 0) && (
-            <ProcessLine steps={steps} devices={allDevices} executions={executions.data ?? []} onOpen={onOpenThread}>
+            <ProcessLine steps={steps} devices={allDevices} executions={executions.data ?? []} onOpen={onOpenExecution}>
               {threadGroups.map((threads, i) => (
                 <ThreadCard
                   key={i}
@@ -1700,18 +1726,30 @@ export function ProjectPage() {
       </Page>
       {
         <ResizablePane
-          key={search.thread ? 'thread' : 'overview'}
+          key={search.thread || search.execution ? 'detail' : 'overview'}
           label="调整项目面板宽度"
-          storageKey={search.thread ? 'baton.width.project-thread' : 'baton.width.project-overview'}
-          defaultWidth={search.thread ? 440 : 320}
+          storageKey={search.thread || search.execution ? 'baton.width.project-thread' : 'baton.width.project-overview'}
+          defaultWidth={search.thread || search.execution ? 440 : 320}
           min={280}
           max={800}
           reserve={400}
           edge="left"
-          floating={!search.thread}
-          open={Boolean(search.thread) || overviewOpen}
+          floating={!search.thread && !search.execution}
+          open={Boolean(search.thread || search.execution) || overviewOpen}
         >
-          {search.thread ? (
+          {search.execution ? (
+            <ExecutionDetail
+              id={search.execution}
+              projectId={projectId}
+              onClose={() =>
+                void navigate({
+                  to: '/projects/$projectId',
+                  params: { projectId },
+                  search: (prev: ProjectSearch) => ({ ...prev, execution: undefined }),
+                })
+              }
+            />
+          ) : search.thread ? (
             <ThreadDetail
               key={search.thread}
               threadId={search.thread}
@@ -1728,14 +1766,17 @@ export function ProjectPage() {
               project={project}
               devices={allDevices}
               threads={projectThreads}
+              executions={executions.data ?? []}
+              executionsError={executions.isError && !executions.data}
               memory={memory.data}
               onOpenThread={onOpenThread}
-              tab={search.view === 'memory' ? 'memory' : 'threads'}
+              onOpenExecution={onOpenExecution}
+              tab={search.view ?? 'threads'}
               onTabChange={(tab) =>
                 void navigate({
                   to: '/projects/$projectId',
                   params: { projectId },
-                  search: (prev: ProjectSearch) => ({ ...prev, view: tab === 'memory' ? 'memory' : undefined }),
+                  search: (prev: ProjectSearch) => ({ ...prev, view: tab === 'threads' ? undefined : tab }),
                 })
               }
             />

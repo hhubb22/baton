@@ -1047,7 +1047,7 @@ export function ThreadDetail({
                     device={device}
                     devices={deviceList}
                     reply={reply}
-                    command={thread.agent === null}
+                    command={false}
                     latest={message.id === latestReplyId}
                     outputGap={message === liveReply && output?.chunks.some((chunk) => chunk.kind === 'gap')}
                     traceInMessage={message.workerTurnSeq === undefined || !activityTurns.has(message.workerTurnSeq)}
@@ -1217,7 +1217,7 @@ export function ThreadDetail({
         onClose={() => setConfirm(null)}
         onConfirm={onStop}
         submitting={stop.isPending}
-        canStop={thread.agent === null || !!agent?.abilities.stop}
+        canStop={!!agent?.abilities.stop}
         agentName={agentName}
         deviceName={name}
         waiting={waiting}
@@ -1366,7 +1366,7 @@ function ArchiveDialog({
   finalFocus: FinalFocus
 }) {
   const running = thread.status === 'running' || !!thread.starting || !!thread.resumePending
-  if (running && thread.agent !== null && !agent?.abilities.stop) {
+  if (running && !agent?.abilities.stop) {
     return (
       <Dialog
         open={open}

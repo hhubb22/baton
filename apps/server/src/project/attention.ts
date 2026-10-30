@@ -1,6 +1,7 @@
 import type * as SqlClient from 'effect/sql/SqlClient'
 
-export const activeInputSQL = (sql: SqlClient.SqlClient) => sql`('user_message','turn_ended','thread_message_failed')`
+export const activeInputSQL = (sql: SqlClient.SqlClient) =>
+  sql`('user_message','turn_ended','thread_message_failed','execution.finished')`
 
 export const recoveryWorkSQL = (sql: SqlClient.SqlClient) => sql`(
  EXISTS(SELECT 1 FROM project_agent_input_queue q WHERE q.agent_id=a.id AND delivered_seq IS NULL AND source_type IN ${activeInputSQL(sql)})

@@ -11,7 +11,6 @@ import * as threads from './index.ts'
 import { digest, sessionCSRF } from '../auth.ts'
 import { httpApplication } from '../http/index.ts'
 import { CredentialSigner } from '../nodes.ts'
-import { activitySnapshot } from '../desktop-notifications.ts'
 
 type Run = TestDatabase['run']
 async function fixture(run: Run, thinking = false, runtimeMode?: P.RuntimeMode) {
@@ -1391,7 +1390,7 @@ it('rejects revoked or expired source before committing business reports', () =>
     })
   }))
 
-it('paginates conversations separately from shell executions and preserves execution details', () =>
+it('paginates conversations', () =>
   withTestDatabase(async ({ run }) => {
     const f = await fixture(run)
     const first = (await f.create()).thread
@@ -1404,28 +1403,10 @@ it('paginates conversations separately from shell executions and preserves execu
         }),
       )
     ).thread
-    const shell = (
-      await run(
-        threads.create(f.employee, {
-          ...f.input,
-          client_thread_id: randomUUID(),
-          message: { ...f.input.message, client_message_id: randomUUID() },
-        }),
-      )
-    ).thread.id
-    await run(
-      query(
-        "UPDATE threads SET agent_type='shell',status='running',last_activity_at=clock_timestamp()+interval '1 minute' WHERE id=$1",
-        shell,
-      ),
-    )
     const page1 = await run(threads.list(f.employee, { limit: '1' }))
     expect(page1.threads).toHaveLength(1)
     expect(page1.next_cursor).toBeDefined()
     const page2 = await run(threads.list(f.employee, { limit: '1', cursor: page1.next_cursor! }))
     expect(new Set([...page1.threads!, ...page2.threads!].map((t) => t.id))).toEqual(new Set([first.id, second.id]))
     expect(page2.next_cursor).toBeUndefined()
-    expect((await run(threads.list(f.employee, { kind: 'execution' }))).threads!.map((t) => t.id)).toEqual([shell])
-    expect((await run(threads.view({ employeeId: f.employee }, shell))).id).toBe(shell)
-    expect((await run(activitySnapshot(f.employee))).running_count).toBe(0)
   }))

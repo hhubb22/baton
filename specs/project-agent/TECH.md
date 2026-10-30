@@ -6,7 +6,7 @@ Basis: [PRODUCT.md](PRODUCT.md) PA-01～PA-26；[Baton TECH](../baton/TECH.md)�
 
 ## Context
 
-Baton 的执行单位是 Thread：设备上的一个原生 Agent 会话，由 Session Worker 维护消息队列、Turn 边界和回复账本，中心保存 Thread 记录和每条回复（[Baton TECH](../baton/TECH.md)「Thread 与 Turn」）。节点只主动连接 Gateway，单条控制消息上限 256 KiB。
+Baton 的 Thread 对应设备上的一个原生 Agent 会话，由 Session Worker 维护消息队列、Turn 边界和回复账本，中心保存 Thread 记录和每条回复（[Baton TECH](../baton/TECH.md)「Thread 与 Turn」）。Project Agent 直接发起的命令以独立 Execution 记录和运行。节点只主动连接 Gateway，单条控制消息上限 256 KiB。
 
 Project Agent 是比 Thread 存在更久的协调者。它的运行位置每次都可能不同，它开的 Thread 结束一轮时它可能不在运行。所以它的对话、记忆和待处理输入都放在 Coordinator，运行时只是一个按需启动的 Runtime 进程。它对 Thread 的操作走和员工相同的 Store 入口，只是操作者记为 Project Agent。
 
@@ -70,7 +70,7 @@ batond 通过 Runtime 命令追加 `run` 启动进程，工作目录是私有空
 
 Runtime 与宿主通过专用 stdio 交换逐行 JSON：Runtime 在 stdout 发送 `{id, request}`，在 stdin 接收 `{id, result}`，单帧最多 192 KiB，最多 8 个请求在途。运行身份由专用管道绑定，batond 覆盖请求身份。`poll_wake` 的 `wait_ms` 为 1～25000，使 180 秒闲置和 15 分钟上限在最后一次等待时准确结束。
 
-bootstrap 顶层的 `local_wait_protocol:1` 表示 batond 支持按 Thread 版本等待。等待的 payload 为 `{thread_id,after_version,wait_ms}`，仅允许该 run 已从中心响应绑定的 Thread；返回 `{reason:"thread_changed"|"timeout",version}`。版本提示通过 `project_run_wake.thread_updates` 传送，相同版本、旧 epoch 和无关输入不唤醒等待者。版本缓存与广播通道由同一互斥区保护，每个 run 最多保留 64 个绑定，工具结果返回后释放。普通闲置 `poll_wake` 继续使用原有通用通知。
+bootstrap 顶层的 `local_wait_protocol:1` 表示 batond 支持按 Execution 版本等待。等待的 payload 为 `{execution_id,after_version,wait_ms}`，仅允许该 run 已从中心响应绑定的 Execution；返回 `{reason:"execution_changed"|"timeout",version}`。版本提示通过 `project_run_wake.execution_updates` 传送，相同版本、旧 epoch 和无关输入不唤醒等待者。版本缓存与广播通道由同一互斥区保护，每个 run 最多保留 64 个绑定，工具结果返回后释放。普通闲置 `poll_wake` 继续使用原有通用通知。
 
 `call_tool` 的请求字段为 `tool_call_id`、`tool_name`、`arguments` 和 `last_seq`，成功返回保存的 `tool_result` Event。工具定义见第 7 节，工具状态不存于本地控制目录。
 
@@ -107,7 +107,8 @@ Runtime 进程的工作目录是一个空的控制目录。pi-agent-core 本身�
 | `user_message` | 主动 | 用户在主对话发送的消息，`content` 与可空的 `reference` 分开保存；API 拒绝超过 64 KiB 的正文 | 正文和引用合计的 JSON ≤ 72 KiB |
 | `thread_reply` | 被动 | Project Agent 开启的一轮里，Agent 的一条回复（第 9 节） | 40 KiB |
 | `thread_message_failed` | 主动 | Project Agent 的消息在 Turn 开始前因模型选择失败而撤回，包含 Thread ID、消息 ID、工具调用 ID 和原因（第 9 节） | 40 KiB |
-| `turn_ended` | 主动 | Project Agent 开启的一轮结束；shell Thread 的这一条带命令输出（第 9、10 节） | 4 KiB；带命令输出时 72 KiB |
+| `turn_ended` | 主动 | Project Agent 开启的一轮结束 | 4 KiB |
+| `execution.finished` | 主动 | 命令执行终态、退出码、输出摘要和完整输出引用 | 72 KiB |
 | `memory_updated` | 被动 | 用户在界面上新建或修改记忆（第 6.4 节） | 1 KiB |
 | `project_updated` | 被动 | 用户修改 Project 标题或目标（第 6.1 节） | 4 KiB |
 
@@ -142,7 +143,7 @@ Project 消息的 HTTP 请求、响应和输入队列 payload 使用独立的 `r
 
 **停止。** Project 被暂停或归档、运行所在节点被吊销、员工在界面上停止运行时，Coordinator 在同一事务作废租约（`lease_epoch` 不变，清空 `lease_run_id`）并保存停止意图，独立发送 `project_run_stop`。batond 收到后停止 Runtime，已结束的运行补送原清理确认。自然 `finish` / `report_failure` 给节点 2 秒主动清理确认宽限；其他停止立即到期。只有 `stopped` 回执确认清理，业务终态和新运行租约保持不变。停止重试只查询待确认索引，不与 start / wake 共用批次。即使停止消息没有送达，旧实例的下一次请求也会因租约失效被拒绝。
 
-**唤醒。** 主动输入与业务变化同事务保存 `wake_required` 和到期时间，来源去重不重新打开通知。有效 running run 的每条 `project_run_wake` 最多包含 32 个 `input_ids`，并从这些输入构造 `thread_updates`。batond 合并通用唤醒和 Thread 版本后，通过容量 64 的异步回执队列发送 `wake_received`；队列满或回执丢失时由中心退避重发。接收确认只按本条消息的输入 ID 清除通知需求，不设置 `delivered_seq`，不追加对话事件，也不续租。同一轮执行期间，新消息可以保持未认领且已停止重复通知。
+**唤醒。** 主动输入与业务变化同事务保存 `wake_required` 和到期时间，来源去重不重新打开通知。有效 running run 的每条 `project_run_wake` 最多包含 32 个 `input_ids`，并从执行输入构造 `execution_updates`。batond 合并通用唤醒和 Execution 版本后，通过容量 64 的异步回执队列发送 `wake_received`；队列满或回执丢失时由中心退避重发。接收确认只按本条消息的输入 ID 清除通知需求，不设置 `delivered_seq`，不追加对话事件，也不续租。同一轮执行期间，新消息可以保持未认领且已停止重复通知。
 
 新 run 在 Agent 锁下重新提示全部未认领主动输入，旧 run 的迟到回执不能清除新 run 的通知。通知确认不使用 sequence 最大值作为提交水位。只有被动输入时不发送 wake。Runtime 每轮结束主动领取，`nodes.exec` 的等待仍有最多 25 秒本地等待后的持久状态补读；通知不代替业务结果。完整字段和故障恢复规则见[控制面调度设计](../control-dispatch-reliability/TECH.md)。
 
@@ -176,7 +177,7 @@ Project 消息的 HTTP 请求、响应和输入队列 payload 使用独立的 `r
 | `input` 或 `tool_result` | 模型回复还没保存就崩溃 | 调用 `continue()`，重新请求模型 |
 | `compaction` | 轮内或收尾压缩后退出 | 查看最后一条非压缩事件，仍为未完成轮次时继续恢复，否则领取输入 |
 
-重新发出的 `call_tool` 不会重复产生副作用：如果该 `tool_call_id` 已有 `tool_result`，Coordinator 直接返回已保存的结果；如果没有，说明原来的事务没有提交，副作用也没有发生，这次正常执行。这依赖第 7 节的规则：所有工具的中心状态变化和 `tool_result` 在同一个事务里提交，`nodes.exec` 的等待结果除外。`threads.create`、`threads.send` 和 `nodes.exec` 的副作用发生在设备上，事务里只保存 Thread 和消息意图，靠 `client_message_id` 的唯一性保证只发出一次（第 9、10 节）。
+重新发出的 `call_tool` 如果已有 `tool_result`，Coordinator 直接返回已保存的结果。普通工具的中心状态变化和结果在同一事务提交；`threads.create`、`threads.send` 保存 Thread、消息意图和 outbox，以 `client_message_id` 去重。`nodes.exec` 单独持久保存 Execution 与等待截止时间，恢复时按原工具调用身份复用执行，再等待结果（第 9、10 节）。
 
 模型请求失败时，Runtime 在本次运行内重试 3 次，间隔 5、15、45 秒。仍然失败就调用 `report_failure`，Coordinator 把 `failure_count` 加一，设置 `next_attempt_at`（依次推迟 1、5、15 分钟，此后保持 15 分钟），本次运行结束，对话保持 active。`failure_count` 达到 3 时 Project 显示故障（第 11 节），界面保留最后的错误；退避到期后扫描继续放置。新的用户消息在 Agent 锁下写入，并清除退避；同一消息 ID 的重发不清除退避。用户通过 `POST /api/v1/projects/{id}/retry` 显式重试后清零。`POST /api/v1/projects/{id}/stop` 作废当前租约并结束这次运行；未领取的主动输入仍可在后续扫描时触发新的运行。这两个接口沿用员工会话、同源和 CSRF 校验，正文为 JSON `{}`，拒绝未知字段和查询参数，成功返回 `200 {"ok":true}`，其他员工的 Project 返回 404。任何一次 assistant 消息保存成功都会把 `failure_count` 清零，清除退避和错误。失败的模型输出不写入对话；租约失效、未解决的工具调用和副作用去重仍分别由原有检查保护。
 
@@ -254,11 +255,14 @@ Project 标题或目标被修改后，新的系统提示词从下一次压缩起
 | `threads.get` | 只读 | 读取一个 Thread 的状态、当前 Turn 和待发消息 | 自身 |
 | `threads.read` | 只读 | 按 Turn 读取消息和回复正文，每个 Turn 附过程项数量 | 自身 |
 | `threads.trace` | 只读 | 按 `thread_id`、`worker_turn_seq` 和可选 `cursor` 读取一轮的过程项，与浏览器 trace 接口的数据和分页相同，不脱敏（Baton TECH「过程记录」） | 自身 |
-| `nodes.exec` | 写入 | 在开启了命令执行的节点上执行一条命令，参数见第 10 节 | `threads.read` |
+| `nodes.exec` | 写入 | 在开启了命令执行的节点上执行一条命令，参数见第 10 节 | `executions.get` |
+| `executions.list` / `executions.get` | 只读 | 读取本 Project 的执行列表或状态与输出摘要 | 同名工具 |
+| `executions.stop` | 写入 | 请求停止执行，等待设备确认进程回收 | `executions.get` |
+| `executions.output` | 只读 | 按输出引用和字节游标读取设备保存的完整输出 | 同名工具 |
 
 单个工具输出不超过 32 KiB，超出时返回截断标记和继续读取的方式。
 
-每个 `call_tool` 请求包含 `tool_call_id`、工具名和参数。Coordinator 在一个事务里依次：校验租约；确认这个 `tool_call_id` 出现在对话最后一条 assistant 消息里，且还没有对应的 `tool_result`；执行工具，包括写入类工具的业务变更；把结果写成 `tool_result` 事件。参数不合法或业务拒绝时，也写一条 `is_error` 的结果，同一个调用不会被反复尝试。`nodes.exec` 是唯一的例外：事务里只新建 shell Thread，`tool_result` 在等待结束后写入（第 10 节）。
+每个 `call_tool` 请求包含 `tool_call_id`、工具名和参数。Coordinator 在一个事务里依次：校验租约；确认这个 `tool_call_id` 出现在对话最后一条 assistant 消息里，且还没有对应的 `tool_result`；执行工具，包括写入类工具的业务变更；把结果写成 `tool_result` 事件。参数不合法或业务拒绝时，也写一条 `is_error` 的结果，同一个调用不会被反复尝试。`nodes.exec` 的事务先新建 Execution，`tool_result` 在等待结束后写入（第 10 节）。
 
 「`tool_call_id` 必须出现在已保存的 assistant 消息里」这条检查，保证每个工具调用在执行前都已经落盘。崩溃恢复时，Runtime 看到的工具调用和 Coordinator 执行过的工具调用总是一致的。
 
@@ -320,17 +324,17 @@ batond 通过 Gateway 的控制队列传送 `node.runtime_report`，正文为 `{
 
 扫描最多向下 4 层（登记根为第 0 层）、读取 4096 个目录条目、记录 128 个仓库。每批读取至多 64 个条目，不跟随遍历中的符号链接，不进入 `.git`。Git 配置最多读取 16 KiB，通过 `git config --no-includes --file - --get remote.origin.url` 解析，每次最多 200 ms，不读取 include 或全局配置。worktree 的 `.git` 和 `commondir` 只允许指向同一登记根内的元数据；指向根外时仍登记仓库路径，省略 origin。origin 仅保留主机和仓库路径，去掉用户信息、端口、查询和片段，忽略本地路径及不支持的传输格式。扫描、读取或容量受限时报告带 `truncated: true`；超出报告容量时先移除末尾仓库，再裁剪模型列表并优先保留默认模型，最后移除末尾目录。发送前采用带缩进的 JSON 计量，给 PostgreSQL `jsonb::text` 的空格留出余量，报告和数据库文本均不超过 64 KiB。
 
-`batond project-exec --enabled=true|false [--shell 路径] [--data-dir 目录]` 原子保存本机 `project-exec.json`。必须显式给出开关，初始值为关闭；默认 shell 在 Windows 为 `pwsh`，其他系统采用 `SHELL`，未设置时为 `/bin/sh`。配置损坏或权限检查失败时上报关闭。浏览器通过 `PUT /api/v1/nodes/{id}/project-exec` 提交 `{enabled}`，Coordinator 校验归属与当前已同步连接，再经 Gateway 发送 `node.project_exec_set`。设备在同一文件锁内保留本机 shell、原子保存并回读开关，以 `node.project_exec_result` 返回 `operation_id`、`ok` 和确认后的 `exec`（含可取得的 `user`）。Coordinator 核对操作、连接、开关值及吊销状态后才返回成功；超时不记作成功，也不自动重发，客户端重新读取设备报告。配置事实随后由能力报告同步。Session Worker 在启动命令前重新读取开关。CLI 和节点页面在开启前说明当前用户权限、任意命令、没有沙箱和注入风险。
+`batond project-exec --enabled=true|false [--shell 路径] [--data-dir 目录]` 原子保存本机 `project-exec.json`。必须显式给出开关，初始值为关闭；默认 shell 在 Windows 为 `pwsh`，其他系统采用 `SHELL`，未设置时为 `/bin/sh`。配置损坏或权限检查失败时上报关闭。浏览器通过 `PUT /api/v1/nodes/{id}/project-exec` 提交 `{enabled}`，Coordinator 校验归属与当前已同步连接，再经 Gateway 发送 `node.project_exec_set`。设备在同一文件锁内保留本机 shell、原子保存并回读开关，以 `node.project_exec_result` 返回 `operation_id`、`ok` 和确认后的 `exec`（含可取得的 `user`）。Coordinator 核对操作、连接、开关值及吊销状态后才返回成功；超时不记作成功，也不自动重发，客户端重新读取设备报告。配置事实随后由能力报告同步。Execution Worker 在启动命令前重新读取开关。CLI 和节点页面在开启前说明当前用户权限、任意命令、没有沙箱和注入风险。
 
 `baton-project-runtime probe` 返回 Runtime 版本、订阅和 API 连接状态及模型目录。订阅 OAuth 具备 access/refresh 时报告 available；API 连接有非空密钥时报告 available，缺密钥时报告 login_required。探测只读取本机配置，不请求在线目录或验证授权。单台设备最多报告 3 个订阅和 29 个 API 连接。Runtime 将报告限制在 48 KiB，batond 按 64 KiB 设备报告预算继续裁剪模型并设置 `models_truncated`；网页编辑被裁剪连接时通过设备管理 RPC 读取完整元数据，密钥不进入回执。设备私有配置 `project-runtime.json` 的 `probeTimeoutMs` 默认 5000 毫秒，`probeMaxOutputBytes` 默认 64 KiB，`maxConcurrentProjects` 默认 4；`maxOutputTokens` 和 `maxModelCalls` 分别默认为 32000 和 64，限制输出 token 与每次运行的模型调用次数。临时探测失败且运行入口、凭据文件元数据不变时可复用上次报告，并标记 stale 与 probe_error。
 
 ### 9. Thread 操作与回复回收
 
-**新建。** `threads.create` 在 `call_tool` 的事务里调用与员工 API 相同的 Store 入口：`client_thread_id` 为 `pa:{conversation_id}:{tool_call_id}`，第一条消息的 `client_message_id` 为 `pa:{conversation_id}:{tool_call_id}:0`，并写入 `project_id`、`origin_conversation_id`、`origin_tool_call_id`。目标节点、目录、Agent 和模型的校验与员工新建相同（Baton R-07）；`agent_type` 不能是 `shell`，命令只能通过 `nodes.exec` 执行。事务只保存 Thread、消息意图和 outbox，设备收到后才开始执行；工具结果返回 Thread ID 和状态，不等待回复。
+**新建。** `threads.create` 在 `call_tool` 的事务里调用与员工 API 相同的 Store 入口：`client_thread_id` 为 `pa:{conversation_id}:{tool_call_id}`，第一条消息的 `client_message_id` 为 `pa:{conversation_id}:{tool_call_id}:0`，并写入 `project_id`、`origin_conversation_id`、`origin_tool_call_id`。目标节点、目录、Agent 和模型的校验与员工新建相同（Baton R-07）；直接命令通过 `nodes.exec` 创建 Execution。事务只保存 Thread、消息意图和 outbox，设备收到后才开始执行；工具结果返回 Thread ID 和状态，不等待回复。
 
 **发消息、停止、归档。** `threads.send` 的 `client_message_id` 为 `pa:{conversation_id}:{tool_call_id}`。目标 Thread 必须属于本 Project。`mode=steer` 在 Agent 不支持时返回 `is_error`。`threads.stop`、`threads.archive` 与员工操作走同一入口，操作者记为 Project Agent。
 
-**撤回与恢复。** `threads.withdraw`、`threads.resume` 在工具事务中先按员工身份锁定目标 Thread 并校验本 Project 归属，再调用中心既有的撤回、恢复入口。撤回只接受 `accepted`、`queued`，已撤回时返回现状，已发送或 `unknown` 时拒绝；待处理的同一消息撤回命令只保存一条。工具返回 `thread_id`、`message_id`、Thread 当前 `status` 和 `read_tool: threads.get`，表示撤回请求已保存，最终消息状态由设备报告确认。恢复要求 Thread 已打开且有存储代次，状态为 `idle`、`stopped` 或 `unknown`，没有归档请求且停止已确认，并通过设备能力与目录权限检查；shell Thread 不支持恢复。已有待处理恢复命令时复用它，返回 Thread ID、当前状态及 `threads.get` 入口，不重发历史消息。两者沿用 `call_tool` 的租约、已保存调用和结果幂等校验。
+**撤回与恢复。** `threads.withdraw`、`threads.resume` 在工具事务中先按员工身份锁定目标 Thread 并校验本 Project 归属，再调用中心既有的撤回、恢复入口。撤回只接受 `accepted`、`queued`，已撤回时返回现状，已发送或 `unknown` 时拒绝；待处理的同一消息撤回命令只保存一条。工具返回 `thread_id`、`message_id`、Thread 当前 `status` 和 `read_tool: threads.get`，表示撤回请求已保存，最终消息状态由设备报告确认。恢复要求 Thread 已打开且有存储代次，状态为 `idle`、`stopped` 或 `unknown`，没有归档请求且停止已确认，并通过设备能力与目录权限检查。已有待处理恢复命令时复用它，返回 Thread ID、当前状态及 `threads.get` 入口，不重发历史消息。两者沿用 `call_tool` 的租约、已保存调用和结果幂等校验。
 
 锁顺序为 `project_agents` → `conversations` → `threads` → `thread_outbox`。员工 API 只锁 `threads` → `thread_outbox`，不形成环。
 
@@ -357,22 +361,24 @@ batond 通过 Gateway 的控制队列传送 `node.runtime_report`，正文为 `{
 
 **参数。** `node_id`；`command`，交给节点上报的 shell 执行；`working_directory`，必须已经存在并位于该节点登记的目录内；`wait_seconds`，0～600，默认 30；`timeout_seconds`，默认 7200。
 
-**实现为一个 shell Thread。** `call_tool` 的事务里新建一个 `agent_type = shell` 的 Thread，第一条消息就是命令，`client_thread_id` 为 `pa:{conversation_id}:{tool_call_id}`，同一个工具调用最多新建一个 Thread、执行一次命令。目标节点的 `exec.enabled` 为假时直接写 `is_error` 结果。shell Thread 只有一个 Turn，命令退出后 Worker 报告一条回复（合并输出，开头和结尾各保留 16 KiB，附退出码和总字节数）和 `turn.ended`，然后 Thread 进入 `stopped`。它不接受第二条消息，也不进入普通对话列表及计数。Project 对话的工具调用显示命令和结果，并可打开执行详情查看状态、输出和停止执行。
+**Execution。** `call_tool` 的事务里新建独立 Execution 和 `execution_outbox` 启动命令，以 `(employee_id, origin_conversation_id, origin_tool_call_id)` 唯一约束去重；同一身份参数不同则拒绝。Execution 保存 Project、设备、命令、目录、执行时限和存储代次。状态为 `pending`、`running`、`completed`、`failed`、`cancelled`、`timed_out`、`unknown`，成功完成要求退出码为 0。停止请求单独保存 `stop_requested_at`，设备确认回收后才能报告 `cancelled`。Thread 列表、通知计数和 Turn 流转只处理 Agent 对话。
 
-**等待。** `call_tool` 返回 `{pending:true, thread_id, version, wait_remaining_ms, wait_protocol:1}`，等待截止时间保存在 `threads.exec_wait_until`，Runtime 重启不会延长它。Runtime 通过 batond 本机的 `poll_wake` 等待 Thread 版本变化或最多 25 秒，再调用短 `wait_tool` 查询。`wait_tool` 的 pending 路径用只读快照校验来源、租约、对话、工具调用和 Thread；需要写结果时按锁顺序重新校验：
+**等待。** `call_tool` 返回 `{pending:true, execution_id, version, wait_remaining_ms, wait_protocol:1}`，等待截止时间保存在 `executions.wait_until`，Runtime 重启不会延长它。Runtime 通过 batond 本机的 `poll_wake` 等待 Execution 版本变化或最多 25 秒，再调用短 `wait_tool` 查询。`wait_tool` 的 pending 路径用只读快照校验来源、租约、对话、工具调用和 Execution；需要写结果时锁定执行记录后重新校验：
 
-- 这一轮已结束：工具结果包含退出码和输出。对应的 `turn_ended` 输入在同一事务标为已投递，`delivered_seq` 指向这条 `tool_result`，避免同一结果出现两次。
-- 仍在执行：工具结果为「仍在执行，Thread ID 为 …，结束后输出会作为新输入送回」。命令继续执行，结束时按第 9 节进入输入队列。
+- 执行已结束：工具结果包含退出码和输出。对应的 `execution.finished` 输入在同一事务标为已投递，`delivered_seq` 指向这条 `tool_result`，避免同一结果出现两次。
+- 仍在执行：工具结果返回当前状态与 `execution_id`。命令继续执行，结束时以 `execution:{id}:finished` 唯一来源键写一条主动输入。
 
 单次运行的时长上限到达时，Runtime 以 `finish_wait=true` 立即结束等待并写入当前状态。
 
-**恢复。** Runtime 在等待期间崩溃时，对话结尾是一个没有结果的 `nodes.exec` 调用。恢复时再次 `call_tool`，Coordinator 按 `(origin_conversation_id, origin_tool_call_id)` 找到已有的 Thread，返回 `pending`。命令不会再执行一次。
+**恢复。** Runtime 在等待期间崩溃时，对话结尾是一个没有结果的 `nodes.exec` 调用。恢复时再次 `call_tool`，Coordinator 按原工具调用身份找到已有的 Execution，继续读取。设备报告按执行 ID、事件 ID 和序号去重，重复事件内容变化则拒绝。中心恢复备份时将未结束的 Execution 标为 `unknown` 并冻结待发命令，等待核对。
 
-**节点上的执行。** `apps/batond/src/agents/shell` 实现 Worker 的 `ThreadAgent`。`send` 在提交 `intent` 之后启动命令（例如 `zsh -lc <command>`、`pwsh -NoProfile -Command <command>`），POSIX 使用独立进程组/watchdog，Windows 使用 PID／创建时间账本与 `taskkill /T /F`。取消与进程树回收分别处理，已发生的副作用不会撤销。Worker 收到 shell Thread 时再读一次本地开关，关闭就以 `thread.open_failed` 拒绝，所以 Coordinator 的能力报告过期也不会执行。
+**节点上的执行。** `apps/batond/src/execution` 在独立进程中管理命令，使用私有 SQLite 账本保存启动意图、停止标记、报告与回执。启动意图持久化后才创建进程；停止先于启动到达时保存停止标记，后续启动不得运行命令。执行前重新读取本地命令开关、验证真实目录边界。POSIX 使用进程组与 watchdog，Windows 使用 PID／创建时间账本与进程树回收。取消不会撤销已发生的副作用。
 
-命令退出后，适配器先把完成记录写入私有 `output.json`（Thread、Turn、退出码、输出，原子替换，读取上限 192 KiB），再交出回复。Worker 崩溃后恢复时，有身份匹配的完成记录就补报回复和 `turn.ended`；没有则 Thread 进入 `unknown`，这一轮以 `agent_exited` 结束。命令退出与完成记录保存之间崩溃仍会落到 `unknown`。完成记录保留到 Session 目录回收。
+命令退出后先持久保存终态和输出引用，再上报中心；重连补发尚未确认的报告。恢复时发现已提交意图而没有终态证据，先回收残留进程，再报告 `unknown`，不自动重跑。执行时限独立于工具等待时限，到期执行进程回收并报告 `timed_out`；回收无法确认则报告 `unknown`。
 
-输出含无效 UTF-8 或不可展示控制字节时，整段保留的首尾字节用 base64 保存，回复元数据标 `encoding: base64`。
+输出摘要保留首尾，含无效 UTF-8 或不可展示控制字节时以 base64 保存并标 `encoding: base64`。完整原始输出保存在设备私有目录，通过 `executions.output` 或 `GET /api/v1/executions/{id}/output` 按字节游标读取。中心验证员工、Project 和输出引用，设备验证执行身份与存储代次。
+
+网页通过 `GET /api/v1/executions?project_id=...` 和 `GET /api/v1/executions/{id}` 查询，`POST /api/v1/executions/{id}/stop` 请求停止。Project 工具记录可打开执行详情，查看状态、退出码、摘要与完整输出。
 
 **安全。** 命令以设备上的用户身份运行，Baton 不提供沙箱，限定工作目录也挡不住命令访问目录之外的内容。Thread 回复和仓库内容都可能包含注入的指令，一旦 Project Agent 被诱导，开启了命令执行的设备上可能被执行任意命令。措施只能限制范围：开关默认关闭、按设备单独开启；每条命令和输出都记录在对话里；命令只能在登记目录下启动。开启开关时，界面说明这些风险。
 

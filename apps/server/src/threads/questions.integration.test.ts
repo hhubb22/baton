@@ -253,25 +253,6 @@ it.each([
   }),
 )
 
-it.each(['completed', 'timeout'] as const)('notifies a shell %s reply once across terminal cleanup reports', (reason) =>
-  withTestDatabase(async ({ run }) => {
-    const f = await fixture(run)
-    await run(query("UPDATE threads SET agent_type='shell' WHERE id=$1", f.thread.id))
-    const ended = f.report('turn.ended', { worker_turn_seq: 1, reason, queue_empty: true })
-    const stopped = f.report('thread.stopped', { reason })
-    await run(threads.processReport(f.source, ended))
-    await run(threads.processReport(f.source, stopped))
-    await run(threads.processReport(f.source, stopped))
-    const { events } = await run(replayNotifications(f.employeeId, '0'))
-    expect(events).toHaveLength(1)
-    expect(events[0]).toMatchObject({
-      thread_id: f.thread.id,
-      kind: reason === 'completed' ? 'turn_ended' : 'turn_stopped',
-      body: reason === 'completed' ? 'Shell finished replying.' : 'Shell stopped unexpectedly: The reply timed out.',
-    })
-  }),
-)
-
 it('notifies a history loss once when it also ends an active reply', () =>
   withTestDatabase(async ({ run }) => {
     const f = await fixture(run)

@@ -177,6 +177,17 @@ it('RL-A08 preserves restored history and memory, requires new authorization and
       await expect(readFile(missingKey)).rejects.toMatchObject({ code: 'ENOENT' })
       await run(Auth.lookupSession(session.token))
 
+      const executionId = randomUUID()
+      await run(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          yield* sql`INSERT INTO executions(id,employee_id,project_id,node_id,origin_conversation_id,origin_tool_call_id,
+          request_hash,command,working_directory,timeout_seconds,storage_generation,wait_until)
+          VALUES(${executionId},${employee.id},${project.id},${identity.node_id},${project.conversation.id},'restore-exec',
+            ${Buffer.from('restore')},'side-effect','/work',7200,'restore-generation',clock_timestamp())`
+          yield* sql`INSERT INTO execution_outbox(execution_id,message_id,action) VALUES(${executionId},${randomUUID()},'start')`
+        }),
+      )
       await run(finalizeRestore(keyPath))
       const state = () =>
         run(
@@ -186,6 +197,8 @@ it('RL-A08 preserves restored history and memory, requires new authorization and
           'session',(SELECT to_jsonb(s) FROM login_sessions s WHERE token_hash=${Auth.digest(session.token)}),
           'credential',(SELECT to_jsonb(c) FROM node_credentials c WHERE id=${identity.credential.id}),
           'presence',(SELECT to_jsonb(p) FROM node_presence p WHERE node_id=${identity.node_id}),
+          'execution',(SELECT to_jsonb(e) FROM executions e WHERE id=${executionId}),
+          'execution_outbox',(SELECT to_jsonb(o) FROM execution_outbox o WHERE execution_id=${executionId}),
           'thread',(SELECT to_jsonb(t) FROM threads t WHERE id=${thread.id}),
           'message',(SELECT to_jsonb(m) FROM thread_messages m WHERE thread_id=${thread.id} AND client_message_id=${uncertainMessage}),
           'outbox',(SELECT to_jsonb(o) FROM thread_outbox o WHERE message_id=${uncertain!.message_id}),
@@ -206,6 +219,8 @@ it('RL-A08 preserves restored history and memory, requires new authorization and
       expect(await run(Threads.view({ employeeId: employee.id }, thread.id))).toMatchObject({ status: 'unknown' })
       expect(finalized[0]).toMatchObject({
         value: {
+          execution: { status: 'unknown' },
+          execution_outbox: { next_attempt_at: 'infinity' },
           message: { status: 'unknown', content: 'This may already have executed' },
           run: { state: 'lost' },
           project: { status: 'paused' },

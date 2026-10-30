@@ -1,10 +1,19 @@
-import { useQueries } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vite-plus/test'
 import { ClientError, type BatonClient, type ChangeEvent } from './client'
 import { createHttpClient } from './http/client'
-import { ClientProvider, keys, useActivity, useMessages, useSession, useThread, useThreads } from './queries'
+import {
+  ClientProvider,
+  keys,
+  useActivity,
+  useMessages,
+  useProjectExecutions,
+  useSession,
+  useThread,
+  useThreads,
+} from './queries'
 import { desktopActivitySnapshot } from './desktop-notifications'
 
 class Socket {
@@ -31,6 +40,51 @@ function wrapperFor(client: BatonClient) {
 }
 
 describe('entity change notifications', () => {
+  it('publishes execution changed messages with their execution identity', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () =>
+      Response.json({
+        employee: { id: 'employee', display_name: 'Alice', must_change_password: false },
+      }),
+    )
+    const client = createHttpClient({ fetch, WebSocket: Socket as unknown as typeof WebSocket })
+    const listener = vi.fn()
+    const unsubscribe = client.subscribe(listener)
+    await client.getSession()
+    Socket.current.receive({ type: 'execution.changed', execution_id: firstId })
+    expect(listener).toHaveBeenCalledWith({ topics: ['executions'], target: { type: 'execution', id: firstId } })
+    unsubscribe()
+  })
+  it('refreshes execution lists and details after execution and project changes', async () => {
+    let publish!: (event: ChangeEvent) => void
+    let status = 'running'
+    const list = vi.fn(async () => [{ id: firstId, status }])
+    const detail = vi.fn(async () => ({ id: firstId, status }))
+    const client = {
+      subscribe: (listener: (event: ChangeEvent) => void) => {
+        publish = listener
+        return () => {}
+      },
+      listProjectExecutions: list,
+      getExecution: detail,
+      getProject: async () => ({ id: secondId }),
+    } as unknown as BatonClient
+    const { result } = renderHook(
+      () => ({
+        list: useProjectExecutions(secondId),
+        detail: useQuery({ queryKey: ['execution', firstId], queryFn: detail }),
+      }),
+      { wrapper: wrapperFor(client) },
+    )
+    await waitFor(() => expect(result.current.detail.data?.status).toBe('running'))
+    status = 'completed'
+    act(() => publish({ topics: ['executions'], target: { type: 'execution', id: firstId } }))
+    await waitFor(() => expect(result.current.list.data?.[0]?.status).toBe('completed'))
+    await waitFor(() => expect(result.current.detail.data?.status).toBe('completed'))
+    status = 'failed'
+    act(() => publish({ topics: ['projects'], target: { type: 'project', id: secondId } }))
+    await waitFor(() => expect(result.current.list.data?.[0]?.status).toBe('failed'))
+    await waitFor(() => expect(result.current.detail.data?.status).toBe('failed'))
+  })
   it('loads all-device activity independently of summary questions and refreshes it after reconnect and changes', async () => {
     let waiting = 1
     const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
@@ -316,24 +370,6 @@ describe('entity change notifications', () => {
     await waitFor(() => expect(result.current[0].data?.map((item) => item.id)).toEqual(['two', 'new']))
     expect(get.mock.calls.map(([id]) => id)).toEqual(['one', 'new', 'one'])
     expect(list).toHaveBeenCalledTimes(1)
-  })
-
-  it('keeps shell executions out of the conversation list after a change event', async () => {
-    let publish!: (event: ChangeEvent) => void
-    const getThread = vi.fn(async () => ({ id: 'shell', agent: null }))
-    const client = {
-      subscribe: (listener: (event: ChangeEvent) => void) => {
-        publish = listener
-        return () => {}
-      },
-      listThreads: async () => [],
-      getThread,
-    } as unknown as BatonClient
-    const { result } = renderHook(() => useThreads(), { wrapper: wrapperFor(client) })
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    act(() => publish({ topics: [], target: { type: 'thread', id: 'shell' } }))
-    await waitFor(() => expect(getThread).toHaveBeenCalled())
-    expect(result.current.data).toEqual([])
   })
 
   it('refreshes connection-dependent topics on nodes.changed and rereads node status', async () => {

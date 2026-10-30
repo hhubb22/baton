@@ -36,6 +36,10 @@ test('固定工具顺序与 Thread 契约一致', () => {
       'threads.read',
       'threads.trace',
       'nodes.exec',
+      'executions.list',
+      'executions.get',
+      'executions.stop',
+      'executions.output',
     ],
   )
   for (const [name, args] of [
@@ -54,6 +58,7 @@ test('固定工具顺序与 Thread 契约一致', () => {
     ['threads.read', { thread_id: 'thread-1', after_turn: 0, through_turn: 1, offset: 0, max_bytes: 32768 }],
     ['threads.trace', { thread_id: 'thread-1', worker_turn_seq: 1 }],
     ['threads.trace', { thread_id: 'thread-1', worker_turn_seq: 1, cursor: 'page-2', offset: 1, max_bytes: 32768 }],
+    ['executions.list', { after_id: 'execution-1', offset: 0, max_bytes: 32768 }],
   ] as const) {
     assert.deepEqual(validate(name, args), args)
   }

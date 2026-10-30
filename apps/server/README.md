@@ -87,7 +87,7 @@ Project 工具 `threads.trace` 使用相同查询，参数为 `thread_id`、`wor
 
 在线且已同步的设备支持目录增删、命令执行授权和订阅设备码登录；HTTP 在设备确认操作标识及保存值后才返回成功。目录、仓库、shell 与订阅状态通过能力报告刷新。文件预览按偏移和版本每次读取最多 64 KiB，网页可继续读取，文件变化时要求重新打开。目录游标可以继续扫描全部条目；POSIX 文件名保留冒号和反斜杠，Windows 保留驱动器与 ADS 防护。符号链接越界、二进制内容和无效游标均被拒绝；祖先目录仅 ctime 变化时丢弃读取并完整重新授权，最多尝试 3 次。
 
-`nodes.exec` 仅由已保存的 Project 工具调用创建单轮 shell Thread，本机开关默认关闭。执行前重新读取本机授权和开关；等待工具结果结束不会停止命令。命令退出后先保存完成证据，再报告输出；缺少可信证据时标记 unknown，保持原命令未重发。设备配置与登录命令见 [节点文档](../batond/README.md#设备目录与模型订阅)。
+`nodes.exec` 由已保存的 Project 工具调用创建独立 Execution，以原对话和工具调用身份去重，本机开关默认关闭。中心通过持久命令与报告跟踪执行，`/api/v1/executions` 提供查询、停止和完整输出入口。设备执行前重新读取授权和开关；工具等待结束后命令继续运行，终态通过一条 `execution.finished` 输入交付。缺少可信完成证据时标记 `unknown`，不自动重跑。设备配置与登录命令见 [节点文档](../batond/README.md#设备目录与模型订阅)。
 
 ## HTTP 契约与追踪
 
@@ -110,7 +110,7 @@ HTTP 接受标准 `traceparent` 和可选 `tracestate`。命令的追踪上下�
 | Project、记忆及历史版本 | 提供 Project 创建与配置、主对话、运行状态和版本冲突响应 |
 | 在线设备授权目录增删、Project 执行授权、订阅登录 | 等待设备保存确认，订阅凭据留在设备 |
 | 文件和附件预览 | 授权根内目录分页和受限文本预览；越界与二进制内容拒绝 |
-| 受限 shell Thread | 仅供 Project `nodes.exec` 使用，要求目标设备本机已开启执行授权 |
+| Execution | 由 Project `nodes.exec` 创建，要求目标设备本机已开启命令执行授权 |
 | Pi、Codex | 节点完成只读认证、版本与模型探测后上报；支持新建、排队、插入、停止、恢复。程序已安装且认证为 valid 或 unknown 时为 `available`，版本未知或其他系统也开放；缺程序或明确未认证时为 `unavailable`，新建返回 HTTP 422，`code:"agent_unavailable"` |
 | Kiro | 节点在上游空会话发现之外运行 `kiro-cli --version`。程序已安装且认证为 valid 或 unknown 时报告 `available`、`create: true`、`resume: true`，网页开放新建与恢复；认证 unknown 提示首次执行由原生程序检查，明确 missing 拒绝。系统、版本、版本超时或不可解析只记入 reason，缺程序为 `unavailable`；不满足准入条件的新建返回 HTTP 422、`code:"agent_unavailable"`。实际回合认证失败以失败结束并向时间线返回固定安全文案，输入保持 sent，Thread 可继续使用；不自动登录、不透传原始错误、不重发；离线验证不证明真实账号授权有效 |
 | Cursor、Kiro steer                                     | HTTP 422，`code:"steer_unsupported"`；同时传模型时为 `model_with_steer`                              |

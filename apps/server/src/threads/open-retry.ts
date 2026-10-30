@@ -5,7 +5,6 @@ import type { Thread } from '@baton/protocol'
 // 这些拒绝发生在 daemon 保存 Worker 配置和投递 open 之前。
 export const canRetryOpen = Effect.fnUntraced(function* (t: Thread) {
   if (
-    t.agent_type === 'shell' ||
     t.opened_at ||
     t.storage_generation ||
     t.last_worker_seq !== 0 ||

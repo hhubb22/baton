@@ -271,25 +271,25 @@ const claimWakes = Effect.fn('claimProjectWakes')(function* (random: () => numbe
     if (!valid.length) continue
     const inputs = yield* sql<{
       id: string
-      payload: { thread_id?: string }
+      payload: { execution_id?: string }
       wake_attempts: number
     }>`SELECT id,payload,wake_attempts FROM project_agent_input_queue WHERE agent_id=${row.agent_id} AND delivered_seq IS NULL AND wake_required AND wake_next_at<=statement_timestamp() ORDER BY wake_next_at,id LIMIT 32 FOR UPDATE SKIP LOCKED`
     if (!inputs.length) continue
     const ids = inputs.map((q) => Number(q.id)),
-      threadIds = inputs
-        .map((q) => q.payload.thread_id)
+      executionIds = inputs
+        .map((q) => q.payload.execution_id)
         .filter((id): id is string => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(id))
-    const updates = threadIds.length
+    const updates = executionIds.length
       ? yield* sql<{
-          thread_id: string
+          execution_id: string
           version: string
-        }>`SELECT id AS thread_id,version FROM threads WHERE employee_id=(SELECT employee_id FROM project_agents WHERE id=${row.agent_id}) AND project_id=${row.project_id} AND id=ANY(${threadIds}::uuid[]) ORDER BY id LIMIT 32`
+        }>`SELECT id AS execution_id,version FROM executions WHERE employee_id=(SELECT employee_id FROM project_agents WHERE id=${row.agent_id}) AND project_id=${row.project_id} AND id=ANY(${executionIds}::uuid[]) ORDER BY id LIMIT 32`
       : []
     const delivery = command('project_run_wake', row)
     delivery.command = {
       ...delivery.command,
       input_ids: ids,
-      thread_updates: updates.map((t) => ({ thread_id: t.thread_id, version: Number(t.version) })),
+      execution_updates: updates.map((e) => ({ execution_id: e.execution_id, version: Number(e.version) })),
     }
     for (const input of inputs)
       yield* sql`UPDATE project_agent_input_queue SET wake_attempts=LEAST(wake_attempts::bigint+1,2147483647)::integer,wake_next_at=clock_timestamp()+${retrySeconds(input.wake_attempts, random)}*interval '1 second' WHERE id=${Number(input.id)}`

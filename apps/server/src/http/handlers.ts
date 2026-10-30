@@ -11,6 +11,7 @@ import {
 import * as Auth from '../auth.ts'
 import * as Nodes from '../nodes.ts'
 import * as Threads from '../threads/index.ts'
+import * as Executions from '../executions.ts'
 import type { HTTPOptions } from './options.ts'
 import { disabledDownloads, type Downloads } from '../downloads.ts'
 import { AppError } from '../errors.ts'
@@ -415,6 +416,48 @@ export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
                 worker_turn_seq: Number(query.worker_turn_seq),
                 ...(query.cursor !== undefined ? { cursor: query.cursor } : {}),
               })
+            }),
+          ),
+        ),
+    ),
+    HttpApiBuilder.group(BatonHttpApi, 'executions', (handlers) =>
+      handlers
+        .handle('list', ({ query }) =>
+          httpBusiness(
+            Effect.gen(function* () {
+              const { employee } = yield* CurrentBrowserSession
+              return yield* Executions.list({ employeeId: employee.id, projectId: query.project_id }, query.cursor)
+            }),
+          ),
+        )
+        .handle('get', ({ params }) =>
+          httpBusiness(
+            Effect.gen(function* () {
+              const { employee } = yield* CurrentBrowserSession
+              return yield* Executions.get({ employeeId: employee.id }, params.executionId)
+            }),
+          ),
+        )
+        .handle('stop', ({ params }) =>
+          httpBusiness(
+            Effect.gen(function* () {
+              const { employee } = yield* CurrentBrowserSession
+              const execution = yield* Executions.stop({ employeeId: employee.id }, params.executionId)
+              options.gateway().notify(employee.id, { type: 'execution.changed', execution_id: execution.id })
+              options
+                .gateway()
+                .notify(employee.id, { type: 'project.changed', project_id: execution.project_id, change: 'detail' })
+              return execution
+            }),
+          ),
+        )
+        .handle('output', ({ params, query }) =>
+          httpBusiness(
+            Effect.gen(function* () {
+              const { employee } = yield* CurrentBrowserSession
+              return yield* Executions.readOutput({ employeeId: employee.id }, params.executionId, query).pipe(
+                Effect.provideService(Executions.ExecutionOutputGateway, options.gateway),
+              )
             }),
           ),
         ),

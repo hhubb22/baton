@@ -453,11 +453,17 @@ describe('Project Runtime host', () => {
           }
           if (request.operation === 'call_tool') {
             pending = true
-            return success({ pending: true, thread_id: thread, version: 3, wait_remaining_ms: 5000, wait_protocol: 1 })
+            return success({
+              pending: true,
+              execution_id: thread,
+              version: 3,
+              wait_remaining_ms: 5000,
+              wait_protocol: 1,
+            })
           }
           if (request.operation === 'wait_tool') {
             expect((request.payload as { changed: { data: unknown } }).changed.data).toEqual({
-              reason: 'thread_changed',
+              reason: 'execution_changed',
               version: 4,
             })
             expect(
@@ -477,7 +483,7 @@ describe('Project Runtime host', () => {
             lease_epoch: c.lease_epoch - 1,
             type: 'project_run_wake',
             input_ids: [12],
-            thread_updates: [{ thread_id: thread, version: 100 }],
+            execution_updates: [{ execution_id: thread, version: 100 }],
           }),
         )
         // Wake repeatedly covers the process response/poll scheduling boundary; duplicates merge.
@@ -486,7 +492,7 @@ describe('Project Runtime host', () => {
             ...c,
             type: 'project_run_wake',
             input_ids: [11],
-            thread_updates: [{ thread_id: thread, version: 4 }],
+            execution_updates: [{ execution_id: thread, version: 4 }],
           })
           return requests.some((r) => r.operation === 'finish')
         })

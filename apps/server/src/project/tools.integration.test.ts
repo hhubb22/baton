@@ -3,7 +3,7 @@ import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, it } from 'vite-plus/test'
 import type { ThreadReport } from '@baton/protocol'
-import { projectToolFixture, callProjectTool, waitForProjectTool } from '../testing/project-tools.ts'
+import { projectToolFixture, callProjectTool } from '../testing/project-tools.ts'
 import { seedNode, withTestDatabase } from '../testing/database.ts'
 import { contextualRuntimeRequest as runtimeRequest } from '../testing/project-context.ts'
 import * as threads from '../threads/index.ts'
@@ -153,21 +153,6 @@ it('executes Project tools, bounds read results, rejects unknown arguments and p
     expect(unpack(await call('threads.read', { thread_id: id }))).toMatchObject({ turns: [], through_turn: 0 })
     expect(await call('threads.stop', { thread_id: id })).not.toHaveProperty('isError', true)
     expect(await call('threads.archive', { thread_id: id })).not.toHaveProperty('isError', true)
-    expect(
-      await call('nodes.exec', {
-        node_id: nodeId,
-        working_directory: '/work/repo',
-        command: 'printf hello',
-        wait_seconds: 0,
-      }),
-    ).toMatchObject({ pending: true, value: { pending: true, wait_remaining_ms: 0 } })
-    const running = await db.run(waitForProjectTool({ ...c, toolCallId: `call-${n}` }))
-    expect(running).toMatchObject({ value: { status: 'waiting_device', message: expect.stringContaining('仍在执行') } })
-    expect(running.pending).toBeUndefined()
-    expect(await call('nodes.exec', { node_id: nodeId, working_directory: '/outside', command: 'pwd' })).toMatchObject({
-      isError: true,
-      value: { code: 'directory_not_allowed' },
-    })
     const other = await projectToolFixture(db)
     expect(await db.run(callProjectTool(other.context, 'threads.get', { thread_id: id }))).toMatchObject({
       isError: true,
@@ -199,123 +184,6 @@ it('executes Project tools, bounds read results, rejects unknown arguments and p
     expect(await call('unknown', {})).toMatchObject({ isError: true })
     expect(await call('memory.read', { item_id: 'invalid' })).toMatchObject({ isError: true })
     expect(await call('history.read', { through_seq: Number.MAX_SAFE_INTEGER })).toMatchObject({ isError: true })
-    await db.run(
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        yield* sql`UPDATE node_runtime_reports SET report=jsonb_set(report,'{exec,enabled}','false'::jsonb) WHERE employee_id=${c.employeeId} AND node_id=${nodeId}`
-      }),
-    )
-    expect(await call('nodes.exec', { node_id: nodeId, working_directory: '/work', command: 'pwd' })).toMatchObject({
-      isError: true,
-      value: { code: 'exec_disabled' },
-    })
-  }))
-
-it('preserves exec wait deadlines across retries and consumes terminal inputs only with the saved tool result', async () =>
-  withTestDatabase(async (db) => {
-    const { context: c, nodeId, source } = await projectToolFixture(db)
-    const args = { node_id: nodeId, working_directory: '/work', command: 'printf done', wait_seconds: 600 }
-    const first = await db.run(callProjectTool(c, 'nodes.exec', args))
-    const id = (first.value as { thread_id: string }).thread_id
-    expect(await db.run(callProjectTool(c, 'nodes.exec', args))).toMatchObject({
-      pending: true,
-      value: { thread_id: id },
-    })
-    expect(await db.run(waitForProjectTool(c))).toMatchObject({ pending: true })
-    const commands = await db.run(threads.claimCommands())
-    expect(commands[0]!.body).toMatchObject({
-      action: 'open',
-      agent_type: 'shell',
-      project_id: c.projectId,
-      origin_conversation_id: c.conversationId,
-      origin_tool_call_id: c.toolCallId,
-      execution_timeout_seconds: 7200,
-    })
-    const report = (seq: number, kind: ThreadReport['kind'], extra: Partial<ThreadReport> = {}): ThreadReport => ({
-      type: 'thread.report',
-      thread_id: id,
-      event_id: randomUUID(),
-      worker_seq: seq,
-      kind,
-      storage_generation: 'generation',
-      ...extra,
-    })
-    await db.run(threads.processReport(source, report(1, 'thread.opened')))
-    await db.run(
-      threads.processReport(
-        source,
-        report(2, 'turn.started', {
-          worker_turn_seq: 1,
-          client_message_id: `pa:${c.conversationId}:${c.toolCallId}:0`,
-        }),
-      ),
-    )
-    await db.run(
-      threads.processReport(
-        source,
-        report(3, 'message.sent', {
-          worker_turn_seq: 1,
-          client_message_id: `pa:${c.conversationId}:${c.toolCallId}:0`,
-        }),
-      ),
-    )
-    await db.run(
-      threads.processReport(
-        source,
-        report(4, 'reply', { worker_turn_seq: 1, content: 'done', metadata: { exit_code: 0 } }),
-      ),
-    )
-    const ended = report(5, 'turn.ended', { worker_turn_seq: 1, reason: 'completed', queue_empty: true })
-    await db.run(threads.processReport(source, ended))
-    await db.run(threads.processReport(source, ended))
-    const queue = () =>
-      db.run(
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          return yield* sql<{
-            source_type: string
-            delivered_seq: number | null
-            wake_required: boolean
-          }>`SELECT source_type,delivered_seq::float8 AS delivered_seq,wake_required FROM project_agent_input_queue WHERE agent_id=${c.agentId}`
-        }),
-      )
-    expect(await queue()).toEqual([{ source_type: 'turn_ended', delivered_seq: null, wake_required: true }])
-    const result = await db.run(waitForProjectTool(c))
-    expect(result).toMatchObject({
-      seq: 3,
-      value: { status: 'stopped', command_result: { output: 'done', exit_code: 0 } },
-    })
-    expect(await queue()).toEqual([{ source_type: 'turn_ended', delivered_seq: result.seq, wake_required: false }])
-    expect(
-      await db.run(
-        runtimeRequest(source, {
-          type: 'project_runtime.request',
-          run_id: c.runId,
-          lease_epoch: c.leaseEpoch,
-          operation: 'read_events',
-          after_seq: 2,
-        }),
-      ),
-    ).toMatchObject({
-      events: [{ seq: 3, kind: 'tool_result', tool_call_id: c.toolCallId, payload: { consumed_thread_id: id } }],
-    })
-    expect(await db.run(waitForProjectTool(c))).toEqual(result)
-    expect(await db.run(callProjectTool(c, 'nodes.exec', args))).toEqual(result)
-    await expect(
-      db.run(threads.addMessage(c.employeeId, id, { client_message_id: 'second', content: 'again' })),
-    ).rejects.toMatchObject({ code: 'shell_single_turn' })
-    await expect(db.run(threads.resume(c.employeeId, id))).rejects.toMatchObject({ code: 'shell_single_turn' })
-    await expect(
-      db.run(
-        threads.processReport(
-          source,
-          report(6, 'turn.started', {
-            worker_turn_seq: 2,
-            client_message_id: `pa:${c.conversationId}:${c.toolCallId}:0`,
-          }),
-        ),
-      ),
-    ).rejects.toMatchObject({ code: 'shell_single_turn' })
   }))
 
 it('delivers Project turn replies in order, keeps employee turns private, and emits early message failures once', async () =>

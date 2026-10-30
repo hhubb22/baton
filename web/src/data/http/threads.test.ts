@@ -1120,41 +1120,6 @@ describe('HTTP thread contracts', () => {
     expect((await api.readOutput(threadId)).chunks).toEqual([])
   })
 
-  it('retains command threads with agent=null and reads their real trace and output', async () => {
-    const t = thread({
-      agent_type: 'shell',
-      model: '',
-      status: 'running',
-      current_turn: { worker_turn_seq: 1, started_at: at },
-    })
-    const { api } = setup((url) => {
-      if (url.pathname === '/api/v1/threads') return { threads: [t] }
-      if (url.pathname.endsWith('/timeline'))
-        return {
-          events: [
-            accepted(),
-            event(2, 'reply', { event_id: 'shell-report', worker_turn_seq: 1, content: 'shell output' }, later),
-          ],
-        }
-      if (url.pathname.endsWith('/trace'))
-        return {
-          ok: true,
-          page_cursor: 'snapshot:start',
-          steps: [traceStep({ data: { input: 'printf shell-output', output: 'shell-output' } })],
-        }
-      if (url.pathname.endsWith('/output'))
-        return { ok: true, state: 'running', text: 'shell-output', cursor: 'shell-epoch:12', gap: false }
-      return t
-    })
-    expect(await api.getThread(threadId)).toMatchObject({ id: threadId, agent: null, status: 'running' })
-    const reply = (await api.listMessages(threadId)).find((m) => m.role === 'agent')!
-    expect(await api.readTrace(reply.id)).toMatchObject({
-      state: 'ready',
-      steps: [traceStep({ data: { input: 'printf shell-output', output: 'shell-output' } })],
-    })
-    expect((await api.readOutput(threadId)).chunks).toEqual([{ kind: 'text', text: 'shell-output' }])
-  })
-
   it('preserves truncated trace fragments and complete steps and represents empty output', async () => {
     let gap = false
     const { api } = setup((url) => {

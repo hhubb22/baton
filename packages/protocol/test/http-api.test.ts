@@ -5,7 +5,7 @@ import { EnrollmentResponse as DeviceEnrollmentResponse, SessionResponse as Auth
 
 it('generates schemas, statuses and cookie security for every implemented HTTP endpoint', () => {
   const endpoints = Object.values(BatonHttpApi.groups).flatMap((group) => Object.values(group.endpoints))
-  expect(endpoints).toHaveLength(61)
+  expect(endpoints).toHaveLength(65)
   const document = httpOpenApi()
   expect(document.info.title).toBe('Baton HTTP API')
   expect(document.paths['/api/v1/release']?.get?.responses).toHaveProperty('200')

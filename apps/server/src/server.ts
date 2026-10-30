@@ -11,6 +11,7 @@ import { withTraceSpan } from '@baton/telemetry'
 import * as Auth from './auth.ts'
 import * as Nodes from './nodes.ts'
 import * as Threads from './threads/index.ts'
+import * as Executions from './executions.ts'
 import * as Projects from './project/projects.ts'
 import { expireProjectNodeLeases } from './project/scheduling.ts'
 import { AppError, type NodeSource } from './errors.ts'
@@ -114,7 +115,7 @@ export const startServer = (
     }
     const httpOptions = { requestTimeout: 15_000, headersTimeout: 10_000, maxHeaderSize: 16 * 1024 }
     const http = options.tls ? createHTTPSServer({ ...httpOptions, ...options.tls }) : createHTTPServer(httpOptions)
-    const gateway = yield* Effect.acquireRelease(
+    const gateway: Gateway = yield* Effect.acquireRelease(
       Effect.sync(
         () =>
           new Gateway(
@@ -194,7 +195,9 @@ export const startServer = (
                       const data = await run(
                         'project_request',
                         withTraceSpan(
-                          Projects.runtimeRequest(source, body, (event) => gateway.notify(source.employee_id, event)),
+                          Projects.runtimeRequest(source, body, (event) =>
+                            gateway.notify(source.employee_id, event),
+                          ).pipe(Effect.provideService(Executions.ExecutionOutputGateway, () => gateway)),
                           'baton.project.request',
                           body.trace,
                           {
@@ -228,6 +231,30 @@ export const startServer = (
                       ),
                     )
                     return undefined
+                  case 'execution.command_result':
+                    if (!envelope.correlation_id) throw new AppError(400, 'missing_correlation')
+                    await run('receipt', Executions.processReceipt(source, envelope.correlation_id, body))
+                    gateway.notify(source.employee_id, { type: 'execution.changed', execution_id: body.execution_id })
+                    gateway.notify(source.employee_id, {
+                      type: 'project.changed',
+                      project_id: (
+                        await run('read', Executions.get({ employeeId: source.employee_id }, body.execution_id))
+                      ).project_id,
+                      change: 'detail',
+                    })
+                    return undefined
+                  case 'execution.report': {
+                    const ack = await run('report', Executions.processReport(source, body))
+                    gateway.notify(source.employee_id, { type: 'execution.changed', execution_id: body.execution_id })
+                    gateway.notify(source.employee_id, {
+                      type: 'project.changed',
+                      project_id: (
+                        await run('read', Executions.get({ employeeId: source.employee_id }, body.execution_id))
+                      ).project_id,
+                      change: 'detail',
+                    })
+                    return { ...ack }
+                  }
                   case 'thread.report': {
                     const ack = await run(
                       'report',
@@ -325,6 +352,9 @@ export const startServer = (
       try {
         const commands = await run('dispatch', Threads.claimCommands())
         for (const command of commands)
+          await gateway.sendValidated(command.node_id, command.employee_id, command.message_id, command.body)
+        const executions = await run('dispatch', Executions.claimCommands())
+        for (const command of executions)
           await gateway.sendValidated(command.node_id, command.employee_id, command.message_id, command.body)
       } catch {
         // Persisted due times retain pending work while the database or transport is unavailable.

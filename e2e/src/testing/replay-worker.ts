@@ -8,8 +8,8 @@ import type { AgentFactory, AgentEvent, AgentMessage, AgentEventIdentity } from 
 import { AgentError } from '@baton/batond/worker/agent'
 import { makeOutputMailbox } from '@baton/batond/worker/output'
 import { runWorker } from '@baton/batond/daemon/worker-runner'
-import { runWatchdogCommand, startProcessWatchdog } from '@baton/batond/platform/process'
-import { makeShellAgentFactory } from '@baton/batond/agents/shell/index'
+import { runWatchdogCommand } from '@baton/batond/platform/process'
+import { runExecutionWorker } from '@baton/batond/execution/runner'
 
 type Input = { id: string; text: string; executionId: string }
 // Derived from ThreadAgent's documented acceptance and event contract; no native service is called.
@@ -100,8 +100,13 @@ async function main() {
   }
   const { values } = parseArgs({
     args: process.argv.slice(3),
-    options: { 'data-dir': { type: 'string' }, 'thread-id': { type: 'string' } },
+    options: { 'data-dir': { type: 'string' }, 'thread-id': { type: 'string' }, 'execution-id': { type: 'string' } },
   })
+  if (process.argv[2] === 'execution-worker') {
+    if (!values['data-dir'] || !values['execution-id']) throw new Error('Missing Execution Worker identity')
+    await Effect.runPromise(Effect.scoped(runExecutionWorker(values['data-dir'], values['execution-id'])))
+    return
+  }
   if (!values['data-dir'] || !values['thread-id']) throw new Error('Missing replay Worker identity')
   const controller = new AbortController()
   process.once('SIGTERM', () => controller.abort())
@@ -109,20 +114,10 @@ async function main() {
   const dataDirectory = values['data-dir'],
     threadId = values['thread-id']
   const program = Effect.gen(function* () {
-    const watchdog =
-      process.platform === 'win32'
-        ? undefined
-        : yield* Effect.acquireRelease(
-            Effect.promise(() =>
-              startProcessWatchdog({ file: process.execPath, args: [process.argv[1]!, 'watchdog'] }),
-            ),
-            (owned) => Effect.promise(() => owned.close()),
-          )
-    const shell = makeShellAgentFactory({ dataDirectory, ...(watchdog ? { watchdog } : {}) })
     return yield* runWorker({
       dataDirectory,
       threadId,
-      agentFactory: (config) => (config.agent_type === 'shell' ? shell(config) : replay(config)),
+      agentFactory: replay,
     })
   })
   try {

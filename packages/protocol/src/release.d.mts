@@ -3,8 +3,8 @@ export interface BuildInfo {
   readonly commit: string
 }
 export const PROTOCOL_VERSION: 1
-export const SCHEMA_VERSION: '0017_outbox_created_at.sql'
-export const LEDGER_VERSIONS: Readonly<{ node: 2; project: 1; thread: 1 }>
+export const SCHEMA_VERSION: '0018_executions.sql'
+export const LEDGER_VERSIONS: Readonly<{ node: 2; project: 1; thread: 1; execution: 1 }>
 export const BUNDLED: boolean
 export const BUILD: BuildInfo
 export interface ReleaseMetadata extends BuildInfo {
@@ -12,7 +12,7 @@ export interface ReleaseMetadata extends BuildInfo {
   readonly arch: string
   readonly protocol_version: number
   readonly schema_version: string
-  readonly ledger_versions: Readonly<{ node: number; project: number; thread: number }>
+  readonly ledger_versions: Readonly<{ node: number; project: number; thread: number; execution: number }>
   readonly supported_daemon_versions: readonly string[]
 }
 export function releaseMetadata(build?: BuildInfo, platform?: string, arch?: string): ReleaseMetadata

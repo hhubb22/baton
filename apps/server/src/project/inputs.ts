@@ -9,6 +9,7 @@ const ProjectInputType = Schema.Literals([
   'turn_ended',
   'thread_message_failed',
   'thread_reply',
+  'execution.finished',
   'memory_updated',
   'project_updated',
 ])
@@ -22,12 +23,13 @@ export const insertProjectInput = Effect.fn('insertProjectInput')(function* (
   const trace = yield* captureTrace
   const kind = yield* projectDecode(ProjectInputType, sourceType)
   const sql = yield* SqlClient.SqlClient
-  const command = yield* projectDecode(Schema.Record(Schema.String, Schema.Unknown), payload)
+  yield* projectDecode(Schema.Record(Schema.String, Schema.Unknown), payload)
   const limits = {
     user_message: 72,
-    turn_ended: 'command_result' in command ? 72 : 4,
+    turn_ended: 4,
     thread_message_failed: 40,
     thread_reply: 40,
+    'execution.finished': 72,
     memory_updated: 1,
     project_updated: 4,
   }

@@ -21,6 +21,7 @@ type Body = Record<string, unknown>
 const rpcResponses = new Map([
   ['files.browse', 'files.browse_result'],
   ['session.request', 'session.result'],
+  ['execution.output_request', 'execution.output_result'],
   ['node.project_exec_set', 'node.project_exec_result'],
   ['node.browse_roots_set', 'node.browse_roots_result'],
   ['node.browse_roots_get', 'node.browse_roots_get_result'],
@@ -31,6 +32,7 @@ const rpcResponses = new Map([
 const defaultRPCTimeouts: Readonly<Record<string, number>> = {
   'files.browse': 12_000,
   'session.request': 12_000,
+  'execution.output_request': 12_000,
   'node.project_exec_set': 5000,
   'node.browse_roots_set': 5000,
   'node.subscription_login': 12_000,
@@ -126,6 +128,7 @@ interface PendingRPC {
   operationId: string
   responseType: string
   sessionId?: string
+  executionId?: string
   resolve(body: Body): void
   reject(error: Error): void
   timer: ReturnType<typeof setTimeout>
@@ -437,6 +440,9 @@ export class Gateway {
               'node.upgrade_state',
               'thread.command_result',
               'thread.report',
+              'execution.command_result',
+              'execution.report',
+              'execution.output_result',
               'session.result',
               'files.browse_result',
               'node.project_exec_result',
@@ -473,6 +479,7 @@ export class Gateway {
           const authenticatedEnvelope = { ...envelope, source: { kind: 'node' as const, ...current.source } }
           if (
             body.type === 'session.result' ||
+            body.type === 'execution.output_result' ||
             body.type === 'files.browse_result' ||
             body.type === 'node.project_exec_result' ||
             body.type === 'node.browse_roots_result' ||
@@ -492,7 +499,8 @@ export class Gateway {
               pending.source.employee_id !== current.source.employee_id ||
               pending.operationId !== body.operation_id ||
               pending.responseType !== body.type ||
-              (body.type === 'session.result' && pending.sessionId !== body.session_id)
+              (body.type === 'session.result' && pending.sessionId !== body.session_id) ||
+              (body.type === 'execution.output_result' && pending.executionId !== body.execution_id)
             )
               return
             const correlationId = envelope.correlation_id
@@ -514,6 +522,8 @@ export class Gateway {
                   'node.upgrade_state',
                   'thread.command_result',
                   'thread.report',
+                  'execution.command_result',
+                  'execution.report',
                 ].includes(body.type)
               ) {
                 // The node retries durable work with its original identity until it receives an acknowledgement.
@@ -556,7 +566,10 @@ export class Gateway {
     if (!responseType || typeof body.operation_id !== 'string')
       return Promise.reject(new AppError(400, 'invalid_request'))
     const operationId = body.operation_id
-    const rpcClass: RPCClass = body.type === 'files.browse' || body.type === 'session.request' ? 'read' : 'management'
+    const rpcClass: RPCClass =
+      body.type === 'files.browse' || body.type === 'session.request' || body.type === 'execution.output_request'
+        ? 'read'
+        : 'management'
     return new Promise((resolve, reject) => {
       const pending: QueuedRPC = {
         body: { ...body },
@@ -620,6 +633,7 @@ export class Gateway {
       operationId: queued.operationId,
       responseType: queued.responseType,
       ...(typeof queued.body.session_id === 'string' ? { sessionId: queued.body.session_id } : {}),
+      ...(typeof queued.body.execution_id === 'string' ? { executionId: queued.body.execution_id } : {}),
       resolve: (body) => {
         finish()
         queued.onResponse?.(connection.source)
@@ -739,11 +753,13 @@ export class Gateway {
         ? event.event_id
         : 'thread_id' in event
           ? event.thread_id
-          : 'project_id' in event
-            ? event.project_id
-            : 'node_id' in event
-              ? event.node_id
-              : '',
+          : 'execution_id' in event
+            ? event.execution_id
+            : 'project_id' in event
+              ? event.project_id
+              : 'node_id' in event
+                ? event.node_id
+                : '',
     ])
     for (const browser of this.browsers) {
       if (browser.employeeId !== employeeId || browser.socket.readyState !== WebSocket.OPEN) continue

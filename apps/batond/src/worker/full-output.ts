@@ -237,14 +237,16 @@ export class FullOutputStore {
 
 export async function pruneDeviceOutputs(dataDirectory: string, now = Date.now()) {
   await validatePrivateDirectory(dataDirectory)
-  const directory = join(dataDirectory, 'threads')
-  try {
-    await validatePrivateDirectory(directory)
-  } catch (error) {
-    if (hasCode(error, 'ENOENT')) return
-    throw error
-  }
-  for (const name of await readdir(directory)) {
-    if (Schema.is(UUID)(name)) await new FullOutputStore(join(directory, name)).prune(now)
+  for (const kind of ['threads', 'executions']) {
+    const directory = join(dataDirectory, kind)
+    try {
+      await validatePrivateDirectory(directory)
+    } catch (error) {
+      if (hasCode(error, 'ENOENT')) continue
+      throw error
+    }
+    for (const name of await readdir(directory)) {
+      if (Schema.is(UUID)(name)) await new FullOutputStore(join(directory, name)).prune(now)
+    }
   }
 }

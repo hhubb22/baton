@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { chmod, lstat, readFile, readdir, rm, symlink, unlink } from 'node:fs/promises'
+import { chmod, lstat, mkdir, readFile, readdir, rm, symlink, unlink } from 'node:fs/promises'
 import { makePrivateTempDirectory } from '../testing/private.ts'
 import { join } from 'node:path'
 import { Schema } from 'effect'
@@ -7,7 +7,7 @@ import { FullOutputReference, SessionResult, UUID, type SessionRequest, type Wor
 import { afterEach, expect, it } from 'vite-plus/test'
 import { initializeWorkerDirectory, LocalWorkerHost } from '../daemon/host.ts'
 import { writePrivateFileAtomic } from '../platform/private.ts'
-import { BoundedOutput } from '../agents/shell/output.ts'
+import { BoundedOutput } from '../execution/output.ts'
 import { FullOutputStore, fullOutputPageBytes, pruneDeviceOutputs, readOutputRetentionDays } from './full-output.ts'
 
 const roots: string[] = []
@@ -120,8 +120,13 @@ it('enforces configurable expiration on read and reclaims expired files for inac
   expect((await f.store.read(f.request(reference))).code).toBe('output_expired')
   expect(await readdir(f.store.directory)).toEqual([])
   await f.store.put(f.config, Buffer.from('scheduled cleanup'), 1)
+  const executionDirectory = join(f.root, 'executions', randomUUID())
+  await mkdir(executionDirectory, { recursive: true, mode: 0o700 })
+  const executionOutput = new FullOutputStore(executionDirectory)
+  await executionOutput.put(f.config, Buffer.from('execution output'), 1)
   await pruneDeviceOutputs(f.root, Date.now() + 2 * 86400000)
   expect(await readdir(f.store.directory)).toEqual([])
+  expect(await readdir(executionOutput.directory)).toEqual([])
   await writePrivateFileAtomic(join(f.root, 'output-retention.json'), JSON.stringify({ retention_days: 0 }))
   await expect(readOutputRetentionDays(f.root)).rejects.toThrow()
 })

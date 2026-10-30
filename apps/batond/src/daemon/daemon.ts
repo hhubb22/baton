@@ -21,7 +21,7 @@ import {
 import { hasCode } from '../platform/errors.ts'
 import { acquireProcessLock } from '../platform/lock.ts'
 import { ensurePrivateDirectory, openPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
-import { LocalWorkerHost, type DaemonWorkerHost } from './host.ts'
+import { LocalWorkerHost, type DaemonWorkerHost, type BatondCommand } from './host.ts'
 import { isMissing, loadIdentity, loadCoordinatorCA, relayURL as normalizeRelay, coordinatorURL } from './identity.ts'
 import { initializeBrowseRoots, loadBrowseRoots } from '../devices/roots.ts'
 import { makeDeviceService, boundRuntimeReport, type DeviceService } from '../devices/index.ts'
@@ -29,6 +29,7 @@ import { makeProjectManager, type ProjectManager, type ProjectManagerOptions } f
 import { ProjectRPC } from './project-rpc.ts'
 import { makeNodeLedger, contentHash, type NodeLedger } from './ledger.ts'
 import { makeThreadService, WorkerHistoryUnavailable } from './threads.ts'
+import { makeExecutionService } from '../execution/service.ts'
 import { connectWebSocket, reconnectDelay, type DaemonTransport, type DaemonConnection } from './transport.ts'
 import { DaemonStorageFailure, ledgerPromise } from './storage.ts'
 import { pruneDeviceOutputs } from '../worker/full-output.ts'
@@ -71,6 +72,7 @@ export interface RunDaemonOptions {
   readonly transport?: DaemonTransport
   readonly probe?: (signal: AbortSignal) => Promise<RuntimeAgent | readonly RuntimeAgent[]>
   readonly host?: DaemonWorkerHost
+  readonly executionCommand?: BatondCommand
   readonly random?: () => number
   readonly project?: Omit<ProjectManagerOptions, 'dataDir'>
 }
@@ -137,13 +139,14 @@ async function connected(options: {
   pollMs: number
   ledger?: NodeLedger
   threads?: ReturnType<typeof makeThreadService>
+  executions?: ReturnType<typeof makeExecutionService>
   host: DaemonWorkerHost
   report: () => Promise<RuntimeReport>
   projects?: ProjectManager
   devices?: DeviceService
   refreshDevices: () => void
 }) {
-  const { connection, identity, signal, ledger, threads, projects, devices } = options
+  const { connection, identity, signal, ledger, threads, executions, projects, devices } = options
   const controller = new AbortController()
   const abort = () => {
     controller.abort()
@@ -160,6 +163,8 @@ async function connected(options: {
   let upgradePending: { id: string; state: NodeUpgradeState; hash: string; sent: number } | undefined
   let upgradeAcked = ''
   const sentReports = new Map<string, { report: ThreadReport; sentAt: number; span: Tracer.Span }>()
+  const sentExecutions = new Map<string, { report: import('@baton/protocol').ExecutionReport; sentAt: number }>()
+  let executionPollAt = 0
   const reportAttempts: number[] = []
   const reportRetryMs = Math.max(1000, options.heartbeatMs)
   let reportEpoch = 0
@@ -297,6 +302,16 @@ async function connected(options: {
             if (!(await sendReport(report))) break
           }
         }
+        if (executions && now >= executionPollAt) {
+          executionPollAt = now + Math.max(1000, options.pollMs)
+          for (const report of await executions.collectReports()) {
+            const sent = sentExecutions.get(report.event_id)
+            if (sent && now - sent.sentAt < reportRetryMs) continue
+            if (!sent && sentExecutions.size >= 8) break
+            sentExecutions.set(report.event_id, { report, sentAt: now })
+            await envelope(report)
+          }
+        }
       }
       await delay(options.pollMs, undefined, { signal: controller.signal })
     }
@@ -415,7 +430,17 @@ async function connected(options: {
         }
         continue
       }
-      if (!ledger || !threads || !projects || !devices) {
+      if (body.type === 'execution.report_result') {
+        if (synced && executions) {
+          const sent = sentExecutions.get(body.event_id)
+          if (sent && sent.report.execution_id === body.execution_id && sent.report.seq === body.seq && body.ok) {
+            await executions.ack(body)
+            sentExecutions.delete(body.event_id)
+          }
+        }
+        continue
+      }
+      if (!ledger || !threads || !executions || !projects || !devices) {
         // 中心将否定命令回执视为最终失败；连接级错误保留原 outbox 供稍后重试。
         if (body.type === 'thread.command')
           await send({ kind: 'error', code: 'node_upgrading', message: '设备已准备升级，请稍后重试原命令' })
@@ -453,6 +478,19 @@ async function connected(options: {
               } catch (error) {
                 if (!(error instanceof WorkerHistoryUnavailable)) throw error
               }
+            })
+          break
+        case 'execution.command':
+          if (synced)
+            schedule(async () => {
+              if (body.action === 'start' && (await upgradePaused(options.dataDirectory))) return
+              await envelope(await executions.command(body), env.message_id)
+            })
+          break
+        case 'execution.output_request':
+          if (synced)
+            schedule(async () => {
+              await envelope(await executions.output(body), env.message_id)
             })
           break
         case 'files.browse':
@@ -663,7 +701,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
     const connect = (
       runtime: Pick<
         Parameters<typeof connected>[0],
-        'ledger' | 'threads' | 'projects' | 'devices' | 'report' | 'refreshDevices'
+        'ledger' | 'threads' | 'executions' | 'projects' | 'devices' | 'report' | 'refreshDevices'
       >,
     ) =>
       Effect.gen(function* () {
@@ -825,6 +863,11 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
             capability: () => agents,
             tracer: yield* Tracer.Tracer,
           })
+          const executions = makeExecutionService({
+            dataDirectory: options.dataDirectory,
+            ...(options.executionCommand ? { command: options.executionCommand } : {}),
+          })
+          yield* controlAttempt(() => executions.recover())
           yield* controlAttempt((signal) => threads.discover(signal))
           let deviceReport: Pick<RuntimeReport, 'exec' | 'roots' | 'repos' | 'project_runtime' | 'truncated'> = {
             exec: { enabled: false, shell: process.platform === 'win32' ? 'pwsh' : '/bin/sh' },
@@ -909,6 +952,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
                 connect({
                   ledger,
                   threads,
+                  executions,
                   projects,
                   devices,
                   report,

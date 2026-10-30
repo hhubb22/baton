@@ -129,7 +129,7 @@ Linux 需要有效的 `XDG_RUNTIME_DIR` 和 systemd 用户实例；`status` 还�
 
 ### Project 与模型订阅
 
-网页可管理 Project 主对话、记忆与历史版本、目录授权、附件预览及本机命令执行开关。Project 使用设备本地的 ChatGPT、xAI 或 Claude 配置，按租约启动独立 Runtime；本机执行开关默认关闭，`nodes.exec` 通过受限 shell Thread 执行命令。
+网页可管理 Project 主对话、记忆与历史版本、目录授权、附件预览及本机命令执行开关。Project 使用设备本地的 ChatGPT、xAI 或 Claude 配置，按租约启动独立 Runtime；本机执行开关默认关闭，`nodes.exec` 创建独立 Execution 执行命令，Project 可查看执行详情、停止命令和读取完整输出。
 
 设备详情按 Runtime 报告的登录方式显示入口。ChatGPT 和 xAI 支持设备码登录，凭据保存在设备上，完成后立即刷新报告。终端登录和状态查询可使用：
 

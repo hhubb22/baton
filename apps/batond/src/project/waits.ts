@@ -1,18 +1,18 @@
 import { Schema } from 'effect'
-import type { ProjectRuntimeRequest, ProjectRuntimeResult, ProjectThreadUpdate } from '@baton/protocol'
+import type { ProjectRuntimeRequest, ProjectRuntimeResult, ProjectExecutionUpdate } from '@baton/protocol'
 import { UUID } from '@baton/protocol'
 import { failure, success } from './types.ts'
 
 const Pending = Schema.Struct({
   pending: Schema.Literal(true),
-  thread_id: UUID,
+  execution_id: UUID,
   version: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   wait_remaining_ms: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 600000 })),
   wait_protocol: Schema.Literal(1),
 })
 const Poll = Schema.Struct({
   wait_ms: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 25000 }))),
-  thread_id: Schema.optionalKey(UUID),
+  execution_id: Schema.optionalKey(UUID),
   after_version: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 })
 interface Binding {
@@ -30,10 +30,10 @@ export class RuntimeWaits {
   private readonly bindings = new Map<string, Binding>()
   private readonly calls = new Map<string, Call>()
   private readonly listeners = new Set<() => void>()
-  notify(updates: readonly ProjectThreadUpdate[] = []) {
+  notify(updates: readonly ProjectExecutionUpdate[] = []) {
     this.wake = true
     for (const update of updates) {
-      const binding = this.bindings.get(update.thread_id)
+      const binding = this.bindings.get(update.execution_id)
       if (binding && update.version > binding.version) binding.version = update.version
     }
     this.signal()
@@ -62,14 +62,14 @@ export class RuntimeWaits {
       const pending = Schema.decodeUnknownOption(Pending)(result.data)
       if (pending._tag === 'Some') {
         const p = pending.value
-        const binding = this.bindings.get(p.thread_id)
+        const binding = this.bindings.get(p.execution_id)
         if (
           (binding && binding.callId !== id) ||
-          [...this.bindings].some(([thread, b]) => b.callId === id && thread !== p.thread_id)
+          [...this.bindings].some(([execution, b]) => b.callId === id && execution !== p.execution_id)
         )
           return failure('unavailable')
         if (!binding && this.bindings.size >= 64) return failure('capacity_exceeded')
-        this.bindings.set(p.thread_id, {
+        this.bindings.set(p.execution_id, {
           callId: id,
           observed: Math.max(binding?.observed ?? 0, p.version),
           version: Math.max(binding?.version ?? 0, p.version),
@@ -98,17 +98,17 @@ export class RuntimeWaits {
   async poll(payload: unknown, signal: AbortSignal, now: () => number): Promise<ProjectRuntimeResult> {
     const decoded = Schema.decodeUnknownOption(Poll)(payload ?? {})
     if (decoded._tag === 'None') return failure('invalid_request')
-    const { thread_id: thread, after_version: after, wait_ms: wait = 25000 } = decoded.value
-    if ((thread === undefined) !== (after === undefined)) return failure('invalid_request')
+    const { execution_id: execution, after_version: after, wait_ms: wait = 25000 } = decoded.value
+    if ((execution === undefined) !== (after === undefined)) return failure('invalid_request')
     const deadline = now() + wait
     for (;;) {
       const time = now()
       if (signal.aborted) return failure('lease_lost')
       let remaining = deadline - time
-      if (thread !== undefined && after !== undefined) {
-        const binding = this.bindings.get(thread)
+      if (execution !== undefined && after !== undefined) {
+        const binding = this.bindings.get(execution)
         if (!binding || after > binding.observed) return failure('invalid_request')
-        if (binding.version > after) return success({ reason: 'thread_changed', version: binding.version })
+        if (binding.version > after) return success({ reason: 'execution_changed', version: binding.version })
         remaining = Math.min(remaining, binding.deadline - time)
         if (remaining <= 0) return success({ reason: 'timeout', version: binding.version })
       } else {

@@ -5,6 +5,32 @@ import { createFullOutputReader } from '../data/http/full-output'
 import { createTransport } from '../data/http/transport'
 import type { FullOutputReference } from '../data/types'
 
+it('reads execution output using its own endpoint and byte offset', async () => {
+  const fetcher = vi.fn<typeof fetch>(async () =>
+    Response.json({
+      output_id: 'output',
+      storage_generation: 'generation',
+      offset: 0,
+      next_offset: 3,
+      total_bytes: 3,
+      expires_at: '2026-12-01T00:00:00Z',
+      encoding: 'base64',
+      data: 'YWJj',
+      done: true,
+    }),
+  )
+  const read = createFullOutputReader(createTransport({ fetch: fetcher }).request, true)
+  const result = await read('execution', {
+    id: 'output',
+    storage_generation: 'generation',
+    total_bytes: 3,
+    expires_at: '2026-12-01T00:00:00Z',
+  })
+  expect(new TextDecoder().decode(result.bytes)).toBe('abc')
+  expect(fetcher.mock.calls[0]?.[0]).toEqual(expect.stringContaining('/executions/execution/output?'))
+  expect(fetcher.mock.calls[0]?.[0]).toEqual(expect.stringContaining('offset=0'))
+})
+
 const reference: FullOutputReference = {
   id: 'output-id',
   storage_generation: 'local-generation',

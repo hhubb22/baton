@@ -79,38 +79,44 @@ it('does not wake Thread waiters for generic input, duplicate versions or unauth
     operation: 'call_tool',
     tool_call_id: 'exec',
   }
-  const pending = success({ pending: true, thread_id: thread, version: 3, wait_remaining_ms: 1000, wait_protocol: 1 })
+  const pending = success({
+    pending: true,
+    execution_id: thread,
+    version: 3,
+    wait_remaining_ms: 1000,
+    wait_protocol: 1,
+  })
   waits.finish(waits.begin('exec'), request, pending, 0)
   const cancel = new AbortController()
-  expect(await waits.poll({ thread_id: randomUUID(), after_version: 3 }, cancel.signal, () => 0)).toMatchObject({
+  expect(await waits.poll({ execution_id: randomUUID(), after_version: 3 }, cancel.signal, () => 0)).toMatchObject({
     code: 'invalid_request',
   })
-  expect(await waits.poll({ thread_id: thread, after_version: 4 }, cancel.signal, () => 0)).toMatchObject({
+  expect(await waits.poll({ execution_id: thread, after_version: 4 }, cancel.signal, () => 0)).toMatchObject({
     code: 'invalid_request',
   })
   let resolved = false,
     now = 0
   const waiting = waits
-    .poll({ thread_id: thread, after_version: 3, wait_ms: 1000 }, cancel.signal, () => now)
+    .poll({ execution_id: thread, after_version: 3, wait_ms: 1000 }, cancel.signal, () => now)
     .then((r) => {
       resolved = true
       return r
     })
   waits.notify([
-    { thread_id: thread, version: 3 },
-    { thread_id: randomUUID(), version: 20 },
+    { execution_id: thread, version: 3 },
+    { execution_id: randomUUID(), version: 20 },
   ])
   await delay(10)
   expect(resolved).toBe(false)
   now = 20
-  waits.notify([{ thread_id: thread, version: 4 }])
-  expect(await waiting).toEqual(success({ reason: 'thread_changed', version: 4 }))
+  waits.notify([{ execution_id: thread, version: 4 }])
+  expect(await waiting).toEqual(success({ reason: 'execution_changed', version: 4 }))
   const first = waits.begin('exec'),
     second = waits.begin('exec')
   const final = success({ seq: 3, kind: 'tool_result', payload: {} })
   expect(waits.finish(first, request, final, now)).toEqual(final)
   expect(waits.finish(second, request, pending, now)).toEqual(final)
-  expect(await waits.poll({ thread_id: thread, after_version: 3 }, cancel.signal, () => now)).toMatchObject({
+  expect(await waits.poll({ execution_id: thread, after_version: 3 }, cancel.signal, () => now)).toMatchObject({
     code: 'invalid_request',
   })
 })

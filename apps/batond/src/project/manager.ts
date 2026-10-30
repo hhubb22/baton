@@ -617,7 +617,7 @@ class Manager implements ProjectManager {
       this.stop(run)
       return
     }
-    run.waits.notify(command.thread_updates ?? [])
+    run.waits.notify(command.execution_updates ?? [])
     const transport = this.transport
     if (transport?.receipts && command.input_ids?.length && this.wakes.length < 64) {
       this.wakes.push({ command, transport })

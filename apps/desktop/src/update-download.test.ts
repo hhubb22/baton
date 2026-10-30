@@ -23,7 +23,7 @@ const release: ReleaseMetadata = {
   arch: 'x64',
   protocol_version: 1,
   schema_version: '1',
-  ledger_versions: { node: 1, project: 1, thread: 1 },
+  ledger_versions: { node: 1, project: 1, thread: 1, execution: 1 },
   supported_daemon_versions: ['v2.0.0', 'v1.0.0'],
 }
 const item: DownloadItem = {

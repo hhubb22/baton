@@ -1,6 +1,5 @@
 import { agentCatalog } from './catalog.ts'
 import { makeAgentHostFactory } from '../agent-host/thread-agent.ts'
-import { makeShellAgentFactory } from './shell/index.ts'
 import { AgentError, type AgentFactory } from '../worker/agent.ts'
 import type { ProcessCommand, ProcessRecordCallbacks, ProcessWatchdog } from '../platform/process.ts'
 
@@ -10,12 +9,10 @@ export function makeThreadAgentFactory(options: {
   readonly records: ProcessRecordCallbacks
   readonly watchdog?: ProcessWatchdog
 }): AgentFactory {
-  const shell = makeShellAgentFactory(options)
   return (config) => {
     if (!Object.hasOwn(agentCatalog, config.agent_type))
       throw new AgentError(`Unsupported Thread agent_type: ${config.agent_type}`)
     const type = config.agent_type as keyof typeof agentCatalog
-    if (type === 'shell') return shell(config)
     return makeAgentHostFactory({
       command: options.command,
       records: options.records,

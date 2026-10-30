@@ -15,7 +15,7 @@ Thread 创建、持久恢复和审批使用上游执行模式，设备按模式�
 | Kiro | 已接入 fork 的 ACP provider 与节点 agent-host；程序已安装且认证为 valid 或 unknown 时开放网页新建与恢复，版本和系统不设白名单 |
 | Grok、Antigravity | 切换后接入，使用设备上已经安装、配置并完成认证的原生程序 |
 
-Claude、OpenCode、Muse、通用 ACP Agent 目录接入均不在本期。既有 shell Thread 继续用于 Project Agent 命令执行。原生 fork、rollback、计划卡片、独立子 Agent 界面、自动续跑、多账号选择，以及 Agent 安装更新和登录托管均不在本期。
+Claude、OpenCode、Muse、通用 ACP Agent 目录接入均不在本期。Project Agent 的一次性命令由独立 Execution 运行。原生 fork、rollback、计划卡片、独立子 Agent 界面、自动续跑、多账号选择，以及 Agent 安装更新和登录托管均不在本期。
 
 本文补充 [Baton 行为规格](../baton/PRODUCT.md) R-06 至 R-16、R-21、R-25 和 D1。Thread 状态、员工隔离、设备目录限制、归档和附件约定继续适用。本期 Thread 历史统一使用中心保存的记录，补齐不可用原因到网页和 Project Agent 的传递，并将设备接收命令与 Agent 启动、输入准备及发送分开确认。
 

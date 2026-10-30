@@ -109,6 +109,11 @@ function refreshListItem<T extends { id: ID }>(
 }
 
 function invalidateEntity(client: BatonClient, queryClient: QueryClient, target: NonNullable<ChangeEvent['target']>) {
+  if (target.type === 'execution') {
+    void queryClient.invalidateQueries({ queryKey: ['executions'] })
+    void queryClient.invalidateQueries({ queryKey: ['execution', target.id] })
+    return
+  }
   const messages = queryClient.getQueryData<Message[]>(keys.messages(target.id)) ?? []
   const messageIds = new Set(messages.map((message) => message.id))
   void queryClient.invalidateQueries({
@@ -133,16 +138,13 @@ function invalidateEntity(client: BatonClient, queryClient: QueryClient, target:
     },
   })
   if (target.type === 'thread') {
-    refreshListItem<Thread>(
-      queryClient,
-      keys.threads,
-      keys.thread(target.id),
-      target.id,
-      () => client.getThread(target.id),
-      (thread) => thread.agent !== null,
+    refreshListItem<Thread>(queryClient, keys.threads, keys.thread(target.id), target.id, () =>
+      client.getThread(target.id),
     )
     void queryClient.invalidateQueries({ queryKey: ['executions'] })
   } else {
+    void queryClient.invalidateQueries({ queryKey: keys.executions(target.id) })
+    void queryClient.invalidateQueries({ queryKey: ['execution'] })
     refreshListItem<Project>(queryClient, keys.projects, keys.project(target.id), target.id, () =>
       client.getProject(target.id),
     )
@@ -170,6 +172,9 @@ export function ClientProvider({ client, children }: { client: BatonClient; chil
         return
       }
       if (topics.includes('threads')) void queryClient.invalidateQueries({ queryKey: ['executions'] })
+      if (topics.includes('executions') || topics.includes('projects'))
+        void queryClient.invalidateQueries({ queryKey: ['execution'] })
+      if (topics.includes('projects')) void queryClient.invalidateQueries({ queryKey: ['executions'] })
       for (const topic of topics)
         void queryClient.invalidateQueries({
           queryKey: [topic],
@@ -239,6 +244,7 @@ export function useProjectExecutions(projectId: ID) {
   return useQuery({
     queryKey: keys.executions(projectId),
     queryFn: () => client.listProjectExecutions?.(projectId) ?? Promise.resolve([]),
+    refetchInterval: 2000,
   })
 }
 

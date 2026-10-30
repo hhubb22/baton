@@ -152,7 +152,7 @@ export const claimInputs = Effect.fn('claimProjectInputs')(function* (binding: P
   yield* assertToolsResolved(binding)
   const sql = yield* SqlClient.SqlClient
   const active =
-    yield* sql`SELECT 1 FROM project_agent_input_queue WHERE agent_id=${binding.agentId} AND delivered_seq IS NULL AND source_type IN ('user_message','turn_ended','thread_message_failed') LIMIT 1`
+    yield* sql`SELECT 1 FROM project_agent_input_queue WHERE agent_id=${binding.agentId} AND delivered_seq IS NULL AND source_type IN ('user_message','turn_ended','thread_message_failed','execution.finished') LIMIT 1`
   if (!active.length) return { payload_bytes: 0, input_count: 0 }
   const rows = yield* sql<{
     value: P.ProjectQueuedInput
@@ -188,7 +188,7 @@ export const claimInputs = Effect.fn('claimProjectInputs')(function* (binding: P
  (q.id=ANY(${ids}::bigint[]) OR (q.source_type='memory_updated' AND EXISTS(SELECT 1 FROM project_agent_input_queue s
  WHERE s.id=ANY(${ids}::bigint[]) AND s.source_type='memory_updated' AND s.payload->>'entry_id'=q.payload->>'entry_id' AND (s.payload->>'revision')::bigint>=(q.payload->>'revision')::bigint)))`
   for (const item of chosen) {
-    if (['user_message', 'thread_reply', 'turn_ended'].includes(item.source_type))
+    if (['user_message', 'thread_reply', 'turn_ended', 'execution.finished'].includes(item.source_type))
       yield* registerEventSource(binding.employeeId, binding.projectId, event.seq, event.seq, item.id)
   }
   return { event, payload_bytes: size, input_count: chosen.length }

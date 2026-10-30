@@ -9,7 +9,7 @@ export const ReleaseMetadata = Schema.Struct({
   arch: Schema.String,
   protocol_version: Schema.Int,
   schema_version: Schema.String,
-  ledger_versions: Schema.Struct({ node: Schema.Int, project: Schema.Int, thread: Schema.Int }),
+  ledger_versions: Schema.Struct({ node: Schema.Int, project: Schema.Int, thread: Schema.Int, execution: Schema.Int }),
   supported_daemon_versions: Schema.Array(Schema.String),
 })
 export type ReleaseMetadata = typeof ReleaseMetadata.Type

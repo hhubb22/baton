@@ -11,6 +11,8 @@ import { isMissing } from './identity.ts'
 import { IPCError, requestWorker } from './ipc.ts'
 import { workerPaths } from './paths.ts'
 import { readLedger } from '../worker/ledger.ts'
+import { readExecutionState } from '../execution/ledger.ts'
+import { executionPaths } from '../execution/paths.ts'
 import { checkStorageFormat } from '../storage-format.ts'
 import { checkNodeUpgradeStorage } from './upgrade-node-ledger.ts'
 import { storageBaseline as projectBaseline } from '../project/ledger.ts'
@@ -38,7 +40,7 @@ export const UpgradeState = Schema.Struct({
 })
 export type UpgradeState = typeof UpgradeState.Type
 export interface UpgradeBlocker {
-  kind: 'thread' | 'runtime' | 'process'
+  kind: 'thread' | 'execution' | 'runtime' | 'process'
   id: string
   reason: string
   pid?: number
@@ -241,6 +243,40 @@ export async function upgradeBlockers(
     } catch {
       blockers.push({ kind: 'thread', id, reason: 'inspection_failed' })
     }
+  }
+  try {
+    const executionIds = await readdir(join(directory, 'executions')).catch((error: unknown) => {
+      if (isMissing(error)) return []
+      throw error
+    })
+    for (const id of executionIds) {
+      if (!Schema.is(Schema.String.check(Schema.isPattern(/^[0-9a-f-]{36}$/i)))(id)) continue
+      const paths = executionPaths(directory, id)
+      if ((await processLockIsHeld(paths.lock)) || (await processLockIsHeld(paths.launchLock)))
+        blockers.push({ kind: 'execution', id, reason: 'worker_alive' })
+      let state
+      try {
+        state = readExecutionState(paths.ledger)
+      } catch (error) {
+        if (isMissing(error)) continue
+        throw error
+      }
+      if (!state) continue
+      const last = state.reports.at(-1)?.report.status
+      if (state.intent && (!last || last === 'pending' || last === 'running'))
+        blockers.push({ kind: 'execution', id, reason: last ?? 'intent' })
+      if (state.process)
+        blockers.push({
+          kind: 'process',
+          id: String(state.process.pid),
+          pid: state.process.pid,
+          creation_time: state.process.creationTime,
+          reason: `${id}:execution:cleanup_unconfirmed`,
+        })
+      pending += state.reports.filter((entry) => !entry.acked).length
+    }
+  } catch {
+    blockers.push({ kind: 'execution', id: 'executions', reason: 'inspection_failed' })
   }
   for (const [filename, table] of [
     ['project-runtime.db', 'project_processes'],

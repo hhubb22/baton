@@ -183,10 +183,10 @@ it('closes unsubmitted calls on invalid context, preserves pending exec and orig
     await mutate()
     expect(
       await rpc('call_tool', { last_seq: 4, tool_call_id: 'pending', tool_name: 'nodes.exec', arguments: args }),
-    ).toMatchObject({ pending: true, thread_id: (pending as { thread_id: string }).thread_id })
+    ).toMatchObject({ pending: true, execution_id: (pending as { execution_id: string }).execution_id })
     expect(await rpc('wait_tool', { last_seq: 4, tool_call_id: 'pending' })).toMatchObject({
       pending: true,
-      thread_id: (pending as { thread_id: string }).thread_id,
+      execution_id: (pending as { execution_id: string }).execution_id,
     })
     const finished = await rpc('wait_tool', { last_seq: 4, tool_call_id: 'pending', payload: { finish_wait: true } })
     await mutate()
@@ -196,7 +196,7 @@ it('closes unsubmitted calls on invalid context, preserves pending exec and orig
     const [count] = await db.run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
-        return yield* sql<{ n: number }>`SELECT count(*)::float8 AS n FROM threads WHERE project_id=${c.projectId}`
+        return yield* sql<{ n: number }>`SELECT count(*)::float8 AS n FROM executions WHERE project_id=${c.projectId}`
       }),
     )
     expect(count!.n).toBe(1)

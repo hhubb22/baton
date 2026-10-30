@@ -98,7 +98,7 @@ Cursor store 子进程禁用 fetch 和 HTTP(S) 请求。上述加载检查不调
 
 中心与节点构建入口、统一构建和 SEA 打包都接受 `--version <带 v 前缀的发布版本> --commit <完整小写 Git 哈希>`，两个参数一起指定；未指定时版本和提交均为 `development`。构建通过 esbuild 编译常量注入身份，不从运行环境变量读取版本。`packages/protocol/src/release.mjs` 是共享来源，中心、daemon、Worker、agent-host、watchdog 和 Runtime 的 `--version` 及诊断使用同一份元数据。中心版本查询无需数据库配置；节点及子进程另报告 SEA 和 Node 运行信息。开发 bundle 的 Runtime 与 watchdog 从同一 bundle 启动，直接源码入口仍通过 tsx 运行。
 
-`release.json` 和安装包清单保存 `version`、`commit`、`platform`、`arch`、`protocol_version`、`schema_version`、`ledger_versions` 和 `supported_daemon_versions`。当前协议版本为 1，中心迁移版本为 `0017_outbox_created_at.sql`，账本 `node` 为格式 2，`project` 和 `thread` 为格式 1。构建核对中心迁移目录的最新文件与声明一致，账本检查直接使用共享格式常量。首版仅支持当前 daemon 发布版本，连接时执行该声明的准入检查；增量迁移来源及应用回切范围尚待相应升级实现声明。包内元数据与程序输出不一致时，安装包检查和归档失败；归档器不能给旧二进制重新贴标。
+`release.json` 和安装包清单保存 `version`、`commit`、`platform`、`arch`、`protocol_version`、`schema_version`、`ledger_versions` 和 `supported_daemon_versions`。当前协议版本为 1，中心迁移版本为 `0018_executions.sql`，账本 `node` 为格式 2，`project`、`thread` 和 `execution` 为格式 1。构建核对中心迁移目录的最新文件与声明一致，账本检查直接使用共享格式常量。首版仅支持当前 daemon 发布版本，连接时执行该声明的准入检查；增量迁移来源及应用回切范围尚待相应升级实现声明。包内元数据与程序输出不一致时，安装包检查和归档失败；归档器不能给旧二进制重新贴标。
 
 发布组合按 `supported_daemon_versions` 精确匹配，首版列表为 `[当前版本]`，不计算 N−1 窗口、不解析版本范围或 SemVer。节点和中心的协议版本必须一致。双方均为 `development` 时正常连接；一方为 `development` 时也放行版本号差异，便于本地源码与发布包联调，协议版本仍须一致。Agent 的 CLI 版本、模型和系统组合继续按既有准入规则处理。
 
@@ -118,7 +118,7 @@ daemon 收到版本拒绝后终止本次运行，等待用户升级后重新启�
 
 PostgreSQL 的 `schema_migrations(version, checksum, applied_at)` 保存迁移文件名、SQL SHA-256 与应用时间。已应用记录必须按文件名排序构成随程序附带迁移的完整前缀；未知版本或中间记录缺失返回 `storage_version_unsupported`，摘要不符返回 `migration_checksum_mismatch`。现有实验库缺少摘要列时拒绝启动，不补填摘要。
 
-三类 SQLite 账本的当前基线使用迁移记录 `0001_baseline`；节点账本为格式 2，项目和 Thread 账本为格式 1。各库使用 `storage_format(id, kind, version)` 单行表及 `storage_migrations(id, checksum, applied_at)` 迁移记录表，`kind` 分别为 `node`、`project`、`thread`。SHA-256 覆盖类型、格式与 payload 基线版本及该账本声明的 SQL。
+四类 SQLite 账本的当前基线使用迁移记录 `0001_baseline`；节点账本为格式 2，项目、Thread 和 Execution 账本为格式 1。各库使用 `storage_format(id, kind, version)` 单行表及 `storage_migrations(id, checksum, applied_at)` 迁移记录表，`kind` 分别为 `node`、`project`、`thread`、`execution`。SHA-256 覆盖类型、格式与 payload 基线版本及该账本声明的 SQL。
 
 | 存储 | 迁移边界 |
 |---|---|
@@ -162,7 +162,7 @@ SQLite 在只读连接中核对格式元数据和迁移记录，通过后才打�
 | `batond upgrade status` | 返回持久状态、阻挡的 Thread/Runtime、进程 PID 与创建时间，以及账本内待确认报告数；无 daemon 时持原锁重查并推进 draining 到 ready，检查失败显示阻挡原因 |
 | `batond upgrade cancel` | 迁移前持久写入 `cancelled` 并解除门禁，恢复保留的队列；无 daemon 时持原锁保存取消，由正常启动继续队列，不自行启动进程或调用 resume。迁移开始或迁移失败后拒绝取消 |
 
-check 读取目标 `release.json`，实际执行该目录的 `batond --version` 并核对完整发布身份；以 SQLite 只读连接核对三类账本格式及基线摘要，要求目标 `ledger_versions` 与实际支持格式一致。查询当前中心 `GET /api/v1/release` 核对版本与协议，再按备份目标文件系统的可用块估算完整目录副本空间，包含目录分配开销及 1 MiB 状态、清单余量。TLS 可复用现有 `--ca-file`；prepare 使用 daemon 已配置的 CA。check 不建立基线、不写升级状态、不启动或停止业务；SQLite 读取时可能建立 SHM 和空 WAL 辅助文件，主库、已有 WAL 内容及业务事实保持不变。
+check 读取目标 `release.json`，实际执行该目录的 `batond --version` 并核对完整发布身份；以 SQLite 只读连接核对四类账本格式及基线摘要，要求目标 `ledger_versions` 与实际支持格式一致。查询当前中心 `GET /api/v1/release` 核对版本与协议，再按备份目标文件系统的可用块估算完整目录副本空间，包含目录分配开销及 1 MiB 状态、清单余量。TLS 可复用现有 `--ca-file`；prepare 使用 daemon 已配置的 CA。check 不建立基线、不写升级状态、不启动或停止业务；SQLite 读取时可能建立 SHM 和空 WAL 辅助文件，主库、已有 WAL 内容及业务事实保持不变。
 
 状态位于数据目录的私有原子文件 `upgrade.json`。同一进程以规范化数据目录为键，串行执行状态读取与原子保存；文件类型、属主和打开前后身份校验保持生效，访问失败仍向调用者返回错误且不阻塞后续访问。跨进程写入仍由原 `daemon.lock` 与认证 IPC 管理。状态包含 `operation_id`、`source_version`、`target_version`、`phase`。完整预检后附目标 `target_path` 与 `checked_release`；按中心版本准备时先记录 `target_protocol_version`，不记录尚未安装的路径或伪造目标包预检。self 只可绑定相同目标版本、协议和构建，允许同一构建迁入新应用目录；原 operation ID、阶段及备份保持不变。迁移取得一致备份后附 `backup_path`、`backup_checksum`；失败附 `error_code` 和 `reason`。传统准备的源版本取运行程序的 `BUILD.version`；直接 self 准备优先沿用既有完成记录的目标版本或原准备的源版本，缺少证据时记录 `unknown`。未注入发布身份的开发程序显示 `development`。持久阶段为 `draining`、`ready`、`migrating`、`syncing`、`completed`、`cancelled`、`failed`。状态读取失败返回 `upgrade_state_invalid`，执行保持暂停。
 
@@ -215,7 +215,7 @@ prepare 之前升级未支持该能力的 daemon 时，由发布说明要求停�
 | 中心数据库 | `BATON_DATABASE_URL` 指向的 PostgreSQL 数据库，Baton schema 由 `BATON_DB_SCHEMA` 指定、默认 `public`。包含账号、设备与默认选择、Project、记忆与修订、Thread 历史、命令与报告证据，以及 `schema_migrations`。备份须包含恢复所需的 pgvector 扩展及 schema 依赖 |
 | 中心签名密钥 | `BATON_NODE_SIGNING_KEY` 指定的原文件，默认中心工作目录的 `node-signing.key`。与数据库配套保存，恢复原权限和所有者；缺失或无效时停止恢复后处理 |
 | 中心部署配置 | 实际服务管理器、容器或启动脚本中的环境变量与配置文件，包括数据库与 schema、密钥路径、公开 Origin、监听地址、TLS 证书和私钥、反向代理配置及使用的程序版本。恢复数据库不恢复这些文件 |
-| 设备私有数据 | `--data-dir`，默认 `~/.baton-ts`，Windows 为 `%USERPROFILE%\.baton-ts`。整体保留 `identity.json`、`reauth-pending.json`（存在时）、目录和执行授权配置、`node.db`、`project-runtime.db`、`threads/<Thread ID>/thread.db`、原生映射和 SDK 状态、`full-output/`，以及存在的 SQLite WAL。不能只复制主数据库文件或只保存身份文件 |
+| 设备私有数据 | `--data-dir`，默认 `~/.baton-ts`，Windows 为 `%USERPROFILE%\.baton-ts`。整体保留 `identity.json`、`reauth-pending.json`（存在时）、目录和执行授权配置、`node.db`、`project-runtime.db`、`threads/<Thread ID>/thread.db`、`executions/<Execution ID>/execution.db`、执行完成证据、原生映射和 SDK 状态、`full-output/`，以及存在的 SQLite WAL。不能只复制主数据库文件或只保存身份文件 |
 | Project 模型凭据 | `BATON_PROJECT_RUNTIME_DATA_DIR`，默认 `~/.baton/project-runtime`；保存订阅 OAuth、按连接 ID 隔离的 API 配置和密钥及 `embeddings/` 中的 Embedding 凭据。它不在默认设备数据目录内，须单独保护和恢复 |
 | Pi 原生会话与认证 | 默认 `~/.pi/agent`，配置了 `PI_CODING_AGENT_DIR` 时使用该目录；会话默认在其 `sessions/`，`PI_CODING_AGENT_SESSION_DIR` 可单独指定会话目录。目录与外部会话目录一并保留 |
 | Codex 原生会话与认证 | `CODEX_HOME`，默认 `~/.codex`；包括 `sessions/`、`archived_sessions/`、SQLite 状态、`auth.json` 等。只恢复 Baton 的原生会话 ID 不能恢复这些内容 |

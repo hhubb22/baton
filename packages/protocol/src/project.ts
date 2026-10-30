@@ -228,11 +228,8 @@ export const ProjectQueuedInput = Schema.Struct({
 })
 export type ProjectQueuedInput = typeof ProjectQueuedInput.Type
 
-export const ProjectThreadUpdate = Schema.Struct({
-  thread_id: UUID,
-  version: NonNegativeInteger,
-})
-export type ProjectThreadUpdate = typeof ProjectThreadUpdate.Type
+export const ProjectExecutionUpdate = Schema.Struct({ execution_id: UUID, version: NonNegativeInteger })
+export type ProjectExecutionUpdate = typeof ProjectExecutionUpdate.Type
 
 export const ProjectRunCommand = Schema.Struct({
   trace: Schema.optionalKey(TraceContext),
@@ -250,7 +247,7 @@ export const ProjectRunCommand = Schema.Struct({
   model: Schema.optionalKey(Text),
   project_id: Schema.optionalKey(UUID),
   conversation_id: Schema.optionalKey(UUID),
-  thread_updates: Schema.optionalKey(Schema.NullOr(Schema.Array(ProjectThreadUpdate))),
+  execution_updates: Schema.optionalKey(Schema.NullOr(Schema.Array(ProjectExecutionUpdate))),
   input_ids: Schema.optionalKey(Schema.NullOr(Schema.Array(Integer))),
 })
 export type ProjectRunCommand = typeof ProjectRunCommand.Type

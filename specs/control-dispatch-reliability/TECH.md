@@ -153,11 +153,11 @@ project_agent_input_queue 增加：
 
 新 run 创建时，在已有 Agent 锁下，把尚未认领的主动输入重新设为需要提示，重置通知退避。并发稍晚提交的输入自己携带 wake_required=true，因此不会遗漏。旧 run 的迟到确认必须被 run / epoch 校验拒绝。
 
-为 `delivered_seq IS NULL AND wake_required` 建立 `(agent_id, wake_next_at, id)` 部分索引。wake 只面向有效 running run。每条命令最多携带 32 个输入 ID，从这些输入构造 thread_updates，继续限制编码容量。发送前在短事务内保存这些行的重试进度。
+为 `delivered_seq IS NULL AND wake_required` 建立 `(agent_id, wake_next_at, id)` 部分索引。wake 只面向有效 running run。每条命令最多携带 32 个输入 ID，从这些输入构造 execution_updates，继续限制编码容量。发送前在短事务内保存这些行的重试进度。
 
 ### 6.2 协议
 
-project_run_wake 增加可选 `input_ids: int64[]`，每条最多 32 个正数 ID。同一个 Thread 的 thread_updates 按版本合并，每 run 最多 64 个绑定。
+project_run_wake 包含可选 `input_ids: int64[]`，每条最多 32 个正数 ID。同一个 Execution 的 execution_updates 按版本合并，每 run 最多 64 个绑定。
 
 batond 确认 run 和 epoch 后，将通用 wake 合并到已有容量为 1 的通道，并把 Thread 版本交给等待缓存。节点在本地通知状态保存后发送以下管理请求；通知失败保留诊断，中心按原输入身份重试。Runtime 业务请求和通知确认分别处理，见节点 `src/project` 的管理器实现。
 

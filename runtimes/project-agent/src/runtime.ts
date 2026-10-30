@@ -399,7 +399,7 @@ export class ProjectRuntime {
     let waitUntil = Infinity
     let initialCheck = true
     while (response?.pending === true) {
-      if (call.name !== 'nodes.exec' || typeof response.thread_id !== 'string' || response.thread_id.length === 0)
+      if (call.name !== 'nodes.exec' || typeof response.execution_id !== 'string' || response.execution_id.length === 0)
         throw new RuntimeError('invalid_tool_result')
       const versioned = response.wait_protocol === 1
       if (versioned) {
@@ -422,7 +422,7 @@ export class ProjectRuntime {
           await this.rpc.call({
             operation: 'poll_wake',
             payload: {
-              thread_id: response.thread_id,
+              execution_id: response.execution_id,
               after_version: response.version,
               wait_ms: Math.max(1, Math.floor(waitMs)),
             },

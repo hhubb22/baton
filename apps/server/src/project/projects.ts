@@ -28,6 +28,7 @@ export { listProjectRunCandidates, scheduleProjectRun, claimProjectCommands } fr
 export { scheduleMemoryJobs } from './memory-jobs.ts'
 import { stopProjectMemory } from './memory-jobs.ts'
 import * as threads from '../threads/index.ts'
+import * as executions from '../executions.ts'
 import { latestReplySeqSQL } from './attention.ts'
 
 const validateModelSource = Effect.fnUntraced(function* (employee: string, provider: string, nodeId: string | null) {
@@ -172,6 +173,10 @@ export const patchProject = Effect.fn('patchProject')(function* (
               OR EXISTS(SELECT 1 FROM thread_messages m WHERE m.thread_id=t.id AND m.status IN ('accepted','queued')))
           ORDER BY t.id`
         for (const thread of running) yield* threads.stop(employee, thread.id)
+        const commands = yield* sql<{
+          id: string
+        }>`SELECT id FROM executions WHERE employee_id=${employee} AND project_id=${id} AND status IN ('pending','running') ORDER BY id`
+        for (const command of commands) yield* executions.stop({ employeeId: employee, projectId: id }, command.id)
       }
       if (updated.status !== 'active') yield* releaseProjectRun(agent, 'finished', `project_${updated.status}`)
       if (

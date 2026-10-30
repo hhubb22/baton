@@ -61,7 +61,10 @@ if (command === 'probe') {
     observedAllInputs = false
   const memory = memoryFixture()
   const rpc = checkedRPC(async (request) => {
-    if (request.operation === 'poll_wake' && !(request.payload as { thread_id?: string } | undefined)?.thread_id) {
+    if (
+      request.operation === 'poll_wake' &&
+      !(request.payload as { execution_id?: string } | undefined)?.execution_id
+    ) {
       const result = await client.call({ ...request, payload: { wait_ms: 50 } })
       if (observedAllInputs) offset += 180000
       return result

@@ -108,14 +108,14 @@ const bootstrapSchema = Schema.Struct({
 const pendingSchema = Schema.Union([
   Schema.Struct({
     pending: Schema.Literal(true),
-    thread_id: Schema.NonEmptyString,
+    execution_id: Schema.NonEmptyString,
     wait_protocol: Schema.Literal(1),
     version: sequence,
     wait_remaining_ms: sequence,
   }),
   Schema.Struct({
     pending: Schema.Literal(true),
-    thread_id: Schema.NonEmptyString,
+    execution_id: Schema.NonEmptyString,
     wait_protocol: Schema.optionalKey(Schema.Number.check(Schema.makeFilter((value) => value !== 1))),
     version: Schema.optionalKey(sequence),
     wait_remaining_ms: Schema.optionalKey(sequence),
@@ -238,7 +238,7 @@ const resultSchemas = {
   wait_tool: toolResultSchema,
   poll_wake: Schema.Union([
     Schema.Struct({ wake: Schema.Boolean }),
-    Schema.Struct({ reason: Schema.Literals(['thread_changed', 'timeout']), version: Schema.optionalKey(sequence) }),
+    Schema.Struct({ reason: Schema.Literals(['execution_changed', 'timeout']), version: Schema.optionalKey(sequence) }),
   ]),
   preview: recordSchema,
   finish: recordSchema,

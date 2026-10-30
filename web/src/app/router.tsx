@@ -52,9 +52,10 @@ export interface ThreadsSearch {
 export interface ProjectSearch {
   settings?: true
   archive?: true
-  view?: 'memory'
+  view?: 'memory' | 'executions'
   // 右侧打开的 Thread，替换概览栏。
   thread?: string
+  execution?: string
 }
 
 function optionalString(value: unknown) {
@@ -133,9 +134,10 @@ const routeTree = rootRoute.addChildren([
       component: ProjectPage,
       validateSearch: (search: Record<string, unknown>): ProjectSearch => ({
         thread: optionalString(search.thread),
+        execution: optionalString(search.execution),
         settings: flag(search.settings),
         archive: flag(search.archive),
-        view: search.view === 'memory' ? 'memory' : undefined,
+        view: search.view === 'memory' || search.view === 'executions' ? search.view : undefined,
       }),
     }),
     createRoute({ getParentRoute: () => workspaceRoute, path: '$', component: NotFound }),

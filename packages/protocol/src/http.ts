@@ -35,6 +35,7 @@ export const BrowserProjectChanged = Schema.Struct({
   project_id: UUID,
   change: Schema.Literal('detail'),
 })
+export const BrowserExecutionChanged = Schema.Struct({ type: Schema.Literal('execution.changed'), execution_id: UUID })
 export const NodesChanged = Schema.Struct({ type: Schema.Literal('nodes.changed'), node_id: UUID })
 export const DevicesChanged = Schema.Struct({
   type: Schema.Literal('devices.changed'),
@@ -81,6 +82,7 @@ export const BrowserEvent = Schema.Union([
   BrowserReady,
   BrowserThreadChanged,
   BrowserProjectChanged,
+  BrowserExecutionChanged,
   NodesChanged,
   DevicesChanged,
   BrowserThreadOutput,
@@ -104,7 +106,6 @@ const afterID = Schema.optionalKey(UUID)
 const afterSequence = Schema.optionalKey(decimal(0, Number.MAX_SAFE_INTEGER))
 
 export const ThreadListQuery = Schema.Struct({
-  kind: Schema.optionalKey(Schema.Literals(['conversation', 'execution'])),
   project_id: Schema.optionalKey(UUID),
   node_id: Schema.optionalKey(UUID),
   status: Schema.optionalKey(ThreadStatus),
@@ -138,6 +139,12 @@ export const ProjectMessagesQuery = Schema.Struct({
 export const ProjectEventsQuery = Schema.Struct({ after_seq: afterSequence, limit: pageLimit })
 const memoryInteger = (minimum: number, maximum: number) =>
   decimal(minimum, maximum).pipe(Schema.decodeTo(NonNegativeInteger, SchemaTransformation.numberFromString))
+export const ExecutionListQuery = Schema.Struct({ project_id: UUID, cursor: Schema.optionalKey(UUID) })
+export const ExecutionOutputQuery = Schema.Struct({
+  output_id: UUID,
+  storage_generation: StorageGeneration,
+  offset: Schema.optionalKey(memoryInteger(0, Number.MAX_SAFE_INTEGER)),
+})
 export const MemoryRevisionsQuery = Schema.Struct({
   after_revision: Schema.optionalKey(memoryInteger(0, Number.MAX_SAFE_INTEGER)),
   limit: Schema.optionalKey(memoryInteger(1, 100)),

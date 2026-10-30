@@ -172,19 +172,6 @@ describe('app', () => {
     expect(await screen.findByRole('button', { name: 'Pi · 默认模型' })).toBeInTheDocument()
   })
 
-  it('renders command threads without a thread composer and keeps command output available', async () => {
-    renderApp('/threads/thr-webui', 'normal', (client) => {
-      const readThreads = client.listThreads.bind(client)
-      const readMessages = client.listMessages.bind(client)
-      client.listThreads = async () =>
-        (await readThreads()).map((thread) => (thread.id === 'thr-webui' ? { ...thread, agent: null } : thread))
-      client.listMessages = async (id) => (await readMessages(id)).map((message) => ({ ...message, activity: null }))
-    })
-    expect(await screen.findByRole('heading', { name: 'Rebuild web UI foundation' })).toBeInTheDocument()
-    expect(await screen.findAllByRole('button', { name: '命令输出' })).not.toHaveLength(0)
-    expect(screen.queryByLabelText('消息')).not.toBeInTheDocument()
-  })
-
   it('keeps the username after invalid credentials and returns to the requested page', async () => {
     const user = userEvent.setup()
     const { router } = renderApp('/threads', 'signedOut')
@@ -472,29 +459,6 @@ describe('projects', () => {
     expect(screen.getByRole('region', { name: '对话' })).toHaveTextContent('Opened a thread on Windows Desktop')
   })
 
-  it('opens an unknown shell execution that is absent from the conversation list', async () => {
-    const user = userEvent.setup()
-    const { router } = renderApp('/projects/prj-compat', 'normal', (client) => {
-      const read = client.getThread.bind(client)
-      client.getThread = async (id) =>
-        id === 'shell-execution' ? { ...(await read('thr-compat')), id, agent: null } : read(id)
-      client.listProjectEntries = async () => [
-        {
-          id: 'failure',
-          projectId: 'prj-compat',
-          kind: 'threadFailure',
-          threadId: 'shell-execution',
-          cause: 'unknown',
-          createdAt: 1,
-        },
-      ]
-    })
-    const row = await screen.findByRole('button', { name: /无法确认执行结果/ })
-    expect(row).toHaveTextContent('命令可能已经产生副作用，助手不会自动重发。')
-    await user.click(row)
-    await waitFor(() => expect(router.state.location.search).toMatchObject({ thread: 'shell-execution' }))
-  })
-
   it('streams a project preview and replaces it when the saved reply arrives before status refresh', async () => {
     let preview: { afterSeq: number; text: string; truncated: boolean } | null = {
       afterSeq: 7,
@@ -728,13 +692,15 @@ describe('projects', () => {
   it('opens a running command from its project tool call', async () => {
     const user = userEvent.setup()
     const { router } = renderApp('/projects/prj-compat', 'normal', (client) => {
-      const list = client.listThreads.bind(client)
       client.listProjectExecutions = async () => [
         {
-          ...(await list())[0]!,
           id: 'shell-execution',
           projectId: 'prj-compat',
-          agent: null,
+          deviceId: 'dev-ubuntu',
+          command: 'pwd',
+          workingDirectory: '/work',
+          timeoutSeconds: 60,
+          createdAt: Date.now(),
           status: 'running',
           originConversationId: 'conversation',
           originToolCallId: 'exec',
@@ -765,7 +731,7 @@ describe('projects', () => {
     await user.click(await screen.findByRole('button', { name: '正在处理' }))
     await user.click(screen.getByRole('button', { name: /nodes.exec.*等待结果/ }))
     await user.click(await screen.findByRole('button', { name: /查看执行详情/ }))
-    await waitFor(() => expect(router.state.location.search).toMatchObject({ thread: 'shell-execution' }))
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ execution: 'shell-execution' }))
   })
 
   it('keeps failed and unfinished tool calls visible in project activity', async () => {

@@ -116,7 +116,7 @@ export const toolDefinitions = [
   {
     name: 'threads.create',
     description:
-      '在目标设备上新建 Thread 并向执行 Agent 发出第一条消息，立即返回 Thread ID 和状态。按设备能力、用户要求和项目记忆选择 Agent 与模型；省略 model 时使用设备上该 Agent 的默认模型。runtime_mode 可选 devices.list 报告的模式，省略时使用上游默认模式。工作目录必须已存在；agent_type 不能为 shell，命令通过 nodes.exec 执行。在 message 中写明工作目标和验证方式，找不到验证方式时写明原因。结果可用 threads.read 查询。',
+      '在目标设备上新建 Thread 并向执行 Agent 发出第一条消息，立即返回 Thread ID 和状态。按设备能力、用户要求和项目记忆选择 Agent 与模型；省略 model 时使用设备上该 Agent 的默认模型。runtime_mode 可选 devices.list 报告的模式，省略时使用上游默认模式。工作目录必须已存在，命令通过 nodes.exec 执行。在 message 中写明工作目标和验证方式，找不到验证方式时写明原因。结果可用 threads.read 查询。',
     parameters: obj({
       node_id: str(),
       agent_type: str(),
@@ -147,7 +147,7 @@ export const toolDefinitions = [
   {
     name: 'threads.resume',
     description:
-      '显式恢复本 Project 已打开的 Thread，沿用中心的设备能力与执行状态校验；停止尚未确认或正在执行时拒绝。重复请求复用待处理的恢复命令，不重新发送历史消息；shell Thread 不支持恢复。结果用 threads.get 查询。',
+      '显式恢复本 Project 已打开的 Thread，沿用中心的设备能力与执行状态校验；停止尚未确认或正在执行时拒绝。重复请求复用待处理的恢复命令，不重新发送历史消息。结果用 threads.get 查询。',
     parameters: obj({ thread_id: str() }),
   },
   {
@@ -195,13 +195,38 @@ export const toolDefinitions = [
   {
     name: 'nodes.exec',
     description:
-      '在已开启命令执行的节点上管理环境，例如创建 worktree、检查仓库或安装依赖。开发工作优先派发给执行 Agent。Baton 不检查命令内容，也不提供沙箱；命令以节点用户身份运行。工作目录必须已存在并位于节点登记目录内。等待结束后命令继续运行，结果可用 threads.read 查询。',
+      '在已开启命令执行的节点上管理环境，例如创建 worktree、检查仓库或安装依赖。开发工作优先派发给执行 Agent。Baton 不检查命令内容，也不提供沙箱；命令以节点用户身份运行。工作目录必须已存在并位于节点登记目录内。等待结束后命令继续运行，结果可用 executions.get 查询。结果为 unknown 时命令可能已产生副作用，不得自动重跑。',
     parameters: obj({
       node_id: str(),
       command: str(),
       working_directory: str(),
       wait_seconds: Type.Optional(Type.Integer({ minimum: 0, maximum: 600, default: 30 })),
       timeout_seconds: Type.Optional(Type.Integer({ minimum: 1, default: 7200 })),
+    }),
+  },
+  {
+    name: 'executions.list',
+    description: '列出本 Project 的命令执行。',
+    parameters: obj({ after_id: opt(), ...page }),
+  },
+  {
+    name: 'executions.get',
+    description: '读取本 Project 的命令执行状态和输出摘要。',
+    parameters: obj({ execution_id: str(), ...page }),
+  },
+  {
+    name: 'executions.stop',
+    description: '请求停止本 Project 的命令执行。',
+    parameters: obj({ execution_id: str() }),
+  },
+  {
+    name: 'executions.output',
+    description: '分页读取本 Project 命令执行的完整输出。',
+    parameters: obj({
+      execution_id: str(),
+      output_id: str(),
+      storage_generation: str(),
+      offset: Type.Optional(Type.Integer({ minimum: 0 })),
     }),
   },
 ]

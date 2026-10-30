@@ -80,7 +80,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
   const [action, ...args] = argv
   if (
     action === '--version' ||
-    (['worker', 'agent-host', 'watchdog', 'project-runtime'].includes(action) &&
+    (['worker', 'execution-worker', 'agent-host', 'watchdog', 'project-runtime'].includes(action) &&
       args.length === 1 &&
       args[0] === '--version')
   ) {
@@ -230,13 +230,24 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
     await runWatchdogCommand()
     return
   }
-  if (action === 'worker' || action === 'agent-host') {
+  if (action === 'worker' || action === 'agent-host' || action === 'execution-worker') {
     const controller = new AbortController()
     const stop = () => controller.abort()
     process.once('SIGINT', stop)
     process.once('SIGTERM', stop)
     try {
-      if (action === 'worker') {
+      if (action === 'execution-worker') {
+        const { values } = parseArgs({
+          args,
+          options: { 'data-dir': { type: 'string' }, 'execution-id': { type: 'string' } },
+        })
+        if (!values['data-dir'] || !values['execution-id'])
+          throw new Error('Execution Worker needs --data-dir and --execution-id')
+        const { runExecutionWorker } = await import('./execution/runner.ts')
+        await Effect.runPromise(Effect.scoped(runExecutionWorker(values['data-dir'], values['execution-id'])), {
+          signal: controller.signal,
+        })
+      } else if (action === 'worker') {
         const { values } = parseArgs({
           args,
           options: { 'data-dir': { type: 'string' }, 'thread-id': { type: 'string' } },

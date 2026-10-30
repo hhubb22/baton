@@ -45,7 +45,7 @@ export const readThread = (employee: string, id: string, lock = false, projectId
     }
     const rows = yield* sql<{
       value: Thread
-    }>`SELECT jsonb_strip_nulls(to_jsonb(t)-'request_hash'-'exec_wait_until') || jsonb_build_object(
+    }>`SELECT jsonb_strip_nulls(to_jsonb(t)-'request_hash') || jsonb_build_object(
     'node_online',COALESCE(p.online,false),'node_synced',COALESCE(p.synced,false),'node_last_contact_at',p.last_contact_at,
     'stop_failure',${sql.literal(stopFailure)},
     'next_thinking',(SELECT CASE WHEN COALESCE(NULLIF(m.model,''),t.model)=COALESCE(NULLIF(t.next_model,''),t.model) THEN m.thinking END
@@ -101,11 +101,6 @@ export const admission = (
     const row = rows[0]!
     if (!directoryAllowed(row.system_name, directory, row.report?.roots))
       return yield* Effect.fail(failure('directory_not_allowed', 422))
-    if (agent === 'shell') {
-      if (operation !== 'create' && operation !== 'queue') return yield* Effect.fail(failure('shell_single_turn', 422))
-      if (!row.report?.exec?.enabled) return yield* Effect.fail(failure('exec_disabled', 422))
-      return ''
-    }
     const capability = row.report?.agents?.find((a) => a.agent_type === agent && a.status === 'available')
     if (!capability || !capability.capabilities[operation])
       return yield* Effect.fail(
@@ -176,8 +171,6 @@ export interface ProjectThreadSource {
   conversationId: string
   toolCallId: string
   executionTimeoutSeconds?: number
-  shellExec?: boolean
-  waitSeconds?: number
 }
 
 export const insertMessage = (t: Thread, input: ThreadMessageInput, source?: ProjectThreadSource) =>
@@ -200,10 +193,6 @@ export const insertMessage = (t: Thread, input: ThreadMessageInput, source?: Pro
     }
     if (t.status === 'archived' || t.archive_requested_at) return yield* Effect.fail(failure('thread_archived'))
     if (t.status === 'stopped' && !t.opened_at) return yield* Effect.fail(failure('thread_not_opened', 422))
-    if (t.agent_type === 'shell') {
-      const existing = yield* sql`SELECT id FROM thread_messages WHERE thread_id=${t.id}`
-      if (!source?.shellExec || existing.length) return yield* Effect.fail(failure('shell_single_turn', 422))
-    }
     const selected = m.model || t.next_model || ''
     yield* admission(t.employee_id, t.node_id, t.agent_type, t.working_directory, selected, m.mode, t.runtime_mode)
     if (m.thinking) {

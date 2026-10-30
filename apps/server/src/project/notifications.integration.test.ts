@@ -8,7 +8,7 @@ import { projectToolFixture } from '../testing/project-tools.ts'
 import { contextualRuntimeRequest } from '../testing/project-context.ts'
 import { runtimeRequest } from './runtime.ts'
 
-it('notifies the committed Project and Thread for runtime tools, including pending shell creation', async () =>
+it('notifies the committed Project and Thread for runtime tools, including pending Execution creation', async () =>
   withTestDatabase(async (db) => {
     const { context: c, nodeId } = await projectToolFixture(db)
     const events: P.BrowserEvent[] = []
@@ -78,9 +78,8 @@ it('notifies the committed Project and Thread for runtime tools, including pendi
     await call('threads.send', { thread_id: randomUUID(), message: 'Unauthorized' })
     expect(events).toEqual([projectEvent])
     const pending = await call('nodes.exec', { node_id: nodeId, working_directory: '/work', command: 'pwd' })
-    expect(pending).toMatchObject({ pending: true, thread_id: expect.any(String) })
-    const shellId = Schema.decodeUnknownSync(Schema.Struct({ thread_id: P.UUID }))(pending).thread_id
-    expect(events).toEqual([{ type: 'thread.changed', thread_id: shellId, change: 'detail' }, projectEvent])
+    expect(pending).toMatchObject({ pending: true, execution_id: expect.any(String) })
+    expect(events).toEqual([projectEvent])
     events.length = 0
     await expect(
       db.run(

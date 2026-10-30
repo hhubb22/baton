@@ -193,7 +193,6 @@ export const recordThreadNotification = Effect.fnUntraced(function* (
     pi: 'Pi',
     codex: 'Codex',
     kiro: 'Kiro',
-    shell: 'Shell',
     grok: 'Grok',
     antigravity: 'Antigravity',
   }[t.agent_type]
@@ -265,7 +264,7 @@ export const activitySnapshot = Effect.fn('browserActivitySnapshot')(function* (
   const [snapshot] = yield* sql<{ value: P.ActivitySnapshot }>`WITH waiting AS (
     SELECT t.id,t.project_id,t.last_activity_at,COALESCE((SELECT left(split_part(m.content,chr(10),1),120)
       FROM thread_messages m WHERE m.thread_id=t.id ORDER BY m.created_at,m.id LIMIT 1),left(t.working_directory,1000)) AS title
-    FROM threads t WHERE t.employee_id=${employeeId} AND t.agent_type<>'shell' AND t.status<>'archived' AND
+    FROM threads t WHERE t.employee_id=${employeeId} AND t.status<>'archived' AND
       t.status='running' AND t.stop_requested_at IS NULL AND t.archive_requested_at IS NULL AND EXISTS(
         SELECT 1 FROM thread_events e JOIN thread_turns v ON v.thread_id=e.thread_id
           AND v.worker_turn_seq=(e.payload->>'worker_turn_seq')::bigint AND v.ended_at IS NULL
@@ -274,7 +273,7 @@ export const activitySnapshot = Effect.fn('browserActivitySnapshot')(function* (
             AND done.kind IN ('question.resolved','question.answered')
             AND done.payload->>'request_id'=e.payload->'question'->>'request_id'))
   ) SELECT jsonb_build_object(
-    'running_count',(SELECT count(*) FROM threads WHERE employee_id=${employeeId} AND agent_type<>'shell' AND status='running'),
+    'running_count',(SELECT count(*) FROM threads WHERE employee_id=${employeeId} AND status='running'),
     'waiting_count',(SELECT count(*) FROM waiting)+(SELECT count(*) FROM projects p
       JOIN project_agents a ON a.project_id=p.id AND a.employee_id=p.employee_id
       JOIN conversations c ON c.agent_id=a.id AND c.employee_id=a.employee_id

@@ -20,7 +20,7 @@ export const UpgradeSnapshot = Schema.Struct({
   state: Schema.NullOr(UpgradeState),
   blockers: Schema.Array(
     Schema.Struct({
-      kind: Schema.Literals(['thread', 'runtime', 'process']),
+      kind: Schema.Literals(['thread', 'execution', 'runtime', 'process']),
       id: Schema.String,
       reason: Schema.String,
       pid: Schema.optionalKey(Schema.Int),

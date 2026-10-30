@@ -6,6 +6,7 @@ import type { HttpContext } from './context'
 import { apiPath, timestamp } from './context'
 import { createProjectAPI } from './projects'
 import { createThreadAPI } from './threads'
+import { createExecutionAPI } from './executions'
 import { createOutputAPI, type OutputResult } from './output'
 import { createTransport, HttpError } from './transport'
 
@@ -302,6 +303,7 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
         type?: string
         thread_id?: string
         project_id?: string
+        execution_id?: string
         change?: string
         node_id?: string
         report_version?: number
@@ -334,6 +336,12 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
       ) {
         nodeRead = null
         emit('devices', 'files')
+      }
+      if (message.type === 'execution.changed') {
+        const id = message.execution_id
+        if (typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))
+          publish({ topics: ['executions'], target: { type: 'execution', id } })
+        else emit('executions')
       }
       if (message.type === 'thread.changed' || message.type === 'project.changed') {
         const type = message.type === 'thread.changed' ? 'thread' : 'project'
@@ -397,6 +405,7 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
         `/events/replay?limit=100${after === undefined ? '' : `&after=${encodeURIComponent(after)}`}`,
       ),
     ...createThreadAPI(ctx, output),
+    ...createExecutionAPI(ctx),
     subscribeOutput: (id, listener) => output.subscribeOutput(id, listener),
     ...createProjectAPI(ctx),
     getSession,

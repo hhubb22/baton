@@ -27,6 +27,14 @@ import {
 } from './device.ts'
 import { ProjectRunCommand, ProjectRuntimeRequest, ProjectRuntimeResult } from './project.ts'
 import {
+  ExecutionCommand,
+  ExecutionCommandResult,
+  ExecutionReport,
+  ExecutionReportResult,
+  ExecutionOutputRequest,
+  ExecutionOutputResult,
+} from './execution.ts'
+import {
   SessionRequest,
   SessionResult,
   ThreadCommand,
@@ -120,6 +128,9 @@ export const NodeToControlBody = Schema.Union([
   NodeUpgradeStateRequest,
   ThreadCommandResult,
   ThreadReport,
+  ExecutionCommandResult,
+  ExecutionReport,
+  ExecutionOutputResult,
   RuntimeReportRequest,
   FileResult,
   SessionResult,
@@ -137,6 +148,9 @@ export const ControlToNodeBody = Schema.Union([
   NodeUpgradeStateResult,
   ThreadCommand,
   ThreadReportResult,
+  ExecutionCommand,
+  ExecutionReportResult,
+  ExecutionOutputRequest,
   RuntimeReportResult,
   FileRequest,
   SessionRequest,

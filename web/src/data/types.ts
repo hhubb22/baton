@@ -180,6 +180,27 @@ export interface Thread {
   unread: boolean
 }
 
+export interface Execution {
+  id: ID
+  projectId: ID
+  deviceId: ID
+  originConversationId: string
+  originToolCallId: string
+  command: string
+  workingDirectory: string
+  timeoutSeconds: number
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out' | 'unknown'
+  exitCode?: number | null
+  reason?: string | null
+  output?: string | null
+  encoding?: string | null
+  totalBytes?: number | null
+  truncated?: boolean
+  fullOutput?: FullOutputReference | null
+  stopRequestedAt?: number | null
+  createdAt: number
+}
+
 // 一条消息从提交到被 Agent 读到的过程。unknown 表示设备在发送途中重启，不确定 Agent 是否收到，Baton 不会自动重发。
 export type Delivery = 'submitted' | 'saved' | 'waitingDevice' | 'queued' | 'delivered' | 'withdrawn' | 'unknown'
 

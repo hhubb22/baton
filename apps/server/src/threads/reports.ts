@@ -147,8 +147,6 @@ const apply = (t: P.Thread, r: P.ThreadReport) =>
         break
       }
       case 'turn.started': {
-        if (t.agent_type === 'shell' && r.worker_turn_seq !== 1)
-          return yield* Effect.fail(failure('shell_single_turn', 422))
         if (!t.opened_at || !['idle', 'stopped', 'unknown', 'running'].includes(t.status))
           return yield* Effect.fail(failure())
         yield* noActiveTurn(t.id)
@@ -237,14 +235,7 @@ const apply = (t: P.Thread, r: P.ThreadReport) =>
         yield* sql`UPDATE thread_turns SET ended_at=clock_timestamp(),end_reason=${r.reason!},model=${r.model || turn.model},token_usage=${r.token_usage === undefined ? null : JSON.stringify(r.token_usage)}::json WHERE id=${turn.id}`
         if (t.stop_requested_at && ['stopped', 'timeout'].includes(r.reason!))
           yield* sql`UPDATE threads SET stop_confirmed_at=clock_timestamp() WHERE id=${t.id}`
-        yield* status(
-          t,
-          t.agent_type === 'shell' ? 'stopped' : r.queue_empty ? 'idle' : 'running',
-          '',
-          t.agent_type === 'shell'
-            ? reportStopCode(t, r, !!t.stop_requested_at && ['stopped', 'timeout'].includes(r.reason!))
-            : null,
-        )
+        yield* status(t, r.queue_empty ? 'idle' : 'running')
         break
       }
       case 'thread.stopped':

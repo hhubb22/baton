@@ -82,12 +82,12 @@ if (command === 'probe') {
       })
       const changed = await call({
         operation: 'poll_wake',
-        payload: { thread_id: pending.data.thread_id, after_version: pending.data.version, wait_ms: 25000 },
+        payload: { execution_id: pending.data.execution_id, after_version: pending.data.version, wait_ms: 25000 },
       })
       await call({ operation: 'wait_tool', tool_call_id: 'exec-1', payload: { changed, boot }, last_seq: 1 })
       const unbound = await call({
         operation: 'poll_wake',
-        payload: { thread_id: pending.data.thread_id, after_version: pending.data.version, wait_ms: 1 },
+        payload: { execution_id: pending.data.execution_id, after_version: pending.data.version, wait_ms: 1 },
       })
       await call({ operation: 'preview', payload: { unbound } })
       await call({ operation: 'finish' })

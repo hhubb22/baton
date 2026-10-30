@@ -29,15 +29,29 @@ const messages: Record<string, string> = {
   output_changed: '保存的输出已更改，请从头读取。',
 }
 
-export function createFullOutputReader(request: HttpContext['request']) {
+export function createFullOutputReader(request: HttpContext['request'], execution = false) {
   return async (threadId: string, reference: FullOutputReference, cursor = '0', signal?: AbortSignal) => {
     const query = new URLSearchParams({
-      action: 'full_output',
       output_id: reference.id,
       storage_generation: reference.storage_generation,
-      cursor,
     })
-    const result = await request<OutputResponse>(`/threads/${apiPath(threadId)}/output?${query}`, { signal })
+    if (execution) query.set('offset', cursor)
+    else {
+      query.set('action', 'full_output')
+      query.set('cursor', cursor)
+    }
+    const response = await request<OutputResponse | FullOutputPage>(
+      `/${execution ? 'executions' : 'threads'}/${apiPath(threadId)}/output?${query}`,
+      { signal },
+    )
+    const result = execution
+      ? {
+          ok: true,
+          session_id: threadId,
+          full_output: response as FullOutputPage,
+          cursor: String((response as FullOutputPage).next_offset),
+        }
+      : (response as OutputResponse)
     if (!result.ok) throw new Error(messages[result.code ?? ''] ?? '设备无法读取此输出，请重试。')
     const page = result.full_output
     if (
@@ -73,3 +87,4 @@ export function createFullOutputReader(request: HttpContext['request']) {
 }
 
 export const readFullOutput = createFullOutputReader(createTransport().request)
+export const readExecutionFullOutput = createFullOutputReader(createTransport().request, true)

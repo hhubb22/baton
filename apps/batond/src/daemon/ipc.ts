@@ -26,10 +26,12 @@ const sameToken = (actual: string, expected: string) => {
 }
 
 /** One authenticated command per connection; disconnecting never cancels accepted work. */
-export const listenWorker = (options: {
+export const listenAuthenticated = <Request, Response>(options: {
   readonly endpoint: string
   readonly token: string
-  readonly handle: (request: typeof WorkerRequest.Type) => Effect.Effect<Message, unknown>
+  readonly decodeRequest: (value: unknown) => Request
+  readonly decodeResponse: (value: unknown) => Response
+  readonly handle: (request: Request) => Effect.Effect<Response, unknown>
 }): Effect.Effect<void, Error, Scope.Scope> =>
   Effect.gen(function* () {
     const context = yield* Effect.context<never>()
@@ -67,15 +69,14 @@ export const listenWorker = (options: {
               socket.write(`${JSON.stringify({ type: 'result', ok: true })}\n`)
               continue
             }
-            const request = decodeRequest(value)
-            if (request.type === 'auth') throw new IPCError('invalid_request', 'Already authenticated')
+            const request = options.decodeRequest(value)
             if (buffer.length !== 0) throw new IPCError('invalid_request', 'One command per connection')
             busy = true
             socket.setTimeout(0)
             void run(options.handle(request))
               .then(
                 (result) => {
-                  const encoded = JSON.stringify(decodeMessage(result))
+                  const encoded = JSON.stringify(options.decodeResponse(result))
                   if (Buffer.byteLength(encoded) > frameLimit) {
                     reject('response_too_large')
                     return
@@ -115,18 +116,35 @@ export const listenWorker = (options: {
     })
   })
 
-export function requestWorker(options: {
+export const listenWorker = (options: {
   readonly endpoint: string
   readonly token: string
-  readonly request: typeof WorkerRequest.Type
+  readonly handle: (request: typeof WorkerRequest.Type) => Effect.Effect<Message, unknown>
+}) =>
+  listenAuthenticated({
+    ...options,
+    decodeRequest: (value) => {
+      const request = decodeRequest(value)
+      if (request.type === 'auth') throw new IPCError('invalid_request', 'Already authenticated')
+      return request
+    },
+    decodeResponse: decodeMessage,
+  })
+
+export function requestAuthenticated<Request, Response>(options: {
+  readonly endpoint: string
+  readonly token: string
+  readonly request: Request
+  readonly decodeRequest: (value: unknown) => Request
+  readonly decodeResponse: (value: unknown) => Response
   readonly timeoutMs?: number
-}): Promise<Message> {
+}): Promise<Response> {
   return new Promise((resolve, reject) => {
     const socket = createConnection(options.endpoint)
     let authenticated = false
     let buffer = Buffer.alloc(0)
     let settled = false
-    const finish = (error?: Error, result?: Message) => {
+    const finish = (error?: Error, result?: Response) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
@@ -152,21 +170,22 @@ export function requestWorker(options: {
         const frame = buffer.subarray(0, newline)
         buffer = buffer.subarray(newline + 1)
         try {
-          const result = decodeMessage(JSON.parse(frame.toString('utf8')))
+          const raw = JSON.parse(frame.toString('utf8')) as unknown
           if (!authenticated) {
+            const result = decodeMessage(raw)
             if (!result.ok) {
               finish(new IPCError('unauthorized', 'Worker authentication failed'))
               return
             }
             authenticated = true
-            const encoded = JSON.stringify(decodeRequest(options.request))
+            const encoded = JSON.stringify(options.decodeRequest(options.request))
             if (Buffer.byteLength(encoded) > frameLimit) {
               finish(new IPCError('frame_too_large', 'Worker IPC request exceeds the limit'))
               return
             }
             socket.write(`${encoded}\n`)
           } else {
-            finish(undefined, result)
+            finish(undefined, options.decodeResponse(raw))
             return
           }
         } catch {
@@ -177,3 +196,10 @@ export function requestWorker(options: {
     })
   })
 }
+
+export const requestWorker = (options: {
+  readonly endpoint: string
+  readonly token: string
+  readonly request: typeof WorkerRequest.Type
+  readonly timeoutMs?: number
+}) => requestAuthenticated({ ...options, decodeRequest, decodeResponse: decodeMessage })

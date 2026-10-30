@@ -13,7 +13,7 @@ export async function dataEntries(directory: string) {
     for (const name of (await readdir(join(directory, relative))).sort()) {
       const parts = relative ? relative.split(sep) : []
       const root = parts.length === 0
-      const thread = parts.length === 2 && parts[0] === 'threads'
+      const thread = parts.length === 2 && (parts[0] === 'threads' || parts[0] === 'executions')
       const probe = parts.length === 2 && parts[0] === 'agent-probes'
       if (
         (root &&

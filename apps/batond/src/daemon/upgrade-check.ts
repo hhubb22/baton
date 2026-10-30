@@ -9,6 +9,7 @@ import { checkStorageFormat, StorageFormatError } from '../storage-format.ts'
 import { storageBaseline as nodeBaseline } from './ledger.ts'
 import { storageBaseline as projectBaseline } from '../project/ledger.ts'
 import { storageBaseline as threadBaseline } from '../worker/ledger.ts'
+import { storageBaseline as executionBaseline } from '../execution/ledger.ts'
 import { coordinatorURL, isMissing, loadIdentity, loadCoordinatorCA } from './identity.ts'
 import { IPCError } from './ipc.ts'
 import { backupSpace } from './upgrade-backup.ts'
@@ -24,6 +25,7 @@ export const sameRelease = (left: ReleaseMetadata, right: ReleaseMetadata) =>
   left.ledger_versions.node === right.ledger_versions.node &&
   left.ledger_versions.project === right.ledger_versions.project &&
   left.ledger_versions.thread === right.ledger_versions.thread &&
+  left.ledger_versions.execution === right.ledger_versions.execution &&
   JSON.stringify(left.supported_daemon_versions) === JSON.stringify(right.supported_daemon_versions)
 
 export async function readUpgradePackage(target: string) {
@@ -53,12 +55,12 @@ export async function readUpgradePackage(target: string) {
   }
 }
 
-/** 只列出三类账本；缺失的根账本可建立首版基线，不猜测旧实验文件。 */
+/** 缺失的根账本可建立首版基线，不猜测旧实验文件。 */
 export async function upgradeLedgers(directory: string) {
   const files = [
     { path: join(directory, 'node.db'), kind: 'node' as const, baseline: nodeBaseline },
     { path: join(directory, 'project-runtime.db'), kind: 'project' as const, baseline: projectBaseline },
-  ] as Array<{ path: string; kind: 'node' | 'project' | 'thread'; baseline: readonly string[] }>
+  ] as Array<{ path: string; kind: 'node' | 'project' | 'thread' | 'execution'; baseline: readonly string[] }>
   let threads: string[] = []
   try {
     threads = await readdir(join(directory, 'threads'))
@@ -71,6 +73,22 @@ export async function upgradeLedgers(directory: string) {
     try {
       await stat(path)
       files.push({ path, kind: 'thread', baseline: threadBaseline })
+    } catch (error) {
+      if (!isMissing(error)) throw error
+    }
+  }
+  let executions: string[] = []
+  try {
+    executions = await readdir(join(directory, 'executions'))
+  } catch (error) {
+    if (!isMissing(error)) throw error
+  }
+  for (const id of executions.sort()) {
+    if (!Schema.is(UUID)(id)) continue
+    const path = join(directory, 'executions', id, 'execution.db')
+    try {
+      await stat(path)
+      files.push({ path, kind: 'execution', baseline: executionBaseline })
     } catch (error) {
       if (!isMissing(error)) throw error
     }

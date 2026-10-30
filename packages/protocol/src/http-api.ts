@@ -9,6 +9,8 @@ import {
   OpenApi,
 } from 'effect/http-api'
 import * as T from './thread.ts'
+import * as E from './execution.ts'
+import { FullOutputPage } from './full-output.ts'
 import * as P from './project.ts'
 import * as D from './device.ts'
 import * as A from './auth.ts'
@@ -277,6 +279,23 @@ const Threads = HttpApiGroup.make('threads')
   )
   .middleware(BrowserRequest)
 
+const Executions = HttpApiGroup.make('executions')
+  .add(
+    Endpoint.get('list', '/api/v1/executions', { query: Q.ExecutionListQuery, success: E.ExecutionPage }),
+    Endpoint.get('get', '/api/v1/executions/:executionId', { params: { executionId: UUID }, success: E.Execution }),
+    Endpoint.post('stop', '/api/v1/executions/:executionId/stop', {
+      params: { executionId: UUID },
+      payload: EmptyInput,
+      success: E.Execution,
+    }),
+    Endpoint.get('output', '/api/v1/executions/:executionId/output', {
+      params: { executionId: UUID },
+      query: Q.ExecutionOutputQuery,
+      success: FullOutputPage,
+    }),
+  )
+  .middleware(BrowserRequest)
+
 const Projects = HttpApiGroup.make('projects')
   .add(
     Endpoint.get('list', '/api/v1/projects', { query: Q.ProjectListQuery, success: P.ProjectsResponse }),
@@ -371,7 +390,7 @@ const System = HttpApiGroup.make('system')
   .middleware(BrowserRequest)
 
 export const BatonHttpApi = HttpApi.make('baton')
-  .add(Public, Account, Nodes, Threads, Projects, System)
+  .add(Public, Account, Nodes, Threads, Executions, Projects, System)
   .annotate(HttpApi.PayloadParseOptions, { onExcessProperty: 'error' })
   .annotate(HttpApi.QueryParseOptions, { onExcessProperty: 'error' })
   .annotateMerge(

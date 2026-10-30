@@ -51,7 +51,6 @@ Worker 按 Turn 和原始项 ID 去重。原始 ID 独立保存在 outbox，ACK 
 
 整项 `JSON.stringify(item)` 最多 192 KiB，包含重复的索引字段与 data。超限时保留原 data JSON 到设备的 `full-output/`，反复将最长字符串缩成首尾两段，按 JSON 编码字节计量并保留完整字符。字符串裁剪最多 256 次；结构本身仍超限或已没有可裁剪字符串时，将摘要 data 置为 null，并标记 `metadata.item_structure_omitted:true`。顶层 title 同样计入预算，完整报告另有 224 KiB 上限。`truncated` 表示容量裁剪，`original_bytes` 是原 data JSON 的 UTF-8 字节数，字符展示映射本身不改变截断标记。全文写入成功后，摘要与 `turn.item` outbox 在同一账本事务保存。
 
-shell 独立保留最多 192 KiB 的首尾输出作为 command_execution 项，回复沿用首尾合计 32 KiB 的摘要。完成记录同时保存两份有界输出和命令，先发 item 再发 reply；Worker 将项 ID 固定为 `shell:<worker_turn_seq>`。停止和完成记录恢复沿用同一顺序及去重身份。Worker 继续按整项 192 KiB 预算裁剪过程项，全文引用沿用 shell 已保存的 stdout/stderr 原始字节；文本以 UTF-8 保存，二进制输出用 base64 表示。shell 在读取输出时累计完整 JSON 编码字节数，`original_bytes` 包含未裁剪输出在 data 中的编码大小，`metadata.shell_output_bytes` 另记原始输出的真实字节数。
 
 `driver.ts` 的 `makeProviderHostDriver` 统一处理会话映射、执行权限、事件归属、迟到事件过滤和发送确认；各 Agent 构造 adapter 和只读探测。上游待审批请求和问题按请求 ID 关联，通过 host 事件、Worker 账本和中心送到网页等待回答。网页回答经持久 `answer` 命令和 host RPC 返回原请求；审批决策限于上游提供的选项，Codex MCP 请求保留上游的确认语义，普通问题传入用户答案。停止或关闭后的 pending 请求取消。
 

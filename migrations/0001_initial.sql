@@ -588,7 +588,6 @@ CREATE TABLE threads (
     version bigint DEFAULT 1 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     last_activity_at timestamp with time zone DEFAULT now() NOT NULL,
-    exec_wait_until timestamp with time zone,
     model text DEFAULT ''::text NOT NULL,
     CONSTRAINT threads_check CHECK (((origin_conversation_id IS NULL) = (origin_tool_call_id IS NULL))),
     CONSTRAINT threads_check1 CHECK (((created_by <> 'project_agent'::text) OR ((project_id IS NOT NULL) AND (origin_conversation_id IS NOT NULL)))),

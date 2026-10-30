@@ -8,7 +8,7 @@ import type { NodeLedger } from './ledger.ts'
 import type { ProjectManager } from '../project/types.ts'
 import { workerPaths } from './paths.ts'
 
-const agents = ['codex', 'cursor', 'pi', 'kiro', 'shell'] as const
+const agents = ['codex', 'cursor', 'pi', 'kiro'] as const
 const reasons = ['device_offline', 'approval', 'credential_missing', 'queue', 'lease', 'backoff'] as const
 const bytes = Metric.gauge('baton.ledger.bytes')
 const budget = Metric.gauge('baton.ledger.budget_ratio')

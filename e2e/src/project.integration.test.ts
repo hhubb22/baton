@@ -23,7 +23,6 @@ import { initializeBrowseRoots } from '@baton/batond/devices/roots'
 import { LocalWorkerHost } from '@baton/batond/daemon/host'
 import { runDaemon } from '@baton/batond/daemon/daemon'
 import { runDaemonCLI } from '@baton/batond/daemon/cli'
-import { assertStoredTurnTrace, readTurnTrace } from './testing/turn-trace.ts'
 
 const origin = 'https://baton.local'
 function browser(base: string, ca: string) {
@@ -204,6 +203,7 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
           identity,
           caFile,
           host,
+          executionCommand: { executable: process.execPath, args: [bundle] },
           probe: async () => capability,
           heartbeatMs: 1000,
           pollIntervalMs: 20,
@@ -355,7 +355,7 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
     )(shellResult.message.content)
     const shellValue = Schema.decodeUnknownSync(
       Schema.Struct({
-        thread_id: P.UUID,
+        execution_id: P.UUID,
         command_result: Schema.Struct({ exit_code: Schema.Literal(0), output: Schema.String }),
       }),
     )(JSON.parse(output[0]!.text))
@@ -374,13 +374,13 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
     expect(JSON.stringify(saved)).toContain('已读取 Cursor 回复')
     expect(JSON.stringify(saved)).toContain('t3-shell-output')
     const threadPage = await alice<P.ThreadPage>(`/threads?project_id=${project.id}`)
-    const executionPage = await alice<P.ThreadPage>(`/threads?project_id=${project.id}&kind=execution`)
+    const executionPage = await alice<P.ExecutionPage>(`/executions?project_id=${project.id}`)
     expect(threadPage.status).toBe(200)
     expect(executionPage.status).toBe(200)
     expect(threadPage.body.threads).toMatchObject([{ agent_type: 'cursor' }])
-    expect(executionPage.body.threads).toMatchObject([{ id: shellValue.thread_id, agent_type: 'shell' }])
+    expect(executionPage.body.executions).toMatchObject([{ id: shellValue.execution_id, status: 'completed' }])
     const cursor = threadPage.body.threads![0]!
-    const shell = executionPage.body.threads![0]!
+    const execution = executionPage.body.executions[0]!
     const timeline = await alice<P.ThreadTimeline>(`/threads/${cursor.id}/timeline?limit=100`)
     const reply = timeline.body.events!.find((event) => event.kind === 'reply')!
     const attachments = Schema.decodeUnknownSync(
@@ -408,7 +408,8 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
     expect(escaped.status).toBe(403)
     expect(escaped.body.code).toBe('path_escaped')
     expect((await bob(`/nodes/${identity.node_id}/files?${query}`)).status).toBe(403)
-    for (const thread of [cursor, shell]) expect((await bob(`/threads/${thread.id}`)).status).toBe(404)
+    expect((await bob(`/threads/${cursor.id}`)).status).toBe(404)
+    expect((await bob(`/executions/${execution.id}`)).status).toBe(404)
     expect(await readFile(join(workspace, 'shell-runs.txt'), 'utf8')).toBe('once\n')
     expect(
       (await readFile(join(workspace, 'submissions.jsonl'), 'utf8'))
@@ -428,8 +429,8 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
           source_type: string
           source_key: string
           delivered_seq: string | null
-          thread_id: string | null
-        }>`SELECT source_type,source_key,delivered_seq,payload->>'thread_id' AS thread_id
+          execution_id: string | null
+        }>`SELECT source_type,source_key,delivered_seq,payload->>'execution_id' AS execution_id
           FROM project_agent_input_queue WHERE agent_id=${project.agent.id} ORDER BY id`
       }),
     )
@@ -439,26 +440,16 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
     expect(new Set(facts.map((f) => f.source_key)).size).toBe(facts.length)
     expect(
       facts
-        .filter((fact) => fact.thread_id === shell.id)
+        .filter((fact) => fact.execution_id === execution.id)
         .map(({ source_type, source_key }) => ({ source_type, source_key })),
-    ).toEqual([{ source_type: 'turn_ended', source_key: `thread:${shell.id}:turn:1` }])
-    const steps = await assertStoredTurnTrace({
-      database,
-      request: alice,
-      threadId: shell.id,
-      expectedItems: [{ type: 'command_execution', text: 't3-shell-output' }],
-      beforeReply: true,
-    })
-    expect(steps).toHaveLength(1)
-    expect(steps[0]).toMatchObject({
-      item_id: 'shell:1',
-      type: 'command_execution',
-      data: { input: expect.stringContaining(script), output: 't3-shell-output\n', exitCode: 0 },
-    })
+    ).toEqual([{ source_type: 'execution.finished', source_key: `execution:${execution.id}:finished` }])
     controller.abort()
     await daemon
     await expect.poll(async () => (await device()).online, { timeout: 10_000 }).toBe(false)
-    expect(await readTurnTrace(alice, shell.id)).toEqual(steps)
+    expect((await alice<P.Execution>(`/executions/${execution.id}`)).body).toMatchObject({
+      status: 'completed',
+      output: 't3-shell-output\n',
+    })
     expect((await bob<P.ProjectsResponse>('/projects')).body.projects).toEqual([])
     expect(await readFile(join(runtimeDirectory, 'local-subscription'), 'utf8')).toBe('local-login-complete')
     expect(JSON.stringify((await device()).runtime_report)).not.toContain('local-login-complete')

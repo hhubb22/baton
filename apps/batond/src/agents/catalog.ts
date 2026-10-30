@@ -26,16 +26,10 @@ export const agentCatalog = {
     capabilities: { create: true, queue: true, steer: false, stop: true, resume: true, switch_model: false },
     limitation: '上游 adapter 不支持 steer 和 Thread 内换模型',
   },
-  shell: {
-    kind: 'shell',
-    name: 'Shell',
-    capabilities: { create: true, queue: true, steer: false, stop: true, resume: false, switch_model: false },
-    limitation: '',
-  },
 } as const satisfies Record<
   string,
   {
-    kind: 'hosted' | 'shell'
+    kind: 'hosted'
     name: string
     capabilities: RuntimeAgent['capabilities']
     limitation: string

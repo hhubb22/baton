@@ -18,6 +18,7 @@ import {
   searchProjectHistory,
 } from './memory/index.ts'
 import * as threads from '../threads/index.ts'
+import * as executions from '../executions.ts'
 import { lockNodeSource, recordNodeBusiness, revalidateNodeSource } from '../nodes.ts'
 import {
   appendProjectEvent,
@@ -193,8 +194,8 @@ const toolRequest = Effect.fn('callProjectTool')(function* (
     request.operation === 'wait_tool'
       ? yield* projectDecode(Schema.Struct({ finish_wait: Schema.optionalKey(Schema.Boolean) }), request.payload ?? {})
       : { finish_wait: false }
-  // nodes.exec 的 Thread 登记先于上下文校验；已提交执行继续原等待。
-  const existingExec = call.name === 'nodes.exec' ? yield* threads.readExec(ctx, ctx) : undefined
+  // 已提交的命令继续原等待，不因上下文更新重复执行。
+  const existingExec = call.name === 'nodes.exec' ? yield* executions.readByOrigin(ctx, ctx) : undefined
   const readOnly = [
     'memory.recall',
     'memory.read',
@@ -205,6 +206,9 @@ const toolRequest = Effect.fn('callProjectTool')(function* (
     'threads.get',
     'threads.read',
     'threads.trace',
+    'executions.list',
+    'executions.get',
+    'executions.output',
   ].includes(call.name)
   const result = existingExec
     ? yield* waitProjectTool(ctx, finish.finish_wait ?? false)
@@ -244,7 +248,7 @@ const toolRequest = Effect.fn('callProjectTool')(function* (
   const payload = {
     format: 'pi-ai/1',
     ...(result.memoryRefs ? { memory_refs: result.memoryRefs, derived: true } : {}),
-    ...(result.consumeThreadId ? { consumed_thread_id: result.consumeThreadId } : {}),
+    ...(result.consumeExecutionId ? { consumed_execution_id: result.consumeExecutionId } : {}),
     message: {
       role: 'toolResult',
       toolCallId: id,
@@ -256,7 +260,7 @@ const toolRequest = Effect.fn('callProjectTool')(function* (
   }
   yield* checkPayloadSize(payload, 32 * 1024)
   const event = yield* appendProjectEvent(b, 'tool_result', payload, null, id)
-  if (result.consumeThreadId) yield* consumeProjectExecInputs(ctx, result.consumeThreadId, event.seq)
+  if (result.consumeExecutionId) yield* consumeProjectExecInputs(ctx, result.consumeExecutionId, event.seq)
   return event
 })
 const readPendingTool = Effect.fn('readPendingProjectTool')(function* (
@@ -296,21 +300,20 @@ const readPendingTool = Effect.fn('readPendingProjectTool')(function* (
       }>`SELECT tool_call_id FROM conversation_events WHERE conversation_id=${binding.conversation_id} AND kind='tool_result' AND tool_call_id=ANY(${calls.map((call) => call.id)}::text[])`
       const done = new Set(results.map((row) => row.tool_call_id))
       if (done.has(id) || calls.slice(0, index).some((call) => !done.has(call.id))) return undefined
-      const thread = yield* threads.readExec(
+      const execution = yield* executions.readByOrigin(
         { employeeId: source.employee_id, projectId: binding.project_id },
         { conversationId: binding.conversation_id, toolCallId: id },
       )
-      if (!thread || thread.ended || ['stopped', 'unknown', 'archived'].includes(thread.status) || !thread.wait_active)
-        return undefined
+      if (!execution || executions.terminal(execution.status) || !execution.wait_active) return undefined
       yield* revalidateNodeSource(source)
       const valid =
         yield* sql`SELECT 1 FROM project_agents a JOIN agent_runs r ON r.id=a.lease_run_id WHERE r.id=${request.run_id} AND a.lease_epoch=${request.lease_epoch} AND a.lease_until>clock_timestamp()`
       if (!valid.length) return yield* Effect.fail(leaseLost())
       return {
         pending: true,
-        thread_id: thread.id,
-        version: Number(thread.version),
-        wait_remaining_ms: thread.remaining,
+        execution_id: execution.id,
+        version: Number(execution.version),
+        wait_remaining_ms: execution.remaining,
         wait_protocol: 1,
       }
     }),
@@ -492,7 +495,7 @@ interface ProjectToolExecution {
   isError?: boolean
   pending?: boolean
   memoryRefs?: readonly (typeof P.MemoryReference.Type)[]
-  consumeThreadId?: string
+  consumeExecutionId?: string
   changedThreadId?: string
 }
 const pageFields = {
@@ -507,6 +510,15 @@ const historyFields = {
   ...pageFields,
 }
 const schemas = {
+  'executions.list': Schema.Struct({ ...afterId, ...pageFields }),
+  'executions.get': Schema.Struct({ execution_id: P.UUID, ...pageFields }),
+  'executions.stop': Schema.Struct({ execution_id: P.UUID }),
+  'executions.output': Schema.Struct({
+    execution_id: P.UUID,
+    output_id: P.UUID,
+    storage_generation: P.StorageGeneration,
+    offset: Schema.optionalKey(P.NonNegativeInteger),
+  }),
   'memory.recall': P.MemoryRecallInput,
   'memory.read': Schema.Struct({
     item_id: Schema.optionalKey(P.UUID),
@@ -603,13 +615,19 @@ const source = (c: ProjectToolContext): ProjectThreadSource => ({
   toolCallId: c.toolCallId,
 })
 const pendingExec = Effect.fnUntraced(function* (c: ProjectToolContext) {
-  const thread = yield* threads.readExec(c, c)
-  if (!thread) return yield* Effect.fail(new AppError(404, 'not_found'))
-  return thread
+  const execution = yield* executions.readByOrigin(c, c)
+  if (!execution) return yield* Effect.fail(new AppError(404, 'not_found'))
+  return execution
 })
 const pendingValue = (row: { id: string; version: number; remaining: number }): ProjectToolExecution => ({
   pending: true,
-  value: { pending: true, thread_id: row.id, version: row.version, wait_remaining_ms: row.remaining, wait_protocol: 1 },
+  value: {
+    pending: true,
+    execution_id: row.id,
+    version: row.version,
+    wait_remaining_ms: row.remaining,
+    wait_protocol: 1,
+  },
 })
 
 const executeBusiness = Effect.fnUntraced(function* (
@@ -751,7 +769,6 @@ const executeBusiness = Effect.fnUntraced(function* (
     }
     case 'threads.create': {
       const a = yield* strictDecode(schemas[name], args)
-      if (a.agent_type === 'shell') return yield* Effect.fail(new AppError(422, 'shell_requires_exec'))
       const r = yield* threads.create(
         c.employeeId,
         {
@@ -844,26 +861,33 @@ const executeBusiness = Effect.fnUntraced(function* (
     }
     case 'nodes.exec': {
       const a = yield* strictDecode(schemas[name], args)
-      const existing = yield* threads.readExec(c, c)
-      if (!existing)
-        yield* threads.create(
-          c.employeeId,
-          {
-            client_thread_id: `pa:${c.conversationId}:${c.toolCallId}`,
-            node_id: a.node_id,
-            agent_type: 'shell',
-            working_directory: a.working_directory,
-            message: { client_message_id: `pa:${c.conversationId}:${c.toolCallId}:0`, content: a.command },
-          },
-          {
-            ...source(c),
-            shellExec: true,
-            executionTimeoutSeconds: a.timeout_seconds ?? 7200,
-            waitSeconds: a.wait_seconds ?? 30,
-          },
-        )
-      const thread = yield* pendingExec(c)
-      return { ...pendingValue(thread), changedThreadId: thread.id }
+      yield* executions.create(c, a)
+      return pendingValue(yield* pendingExec(c))
+    }
+    case 'executions.list': {
+      const a = yield* strictDecode(schemas[name], args)
+      return { value: yield* page(yield* executions.list(c, a.after_id), a) }
+    }
+    case 'executions.get': {
+      const a = yield* strictDecode(schemas[name], args)
+      return { value: yield* page(yield* executions.get(c, a.execution_id), a) }
+    }
+    case 'executions.stop': {
+      const a = yield* strictDecode(schemas[name], args)
+      const execution = yield* executions.stop(c, a.execution_id)
+      return {
+        value: {
+          execution_id: execution.id,
+          status: execution.status,
+          version: execution.version,
+          stop_requested_at: execution.stop_requested_at,
+          read_tool: 'executions.get',
+        },
+      }
+    }
+    case 'executions.output': {
+      const a = yield* strictDecode(schemas[name], args)
+      return { value: yield* executions.readOutput(c, a.execution_id, a) }
     }
     default:
       return yield* Effect.fail(new AppError(422, 'unknown_tool'))
@@ -888,22 +912,34 @@ const toolTransaction = (body: Effect.Effect<ProjectToolExecution, AppError | Sq
 const waitProjectTool = (c: ProjectToolContext, finishWait = false) =>
   toolTransaction(
     Effect.gen(function* () {
-      const result = yield* threads.waitForExec(c, c, finishWait)
-      const r = result.thread
+      const result = yield* executions.waitForExecution(c, c, finishWait)
+      const r = result.execution
       if (result.pending) return pendingValue(r)
-      const { terminal, command } = result
+      const terminal = executions.terminal(r.status)
+      const command =
+        r.output === undefined
+          ? undefined
+          : {
+              output: r.output,
+              total_bytes: r.total_bytes ?? 0,
+              truncated: r.truncated ?? false,
+              ...(r.encoding ? { encoding: r.encoding } : {}),
+              ...(r.exit_code === undefined ? {} : { exit_code: r.exit_code }),
+              ...(r.full_output ? { full_output: r.full_output } : {}),
+            }
       const value = {
-        thread_id: r.id,
+        execution_id: r.id,
         status: r.status,
-        status_reason: r.status_reason,
+        reason: r.reason,
         version: r.version,
-        read_tool: 'threads.read',
+        read_tool: 'executions.get',
+        ...(r.status === 'unknown' ? { automatic_retry: false } : {}),
         ...(command
           ? { command_result: command }
           : {
               message: terminal
-                ? `命令已结束，执行结果不可用；请查看 Thread ${r.id}`
-                : `仍在执行，Thread ID 为 ${r.id}，结束后输出会作为新输入送回`,
+                ? `命令已结束，状态为 ${r.status}；请查看 Execution ${r.id}`
+                : `仍在执行，Execution ID 为 ${r.id}，结束后输出会作为新输入送回`,
             }),
       }
       if (command) {
@@ -918,16 +954,16 @@ const waitProjectTool = (c: ProjectToolContext, finishWait = false) =>
       }
       return {
         value,
-        ...(terminal ? { consumeThreadId: r.id } : {}),
-        ...(terminal && (!command || r.status === 'unknown') ? { isError: true } : {}),
+        ...(terminal ? { consumeExecutionId: r.id } : {}),
+        ...(terminal && r.status !== 'completed' ? { isError: true } : {}),
       }
     }),
   )
-const consumeProjectExecInputs = (c: ProjectToolContext, threadId: string, resultSeq: number) =>
+const consumeProjectExecInputs = (c: ProjectToolContext, executionId: string, resultSeq: number) =>
   transaction(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      yield* sql`UPDATE project_agent_input_queue SET delivered_seq=${resultSeq},wake_required=false WHERE employee_id=${c.employeeId} AND agent_id=${c.agentId} AND delivered_seq IS NULL AND payload->>'thread_id'=${threadId} AND ((source_type='turn_ended' AND source_key=${`thread:${threadId}:turn:1`}) OR (source_type='thread_reply' AND payload->>'worker_turn_seq'='1') OR (source_type='thread_message_failed' AND source_key=${`thread:${threadId}:message:unknown`}))`
+      yield* sql`UPDATE project_agent_input_queue SET delivered_seq=${resultSeq},wake_required=false WHERE employee_id=${c.employeeId} AND agent_id=${c.agentId} AND delivered_seq IS NULL AND source_type='execution.finished' AND source_key=${`execution:${executionId}:finished`}`
     }),
   )
 function boundedToolText(text: string, maxBytes: number) {

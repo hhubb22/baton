@@ -35,6 +35,9 @@ export const finalizeRestore = Effect.fn('finalizeRestore')(function* (signingKe
       WHERE m.status IN ('accepted','queued','sent')
         AND NOT EXISTS(SELECT 1 FROM thread_turns v WHERE v.id=m.turn_id AND v.ended_at IS NOT NULL)`
         yield* sql`UPDATE thread_outbox SET next_attempt_at='infinity' WHERE completed_at IS NULL`
+        yield* sql`UPDATE executions SET status='unknown',reason=${reason},finished_at=clock_timestamp(),version=version+1
+          WHERE status IN ('pending','running')`
+        yield* sql`UPDATE execution_outbox SET next_attempt_at='infinity' WHERE acked_at IS NULL`
 
         yield* sql`UPDATE projects SET status='paused',version=version+1,updated_at=clock_timestamp() WHERE status='active'`
         yield* sql`UPDATE agent_runs SET state='lost',ended_at=clock_timestamp(),end_reason=${reason},

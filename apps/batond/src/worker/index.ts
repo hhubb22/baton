@@ -782,11 +782,6 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         yield* event.acknowledge
         return
       }
-      if (recovering && state.config?.agent_type === 'shell') {
-        if (buffered.length >= 256) return yield* uncertain('shell recovery event buffer overflow')
-        buffered.push(event)
-        return
-      }
       if (event.type === 'uncertain') {
         yield* uncertain(event.reason)
         return
@@ -913,15 +908,14 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
               (entry) =>
                 entry.report.kind === 'turn.item' &&
                 entry.report.worker_turn_seq === current.turn &&
-                (entry.itemId ?? entry.report.item?.id) ===
-                  (draft.config?.agent_type === 'shell' ? `shell:${current.turn}` : event.item.id),
+                (entry.itemId ?? entry.report.item?.id) === event.item.id,
             )
           )
             return
           report(draft, 'turn.item', {
             client_message_id: event.messageId,
             worker_turn_seq: current.turn,
-            item: draft.config?.agent_type === 'shell' ? { ...event.item, id: `shell:${current.turn}` } : event.item,
+            item: event.item,
             truncated: event.truncated ?? false,
             original_bytes: event.original_bytes ?? Buffer.byteLength(JSON.stringify(event.item.data)),
             ...(event.metadata ? { metadata: event.metadata } : {}),
@@ -980,13 +974,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
             ...(event.tokenUsage === undefined ? {} : { token_usage: event.tokenUsage }),
           })
           delete draft.activeMessage
-          if (draft.phase !== 'stopping') {
-            if (draft.config?.agent_type === 'shell') {
-              draft.phase = 'stopped'
-              draft.processTreeStopped = true
-              report(draft, 'thread.stopped', { reason: 'completed' })
-            } else draft.phase = 'idle'
-          }
+          if (draft.phase !== 'stopping') draft.phase = 'idle'
         }
       })
       if (event.type === 'end' && state.phase === 'stopping' && stopEvidence)
@@ -1064,7 +1052,6 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         // Cancellation has a separate path even when open/send is still pending.
         yield* current.abort().pipe(Effect.timeout(Math.min(5000, stopMs)), Effect.ignore)
         if (interrupted) yield* Fiber.interrupt(interrupted)
-        if (state.config?.agent_type === 'shell') return (yield* current.reap()).processTreeStopped
         if (reclaimedOnRecovery) return true
         if (!active || active.state === 'queued') return true
         yield* Deferred.await(evidence)
@@ -1121,10 +1108,6 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
               if (reaped.processTreeStopped) yield* retireAgent(current)
               yield* commit((draft) => {
                 const unknown =
-                  (config.agent_type === 'shell' &&
-                    !!active &&
-                    active.state !== 'queued' &&
-                    !draft.messages[active.input.id]?.ended) ||
                   !stopped ||
                   draft.phase === 'unknown' ||
                   Object.values(draft.messages).some((message) => message.state === 'unknown')
@@ -1570,19 +1553,6 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       switch (action) {
         case 'open': {
           if (draft.config || !request.open_config) return reject('invalid_state', 'Thread already has an open command')
-          const config = request.open_config
-          if (
-            config.agent_type === 'shell' &&
-            (!config.project_id ||
-              !config.origin_conversation_id ||
-              !config.origin_tool_call_id ||
-              config.model ||
-              config.adapter_config.model)
-          )
-            return reject(
-              'invalid_shell_origin',
-              'shell commands require a Project tool origin and do not accept models',
-            )
           draft.config = request.open_config
           draft.phase = 'opening'
           break
@@ -1620,8 +1590,6 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
             if (draft.phase !== 'busy' || !target || target.ended || target.turn === undefined)
               return reject('invalid_state', 'Steering requires an active target turn')
           }
-          if (draft.config?.agent_type === 'shell' && Object.keys(draft.messages).length > 0)
-            return reject('unsupported', 'shell Thread accepts only one command')
           if (draft.phase === 'stopped' || draft.phase === 'unknown') {
             if (!draft.opened || !draft.nativeId)
               return reject('invalid_state', 'Cannot resume a Thread without a successfully opened native mapping')
@@ -1661,7 +1629,6 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
           break
         }
         case 'resume': {
-          if (draft.config?.agent_type === 'shell') return reject('unsupported', 'shell Thread cannot be resumed')
           if (
             !draft.opened ||
             !draft.nativeId ||
@@ -1827,49 +1794,6 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       }
       yield* commit((draft) => cancelQuestions(draft, 'Agent restarted; question is no longer available'))
       const current = yield* ensureAgent()
-      if (state.config.agent_type === 'shell' && state.opened && state.nativeId && state.phase !== 'unknown') {
-        const active = state.activeMessage ? structuredClone(state.messages[state.activeMessage]) : undefined
-        const config = state.config
-        const nativeId = state.nativeId
-        const restoreQueued = state.phase === 'idle' && state.turn === 0
-        yield* launch(
-          newOperation('recover'),
-          Effect.gen(function* () {
-            if (!(yield* recoverPersistedProcesses())) return { processTreeStopped: false }
-            if (active && !active.ended && (active.state === 'intent' || active.state === 'sent')) {
-              return { processTreeStopped: true, acceptance: yield* recoverInput(current, active) }
-            }
-            if (restoreQueued) yield* current.resume(nativeId, config).pipe(Effect.timeout(openMs))
-            return { processTreeStopped: true }
-          }).pipe(Effect.timeout(stopMs)),
-          (result) =>
-            Effect.gen(function* () {
-              yield* commit((draft) => {
-                if (Exit.isFailure(result) || !result.value.processTreeStopped) {
-                  markUnknown(draft, 'shell execution or previous process-tree termination could not be verified')
-                  return
-                }
-                draft.processTreeStopped = true
-                if (active && !active.ended && (active.state === 'intent' || active.state === 'sent')) {
-                  const acceptance = 'acceptance' in result.value ? result.value.acceptance : undefined
-                  if (
-                    !acceptance ||
-                    acceptance.nativeSessionId !== draft.nativeId ||
-                    (active.executionId && acceptance.executionId !== active.executionId)
-                  ) {
-                    markUnknown(draft, 'shell completion evidence is missing or does not match the persisted command')
-                    return
-                  }
-                  draft.phase = 'busy'
-                  if (active.state === 'intent') accepted(draft, active.input.id, acceptance)
-                }
-              })
-              recovering = false
-              yield* flushBuffered()
-            }),
-        )
-        return
-      }
       const recoveryTask = Effect.gen(function* () {
         if (!(yield* recoverPersistedProcesses())) return { processTreeStopped: false }
         return yield* current.reap()

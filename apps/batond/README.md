@@ -84,7 +84,7 @@ pnpm --filter @baton/batond dev project-exec --enabled=false
 
 目录和执行开关使用与 daemon 相同的 `--data-dir`，配置通过私有文件锁与原子替换保存。重复添加同一真实目录返回已有记录；移除全部目录后保留空列表。在线设备也可在网页保存这些设置，中心等待本机确认后才显示成功。`browse-roots.json` 的 `maxRoots` 默认 256，可配置为 1～4096 的整数；修改目录时保留该设置。例如 `{"maxRoots":512,"roots":[{"id":"dev","path":"/绝对路径/工作目录"}]}`。每个目录仍须逐项授权，设备报告仍保留 64 KiB 总容量限制，超限时裁剪仓库、模型和目录并标记 `truncated`；本地授权清单保留全部目录。网页 Devices 展开设备后通过独立管理请求分页读取全部授权目录，每页 JSON 不超过 48 KiB；本地 `files list` 也可查询完整清单。翻页期间清单变化会提示重新读取。目录增删的确认响应返回有界摘要，随后刷新完整清单。
 
-命令执行默认关闭。开启后，Project Agent 以设备用户身份执行任意命令；Baton 不提供沙箱，目录授权限制命令启动位置。每条命令和输出保存在 Thread 中。受限 shell 只允许 `nodes.exec` 创建一个 Turn，默认执行时限 7200 秒，等待结果的时间与命令时限分别计算。完成记录、未知结果及输出编码见 [shell 文档](src/agents/shell/README.md)。
+命令执行默认关闭。开启后，Project Agent 以设备用户身份执行任意命令；Baton 不提供沙箱，目录授权限制命令启动位置。`nodes.exec` 创建独立 Execution，命令进程由 `src/execution` 管理，启动意图、停止标记和报告保存在私有 SQLite 账本。默认执行时限 7200 秒，工具等待时间与命令时限分别计算。完成证据先保存再上报，无法确认结果时标为 `unknown` 且不自动重跑。状态、输出与恢复规则见 [Project Agent 设计](../../specs/project-agent/TECH.md#10-在节点上执行命令)。
 
 订阅凭据使用 `BATON_PROJECT_RUNTIME_DATA_DIR`，默认 `~/.baton/project-runtime`，登录与 daemon 使用相同的系统用户和目录。`subscriptions` 只读取本地凭据和静态模型目录；终端登录接受 provider ID，支持 `openai-codex`、`xai`、`anthropic`，也识别 ChatGPT、xAI、Claude 别名；实际登录方式由 Runtime 注册的实现决定。API key 从 Runtime 的 `login-api-key <provider>` 标准输入配置，支持 xAI 与 Anthropic，命令和私有文件要求见 [Runtime 登录说明](../../runtimes/project-agent/README.md#运行与凭据)。Runtime 不读取环境 API key 或其他 CLI 的凭据，每个 provider 的 API key 与 OAuth 登录互相替换。网页根据设备报告的 `login_methods` 提供设备码登录或设备本地配置命令。已声明 provider 的认证状态为 `unknown` 时允许启动并由实际请求检查；明确 `login_required` 时等待登录。已知凭据权限、属主或路径错误保留具体安全原因，启动失败后可从运行的 `end_reason` 查看。网页设备码登录在取码后继续后台等待，最多 15 分钟，同服务的新请求替换旧登录，退出后刷新能力报告。凭据留在设备。
 
