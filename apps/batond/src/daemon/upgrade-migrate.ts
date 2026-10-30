@@ -12,6 +12,7 @@ import { isMissing } from './identity.ts'
 import { readUpgradeState, saveUpgradeState, upgradeBlockers, type UpgradeState } from './upgrade.ts'
 import { readUpgradePackage, sameRelease, upgradeLedgers } from './upgrade-check.ts'
 import { createUpgradeBackup, verifyUpgradeBackup } from './upgrade-backup.ts'
+import { migrateNodeLedger } from './upgrade-node-ledger.ts'
 
 /** 节点锁覆盖备份、逐库核验和阶段提交；根配置沿用各自已有的写锁。 */
 export async function migrateUpgrade(dataDirectory: string): Promise<UpgradeState> {
@@ -78,8 +79,10 @@ export async function migrateUpgrade(dataDirectory: string): Promise<UpgradeStat
           if (!isMissing(error)) throw error
           await writePrivateFileAtomic(file.path, '')
         }
-        if (file.kind === 'node') await Effect.runPromise(Effect.scoped(makeNodeLedger(file.path)))
-        else if (file.kind === 'project') await Effect.runPromise(Effect.scoped(makeProjectLedger(file.path)))
+        if (file.kind === 'node') {
+          migrateNodeLedger(file.path)
+          await Effect.runPromise(Effect.scoped(makeNodeLedger(file.path)))
+        } else if (file.kind === 'project') await Effect.runPromise(Effect.scoped(makeProjectLedger(file.path)))
         else await Effect.runPromise(Effect.scoped(openWorkerLedger({ dbPath: file.path, dataDirectory: directory })))
       }
       state = { ...state, phase: 'syncing' }

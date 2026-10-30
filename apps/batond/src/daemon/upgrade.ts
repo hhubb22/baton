@@ -12,7 +12,7 @@ import { IPCError, requestWorker } from './ipc.ts'
 import { workerPaths } from './paths.ts'
 import { readLedger } from '../worker/ledger.ts'
 import { checkStorageFormat } from '../storage-format.ts'
-import { storageBaseline as nodeBaseline } from './ledger.ts'
+import { checkNodeUpgradeStorage } from './upgrade-node-ledger.ts'
 import { storageBaseline as projectBaseline } from '../project/ledger.ts'
 import {
   checkUpgrade,
@@ -249,11 +249,8 @@ export async function upgradeBlockers(
     let db: DatabaseSync | undefined
     try {
       await stat(join(directory, filename))
-      checkStorageFormat(
-        join(directory, filename),
-        table === 'project_processes' ? 'project' : 'node',
-        table === 'project_processes' ? projectBaseline : nodeBaseline,
-      )
+      if (table === 'project_processes') checkStorageFormat(join(directory, filename), 'project', projectBaseline)
+      else checkNodeUpgradeStorage(join(directory, filename))
       db = new DatabaseSync(join(directory, filename), { readOnly: true })
       if (table === 'project_processes') {
         for (const row of db

@@ -12,6 +12,7 @@ import { storageBaseline as threadBaseline } from '../worker/ledger.ts'
 import { coordinatorURL, isMissing, loadIdentity, loadCoordinatorCA } from './identity.ts'
 import { IPCError } from './ipc.ts'
 import { backupSpace } from './upgrade-backup.ts'
+import { checkNodeUpgradeStorage } from './upgrade-node-ledger.ts'
 
 export const sameRelease = (left: ReleaseMetadata, right: ReleaseMetadata) =>
   left.version === right.version &&
@@ -117,7 +118,8 @@ export function centerRelease(url: string, ca?: string): Promise<ReleaseMetadata
 
 export async function checkUpgradeStorage(directory: string, release: ReleaseMetadata) {
   for (const file of await upgradeLedgers(directory)) {
-    checkStorageFormat(file.path, file.kind, file.baseline)
+    if (file.kind === 'node') checkNodeUpgradeStorage(file.path)
+    else checkStorageFormat(file.path, file.kind, file.baseline)
     const version = LEDGER_VERSIONS[file.kind]
     if (release.ledger_versions[file.kind] !== version)
       throw new IPCError(

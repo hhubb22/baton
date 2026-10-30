@@ -130,6 +130,49 @@ async function snapshot(path: string) {
   return files
 }
 
+it('migrates a v0.1.3 node ledger while preserving unacknowledged reports and the backup', async () => {
+  const f = await fixture()
+  const file = join(f.path, 'node.db')
+  const checksum = 'b0c6072be2ce435eb49ad22fe645cddabc081ff54b540386f06f1b9fae98c880'
+  edit(
+    file,
+    `BEGIN;
+    ALTER TABLE node_outbox DROP COLUMN created_ms;
+    UPDATE storage_format SET version=1;
+    UPDATE storage_migrations SET checksum='${checksum}';
+    COMMIT;`,
+  )
+  const prepared = await manageUpgrade(f.path, 'prepare', { package: f.target, self: true })
+  expect(prepared).toMatchObject({ state: { phase: 'draining' } })
+  const status = await manageUpgrade(f.path, 'status')
+  expect(status).toMatchObject({ state: { phase: 'ready' }, blockers: [] })
+  const state = await migrateUpgrade(f.path)
+  expect(state.phase).toBe('syncing')
+  expect(
+    await Effect.runPromise(
+      Effect.scoped(makeNodeLedger(file).pipe(Effect.flatMap((ledger) => ledger.pendingReports()))),
+    ),
+  ).toEqual([f.report])
+  await saveUpgradeState(f.path, { ...state, phase: 'migrating' })
+  expect((await migrateUpgrade(f.path)).backup_path).toBe(state.backup_path)
+  const backup = new DatabaseSync(join(state.backup_path!, 'data', 'node.db'), { readOnly: true })
+  try {
+    expect(backup.prepare('SELECT version FROM storage_format').get()).toEqual({ version: 1 })
+    expect(backup.prepare('SELECT count(*) AS count FROM node_outbox WHERE acked=0').get()).toEqual({ count: 1 })
+  } finally {
+    backup.close()
+  }
+})
+
+it('rejects a legacy node ledger with a changed baseline checksum', async () => {
+  const f = await fixture()
+  const file = join(f.path, 'node.db')
+  edit(file, "UPDATE storage_format SET version=1; UPDATE storage_migrations SET checksum='tampered'")
+  await expect(manageUpgrade(f.path, 'prepare', { package: f.target, self: true })).rejects.toMatchObject({
+    code: 'migration_checksum_mismatch',
+  })
+})
+
 it('uses the saved CA for upgrade checks and lets the CLI override it without changing the saved file', async () => {
   const f = await fixture()
   const ca = join(f.path, 'coordinator-ca.pem')
