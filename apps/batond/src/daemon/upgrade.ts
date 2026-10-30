@@ -322,7 +322,7 @@ export async function upgradeBlockers(
           // 只按表判断会把正在运行的探测报成未确认清理，升级因此永远无法就绪。
           // 只有在登记时拿到了确切创建时间、且该进程已确认退出（或 pid 已被复用）时才不再阻碍；
           // creationTime 为 unknown 表示登记时就没拿到身份，无法核实，保持保守仍报为阻碍。
-          // 查询失败（如 Windows CIM 超时）不能当作已退出，否则仍在写账本的 Runtime 会被放行迁移。
+          // 查询失败不能当作已退出，否则仍在写账本的 Runtime 会被放行迁移。
           if (record.creationTime !== 'unknown') {
             const identity = await readProcessIdentity(record.pid).then(
               (value) => value,

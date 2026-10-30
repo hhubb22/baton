@@ -31,7 +31,7 @@ export const powershell = (source: string): Promise<string> =>
 
 export interface ProcessIdentity {
   readonly pid: number
-  /** Linux boot ID + start ticks; Darwin ps lstart (seconds); Windows CIM UTC ticks. */
+  /** Linux boot ID + start ticks; Darwin ps lstart (seconds); Windows process UTC ticks. */
   readonly creationTime: string
 }
 
@@ -44,9 +44,9 @@ export async function readProcessIdentity(pid: number): Promise<ProcessIdentity 
   validatePid(pid)
   if (process.platform === 'win32') {
     const creationTime = await powershell(
-      `$p = Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'; if ($null -ne $p) { $p.CreationDate.ToUniversalTime().Ticks.ToString([Globalization.CultureInfo]::InvariantCulture) }`,
+      `$p = $null; try { $p = [Diagnostics.Process]::GetProcessById(${pid}) } catch { if ($_.Exception.InnerException -is [ArgumentException]) { return }; throw }; try { [Console]::Out.WriteLine($p.StartTime.ToUniversalTime().Ticks.ToString([Globalization.CultureInfo]::InvariantCulture)) } catch { if (-not $p.HasExited) { throw } } finally { $p.Dispose() }`,
     )
-    if (creationTime && !/^\d+$/.test(creationTime)) throw new Error('Invalid CIM creation time')
+    if (creationTime && !/^\d+$/.test(creationTime)) throw new Error('Invalid process creation time')
     return creationTime ? { pid, creationTime } : null
   }
   if (process.platform === 'linux') {

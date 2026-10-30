@@ -22,7 +22,7 @@ Windows 不设置或校验 ACL，私有目录沿用数据目录继承的权限�
 
 `readProcessLock(path)` 返回记录或 null；格式损坏、类型或权限错误会抛错。`processLockIsHeld(path)` 核对记录中的 PID 与创建时间，供 Host 在拉起 Worker 前区分启动中与已退出的 Worker。`isProcessAlive(record)` 可直接核对身份。检查失败不能作为锁空闲的依据；Host 对 launch.lock 的持有期间应再次探测认证 IPC。
 
-锁先在相邻随机目录中完整写入所有者记录，再原子 rename 到目标。活进程持有时抛 `ProcessLockBusy`；stale 回收与 release 仅删除核验过的 token 文件，rmdir 不会移除新所有者的非空目录。Linux 创建时间使用 boot ID 与 /proc start ticks，macOS 使用固定 UTC 的 ps lstart（精度为秒），Windows 使用 CIM UTC ticks。macOS 同秒 PID 复用无法仅凭 ps 精确区分。
+锁先在相邻随机目录中完整写入所有者记录，再原子 rename 到目标。活进程持有时抛 `ProcessLockBusy`；stale 回收与 release 仅删除核验过的 token 文件，rmdir 不会移除新所有者的非空目录。Linux 创建时间使用 boot ID 与 /proc start ticks，macOS 使用固定 UTC 的 ps lstart（精度为秒），Windows 使用 .NET 进程创建时间的 UTC ticks。macOS 同秒 PID 复用无法仅凭 ps 精确区分。
 
 ## 进程
 
@@ -62,9 +62,9 @@ CLI 的 `watchdog` 分支调用 `await runWatchdogCommand()`，此分支 stdout 
 
 `spawnOwnedProcessEffect` 将 Effect 中断连接到启动取消，并等待清理；`spawnOwnedProcessScoped` 在 Scope 关闭时回收。`spawnDetachedWorker(command)` 使用 detached + ignore stdio + unref，允许 Worker 在 batond 退出后继续运行。Worker 由自己的独占锁与认证 IPC 管理，不能作为 OwnedProcess 登记到 batond 的 watchdog。
 
-Windows 必须提供 `records: { add, remove }`。add 在返回 OwnedProcess 前完成，remove 在回收确认后调用。Worker 重启时将账本记录交给 `recoverRecordedProcesses(records, { remove })`：CIM 创建时间一致时 taskkill /PID /T /F，身份不匹配则保留无关进程并清除失效记录。该路径尚未在 Windows 实机验证。
+Windows 必须提供 `records: { add, remove }`。add 在返回 OwnedProcess 前完成，remove 在回收确认后调用。Worker 重启时将账本记录交给 `recoverRecordedProcesses(records, { remove })`：创建时间一致时 taskkill /PID /T /F，身份不匹配则保留无关进程并清除失效记录。该路径尚未在 Windows 实机验证。
 
-Windows 第一版按设计保留三个限制：taskkill 可能遗漏中间父进程提前退出后的后代；Worker 崩溃后直到下一次启动之间，Agent 会继续运行；CIM 核验与 taskkill 之间存在 PID 复用竞争。Windows 返回的 reaped 表示 taskkill 完成且记录中的根进程已退出，其保证受这些限制约束。
+Windows 第一版按设计保留三个限制：taskkill 可能遗漏中间父进程提前退出后的后代；Worker 崩溃后直到下一次启动之间，Agent 会继续运行；身份核验与 taskkill 之间存在 PID 复用竞争。Windows 返回的 reaped 表示 taskkill 完成且记录中的根进程已退出，其保证受这些限制约束。
 
 ## 本地验证
 

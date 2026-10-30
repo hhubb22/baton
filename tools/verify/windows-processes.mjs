@@ -46,20 +46,20 @@ if (role === '--leaf') {
   const registered = []
   function creationTime(pid) {
     if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('Invalid PID')
-    const source = `$ErrorActionPreference = 'Stop'; $p = Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'; if ($null -ne $p) { $p.CreationDate.ToUniversalTime().Ticks.ToString([Globalization.CultureInfo]::InvariantCulture) }`
+    const source = `$ErrorActionPreference = 'Stop'; $p = $null; try { $p = [Diagnostics.Process]::GetProcessById(${pid}) } catch { if ($_.Exception.InnerException -is [ArgumentException]) { return }; throw }; try { [Console]::Out.WriteLine($p.StartTime.ToUniversalTime().Ticks.ToString([Globalization.CultureInfo]::InvariantCulture)) } catch { if (-not $p.HasExited) { throw } } finally { $p.Dispose() }`
     const output = execFileSync(
       powershell,
       ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(source, 'utf16le').toString('base64')],
       { encoding: 'utf8', timeout: 15_000, env: isolatedEnv(directory) },
     ).trim()
-    if (output && !/^\d+$/.test(output)) throw new Error('Unexpected CIM creation time')
+    if (output && !/^\d+$/.test(output)) throw new Error('Unexpected process creation time')
     return output || null
   }
   function guardedKill(entry) {
     const current = creationTime(entry.pid)
     if (!current || current !== entry.createdAtTicks)
       return { killed: false, current, reason: current ? 'creation-time-mismatch' : 'already-exited' }
-    // CIM check followed by taskkill has a TOCTOU interval; this is not a Job Object guarantee.
+    // Identity check followed by taskkill has a TOCTOU interval; this is not a Job Object guarantee.
     execFileSync(taskkill, ['/PID', String(entry.pid), '/T', '/F'], {
       stdio: 'pipe',
       timeout: 15_000,
@@ -128,7 +128,7 @@ if (role === '--leaf') {
           exitedIntermediate,
           orphanGapObserved: Boolean(exitedIntermediate.survivors.leaf),
           limitations: [
-            'CIM and taskkill are not atomic; PID reuse between the check and termination remains possible.',
+            'Identity validation and taskkill are not atomic; PID reuse between the check and termination remains possible.',
             'This script does not measure the delay from Worker crash to its next restart.',
           ],
         },

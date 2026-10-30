@@ -71,7 +71,7 @@ node tools/measure/worker-startup.mjs 100 --package bin/package --ledger 2000
 
 `measure/worker-startup.mjs [样本数=100] --package <安装目录> [--ledger 事务数] [--prepared 驱动目录]` 要求实际安装包，并保留旁置依赖。每个样本使用新 Worker、Thread 和 SQLite 账本，在空 PATH、临时 HOME 下调用真实 `LocalWorkerHost`。计时从实际 spawn 前开始，到外部调用方收到 `worker_ready=true` 的认证 status 为止；另报含目录和令牌准备的 Host 总耗时。驱动验证错误令牌被拒绝、Worker 独占锁、实际迁移与 WAL 模式。就绪时 `agent_ready=false`，不打开 Agent 会话。
 
-POSIX 核对 watchdog 身份，发送 SIGTERM 后等待 Worker、watchdog 退出和锁释放。Windows 核对 CIM 创建时间，再用 `taskkill /T /F` 终止，报告 `graceful=false`；创建时间检查与终止之间仍有竞争窗口。macOS 使用短临时路径以满足 UDS 限制。
+POSIX 核对 watchdog 身份，发送 SIGTERM 后等待 Worker、watchdog 退出和锁释放。Windows 核对 .NET 进程创建时间的 UTC ticks，再用 `taskkill /T /F` 终止，报告 `graceful=false`；创建时间检查与终止之间仍有竞争窗口。macOS 使用短临时路径以满足 UDS 限制。
 
 报告第一样本、p50、p99、最大值与清理方式；任一样本达到 Host 就绪预算（Windows 10 秒，其余系统 3 秒）、就绪超时或清理失败时非零退出。不清空系统页缓存，不测已有会话的恢复耗时。
 
@@ -103,7 +103,7 @@ node tools/release/cache-node.mjs 26.11.1 darwin-arm64
 node tools/verify/windows-processes.mjs
 ```
 
-脚本只终止自己创建并登记过的进程，以 CIM 创建时间识别进程，检查完整父子孙进程树的 `taskkill /T /F` 回收、过期创建时间对无关进程的保护，以及中间父进程退出后是否遗漏孙进程。非 Windows 系统输出 `not-measured`。检查不强迫操作系统复用 PID，也不验证 Worker 崩溃后的重启行为。
+脚本只终止自己创建并登记过的进程，以 .NET 进程创建时间的 UTC ticks 识别进程，检查完整父子孙进程树的 `taskkill /T /F` 回收、过期创建时间对无关进程的保护，以及中间父进程退出后是否遗漏孙进程。非 Windows 系统输出 `not-measured`。检查不强迫操作系统复用 PID，也不验证 Worker 崩溃后的重启行为。
 
 ## 工具测试
 

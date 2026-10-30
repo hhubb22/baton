@@ -22,7 +22,7 @@ export async function reapProcessTree(identity: ProcessIdentity, timeoutMs = 200
   if (current && current.creationTime !== identity.creationTime) return { reaped: false, reason: 'identity-mismatch' }
   if (process.platform === 'win32') {
     if (!current) return { reaped: true }
-    // CIM validation and taskkill are not atomic. Orphans of an exited intermediate process can escape /T.
+    // Identity validation and taskkill are not atomic. Orphans of an exited intermediate process can escape /T.
     try {
       await systemCommand(windowsTool('taskkill.exe'), ['/PID', String(identity.pid), '/T', '/F'])
     } catch (error) {
