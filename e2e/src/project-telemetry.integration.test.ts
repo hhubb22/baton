@@ -145,6 +145,8 @@ test('exports the center placement and real Project Runtime model call in one tr
             ...telemetryEnvironment(relay),
             BATON_TELEMETRY_NODE_ID: identity.node_id,
             OTEL_BSP_SCHEDULE_DELAY: '30',
+            OTEL_LOGS_EXPORTER: 'none',
+            OTEL_METRICS_EXPORTER: 'none',
           }),
         ),
       ),
@@ -175,15 +177,10 @@ test('exports the center placement and real Project Runtime model call in one tr
       ).status,
     ).toBe(202)
     await expect
-      .poll(
-        () =>
-          spans.some(
-            (span) =>
-              span.service === 'baton-project-runtime' && span.name === 'baton.project.run' && span.traceId === trace,
-          ),
-        { timeout: 30000 },
-      )
-      .toBe(true)
+      .poll(() => spans.filter((span) => span.traceId === trace).map(({ service, name }) => ({ service, name })), {
+        timeout: 30000,
+      })
+      .toContainEqual({ service: 'baton-project-runtime', name: 'baton.project.run' })
     const run = spans.find(
       (span) => span.service === 'baton-project-runtime' && span.name === 'baton.project.run' && span.traceId === trace,
     )!
