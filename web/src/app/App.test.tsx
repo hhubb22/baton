@@ -451,12 +451,13 @@ describe('projects', () => {
     expect(screen.getByRole('region', { name: '已新建 1 个对话' })).toBeInTheDocument()
     expect(screen.getByText(/Compat suite is in/)).toBeInTheDocument()
     await advance(scheduler, 30000)
-    await waitFor(() =>
-      expect(screen.getByRole('region', { name: '对话' })).toHaveTextContent('The suite finished with 2 failures'),
-    )
+    await waitFor(() => {
+      const conversation = screen.getByRole('region', { name: '对话' })
+      expect(conversation).toHaveTextContent('The suite finished with 2 failures')
+      expect(conversation).toHaveTextContent('Opened a thread on Windows Desktop')
+    })
     expect(screen.getAllByRole('button', { name: '执行过程' })).toHaveLength(2)
     expect(process).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByRole('region', { name: '对话' })).toHaveTextContent('Opened a thread on Windows Desktop')
   })
 
   it('streams a project preview and replaces it when the saved reply arrives before status refresh', async () => {
