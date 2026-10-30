@@ -451,6 +451,29 @@ describe('projects', () => {
     expect(screen.queryByText('4f2c9e1 Add drive letter cases to path tests')).not.toBeInTheDocument()
   })
 
+  it('opens an unknown shell execution that is absent from the conversation list', async () => {
+    const user = userEvent.setup()
+    const { router } = renderApp('/projects/prj-compat', 'normal', (client) => {
+      const read = client.getThread.bind(client)
+      client.getThread = async (id) =>
+        id === 'shell-execution' ? { ...(await read('thr-compat')), id, agent: null } : read(id)
+      client.listProjectEntries = async () => [
+        {
+          id: 'failure',
+          projectId: 'prj-compat',
+          kind: 'threadFailure',
+          threadId: 'shell-execution',
+          cause: 'unknown',
+          createdAt: 1,
+        },
+      ]
+    })
+    const row = await screen.findByRole('button', { name: /无法确认执行结果/ })
+    expect(row).toHaveTextContent('命令可能已经产生副作用，助手不会自动重发。')
+    await user.click(row)
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ thread: 'shell-execution' }))
+  })
+
   it('streams a project preview and replaces it when the saved reply arrives before status refresh', async () => {
     let preview: { afterSeq: number; text: string; truncated: boolean } | null = {
       afterSeq: 7,

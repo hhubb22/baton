@@ -52,6 +52,7 @@ import {
   useSendProjectMessage,
   useSetProjectStatus,
   useStopProjectRun,
+  useThread,
   useThreads,
   useStableThreadOrder,
 } from '../data/queries'
@@ -622,24 +623,28 @@ const failureReasons: Record<ThreadFailureCause, (agent: string) => string> = {
   other: () => '打开 Thread 查看原因。',
 }
 
-// 项目助手发给 Thread 的消息没有送达：一行 Thread 加一句原因，完整错误在 Thread 详情里。
+// 显示消息或执行结果，并提供 Thread 详情入口。
 function ThreadFailure({
   cause,
+  threadId,
   thread,
   selected,
   onOpen,
 }: {
   cause: ThreadFailureCause
+  threadId: string
   thread: Thread | undefined
   selected: boolean
   onOpen: () => void
 }) {
+  const detail = useThread(threadId)
+  thread = detail.data ?? thread
   const unknown = cause === 'unknown'
+  const executionUnknown = unknown && thread?.agent === null
   const agent = thread?.agent ? agentNames[thread.agent] : '助手'
   return (
     <button
       type="button"
-      disabled={!thread}
       aria-current={selected || undefined}
       onClick={onOpen}
       {...stylex.props(text.small, styles.failure, selected && styles.threadSelected, focusRing.ring)}
@@ -647,10 +652,16 @@ function ThreadFailure({
       <Icon name="threads" size={16} style={styles.threadIcon} />
       <span {...stylex.props(styles.threadTitle, text.truncate)}>{thread?.title ?? 'Thread'}</span>
       <span {...stylex.props(text.caption, styles.failureStatus, statusTextStyle(unknown ? 'attention' : 'danger'))}>
-        {unknown ? '无法确认送达' : '没有送达'}
-        {thread && <Icon name="chevron-right" size={14} />}
+        {unknown ? (executionUnknown ? '无法确认执行结果' : thread ? '无法确认送达' : '无法确认结果') : '没有送达'}
+        <Icon name="chevron-right" size={14} />
       </span>
-      <span {...stylex.props(styles.failureReason)}>{failureReasons[cause](agent)}</span>
+      <span {...stylex.props(styles.failureReason)}>
+        {executionUnknown
+          ? '命令可能已经产生副作用，助手不会自动重发。'
+          : unknown && !thread
+            ? '打开 Thread 查看原因。'
+            : failureReasons[cause](agent)}
+      </span>
     </button>
   )
 }
@@ -717,6 +728,7 @@ const Entry = memo(function Entry({
       return (
         <ThreadFailure
           cause={entry.cause}
+          threadId={entry.threadId}
           thread={threads.find((item) => item.id === entry.threadId)}
           selected={entry.threadId === openThread}
           onOpen={() => onOpenThread(entry.threadId)}

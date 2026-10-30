@@ -589,12 +589,10 @@ test('exports one trace from HTTP through Worker and Pi agent-host', async () =>
           )
           .toBe(true)
         await expect
-          .poll(
-            () =>
-              spans.some((span) => span.service === 'batond' && span.name === 'baton.report' && span.traceId === trace),
-            { timeout: 10000 },
-          )
-          .toBe(true)
+          .poll(() => spans.filter((span) => span.traceId === trace).map(({ service, name }) => ({ service, name })), {
+            timeout: 10000,
+          })
+          .toContainEqual({ service: 'batond', name: 'baton.report' })
         const http = spans.find(
           (span) => span.service === 'baton-server' && span.name === 'baton.http.request' && span.traceId === trace,
         )!
