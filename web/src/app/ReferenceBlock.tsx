@@ -2,9 +2,10 @@ import * as stylex from '@stylexjs/stylex'
 import { fileSize, referenceLimit } from '../data/derive'
 import { useDevices, useThreads } from '../data/queries'
 import type { Reference } from '../data/types'
-import { fonts } from '../theme/base.stylex'
+import { fonts, fontSize } from '../theme/base.stylex'
 import { text } from '../theme/text'
-import { colors, radius, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, space } from '../theme/tokens.stylex'
 import { IconButton } from '../ui/Button'
 import { Icon } from '../ui/Icon'
 
@@ -19,27 +20,27 @@ const styles = stylex.create({
     paddingInline: space.md,
     borderLeftWidth: '2px',
     borderLeftStyle: 'solid',
-    borderLeftColor: colors.border,
+    borderLeftColor: semantic.input,
     borderRadius: radius.sm,
-    backgroundColor: colors.subtle,
+    backgroundColor: semantic.secondary,
   },
-  inBubble: { backgroundColor: colors.surface },
+  inBubble: { backgroundColor: semantic.card },
   head: { display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 },
-  icon: { flexShrink: 0, color: colors.muted },
+  icon: { flexShrink: 0, color: semantic.mutedForeground },
   title: { flexGrow: 1 },
-  meta: { color: colors.muted },
-  path: { color: colors.muted, overflowWrap: 'anywhere' },
+  meta: { color: semantic.mutedForeground },
+  path: { color: semantic.mutedForeground, overflowWrap: 'anywhere' },
   excerpt: {
     margin: 0,
     maxHeight: '96px',
     overflow: 'hidden',
     fontFamily: fonts.mono,
-    fontSize: '12px',
+    fontSize: fontSize.caption,
     lineHeight: 1.55,
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
   },
-  note: { color: colors.faint },
+  note: { color: semantic.faintForeground },
 })
 
 function lineRange(lines: Reference['lines']) {

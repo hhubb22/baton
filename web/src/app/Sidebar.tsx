@@ -7,7 +7,8 @@ import type { Project } from '../data/types'
 import { weight } from '../theme/base.stylex'
 import { useTheme, type ThemeMode } from '../theme/ThemeProvider'
 import { text } from '../theme/text'
-import { colors, radius, size, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, size, space } from '../theme/tokens.stylex'
 import { Avatar, PersonAvatar } from '../ui/Avatar'
 import { Count, UnreadDot } from '../ui/Badge'
 import { focusRing, IconButton } from '../ui/Button'
@@ -35,7 +36,7 @@ const styles = stylex.create({
     height: size.header,
     paddingInline: space.xs,
   },
-  brand: { flexGrow: 1, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', color: colors.text },
+  brand: { flexGrow: 1, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', color: semantic.foreground },
   nav: { display: 'flex', flexDirection: 'column', flexShrink: 0, gap: space.xs, marginTop: space.xs },
   row: {
     display: 'flex',
@@ -45,21 +46,21 @@ const styles = stylex.create({
     paddingInline: space.sm,
     paddingLeft: '9px',
     borderRadius: radius.sm,
-    color: colors.muted,
+    color: semantic.mutedForeground,
     fontWeight: weight.medium,
     lineHeight: 'normal',
     letterSpacing: 'normal',
     textDecoration: 'none',
     whiteSpace: 'nowrap',
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
+    backgroundColor: { default: 'transparent', ':hover': semantic.muted },
   },
   projectRow: { height: size.row, gap: '6px' },
   active: {
-    backgroundColor: { default: colors.raised, ':hover': colors.raised },
-    color: colors.text,
+    backgroundColor: { default: semantic.muted, ':hover': semantic.muted },
+    color: semantic.foreground,
     fontWeight: weight.medium,
   },
-  rowIcon: { color: colors.muted },
+  rowIcon: { color: semantic.mutedForeground },
   rowLabel: { flexGrow: 1, minWidth: 0 },
   label: {
     opacity: 1,
@@ -74,7 +75,7 @@ const styles = stylex.create({
     height: size.compact,
     marginTop: space.xl,
     paddingInline: space.sm,
-    color: colors.muted,
+    color: semantic.mutedForeground,
   },
   addProject: {
     display: 'inline-flex',
@@ -85,8 +86,8 @@ const styles = stylex.create({
     padding: 0,
     borderWidth: 0,
     borderRadius: radius.inner,
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
-    color: colors.faint,
+    backgroundColor: { default: 'transparent', ':hover': semantic.muted },
+    color: semantic.faintForeground,
     opacity: { default: 0, ':focus-visible': 1, '@media (hover: none)': 1 },
     transition: 'opacity 150ms ease',
     '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
@@ -121,8 +122,8 @@ const styles = stylex.create({
     minHeight: 0,
     overflowY: 'auto',
   },
-  empty: { paddingInline: space.sm, color: colors.faint },
-  pausedName: { color: colors.faint },
+  empty: { paddingInline: space.sm, color: semantic.faintForeground },
+  pausedName: { color: semantic.faintForeground },
   account: {
     display: 'flex',
     alignItems: 'center',
@@ -135,8 +136,8 @@ const styles = stylex.create({
     paddingLeft: '6px',
     borderWidth: 0,
     borderRadius: radius.sm,
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
-    color: colors.text,
+    backgroundColor: { default: 'transparent', ':hover': semantic.muted },
+    color: semantic.foreground,
     textAlign: 'start',
   },
   accountMenu: {
@@ -147,7 +148,7 @@ const styles = stylex.create({
   },
   accountName: { display: 'flex', flexDirection: 'column' },
   accountLabel: { flexGrow: 1, minWidth: 0, fontWeight: 550, lineHeight: '23px', letterSpacing: '-0.1px' },
-  accountCaret: { color: colors.faint, transform: 'rotate(180deg)' },
+  accountCaret: { color: semantic.faintForeground, transform: 'rotate(180deg)' },
 })
 
 // 收起时只留图标，名称放进 aria-label 和悬停提示。

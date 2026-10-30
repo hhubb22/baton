@@ -4,13 +4,30 @@ import { App } from './app/App'
 import type { BatonClient } from './data/client'
 import { createHttpClient } from './data/http/client'
 import { ErrorBoundary } from './telemetry/ErrorBoundary'
-import '@fontsource-variable/inter/index.css'
+import { ThemeProvider } from './theme/ThemeProvider'
+import { TooltipProvider } from './ui/Tooltip'
+import '@fontsource-variable/noto-serif-sc/wght.css'
+import './theme/fonts.css'
+import './theme/colors.css'
 import './theme/global.css'
 
 async function start() {
   let client: BatonClient
   let development: ReactNode = null
   const search = new URLSearchParams(window.location.search)
+  if (import.meta.env.DEV && search.get('gallery') === '1') {
+    const { Gallery } = await import('./dev/Gallery')
+    createRoot(document.getElementById('root')!).render(
+      <StrictMode>
+        <ThemeProvider>
+          <TooltipProvider>
+            <Gallery />
+          </TooltipProvider>
+        </ThemeProvider>
+      </StrictMode>,
+    )
+    return
+  }
   if (import.meta.env.DEV && (search.get('mock') === '1' || search.has('scenario'))) {
     const [{ createBrowserClient }, { ScenarioPanel }] = await Promise.all([
       import('./dev/mock'),
@@ -25,7 +42,9 @@ async function start() {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <ErrorBoundary>
-        <App client={client}>{development}</App>
+        <TooltipProvider>
+          <App client={client}>{development}</App>
+        </TooltipProvider>
       </ErrorBoundary>
     </StrictMode>,
   )

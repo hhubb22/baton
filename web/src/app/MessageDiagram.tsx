@@ -1,13 +1,22 @@
 import * as stylex from '@stylexjs/stylex'
 import { useEffect, useState } from 'react'
+import { fontSize } from '../theme/base.stylex'
 import { useResolvedTheme } from '../theme/ThemeProvider'
-import { colors, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { space } from '../theme/tokens.stylex'
 import { focusRing } from '../ui/Button'
 
 const styles = stylex.create({
-  preview: { padding: space.lg, overflowX: 'auto', backgroundColor: colors.surface },
+  preview: { padding: space.lg, overflowX: 'auto', backgroundColor: semantic.card },
   image: { display: 'block', maxWidth: '100%', height: 'auto', marginInline: 'auto' },
-  source: { margin: 0, padding: space.md, overflowX: 'auto', whiteSpace: 'pre', fontSize: '12px', lineHeight: 1.6 },
+  source: {
+    margin: 0,
+    padding: space.md,
+    overflowX: 'auto',
+    whiteSpace: 'pre',
+    fontSize: fontSize.caption,
+    lineHeight: 1.6,
+  },
 })
 const cache = new Map<string, string>()
 

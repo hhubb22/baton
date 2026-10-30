@@ -1,6 +1,7 @@
 import { Switch } from '@base-ui/react/switch'
 import * as stylex from '@stylexjs/stylex'
-import { colors, radius } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { motion, radius } from '../theme/tokens.stylex'
 import { focusRing } from './Button'
 
 const styles = stylex.create({
@@ -12,11 +13,11 @@ const styles = stylex.create({
     padding: 0,
     borderWidth: 0,
     borderRadius: radius.pill,
-    backgroundColor: colors.borderStrong,
+    backgroundColor: semantic.input,
     transitionProperty: 'background-color',
-    transitionDuration: '120ms',
+    transitionDuration: motion.micro,
   },
-  on: { backgroundColor: colors.accent },
+  on: { backgroundColor: semantic.brand },
   thumb: {
     position: 'absolute',
     top: '2px',
@@ -24,9 +25,10 @@ const styles = stylex.create({
     width: '14px',
     height: '14px',
     borderRadius: radius.pill,
-    backgroundColor: '#fff',
+    backgroundColor: semantic.brandOn,
     transitionProperty: 'transform',
-    transitionDuration: '120ms',
+    transitionDuration: motion.micro,
+    transitionTimingFunction: motion.easeOut,
   },
   thumbOn: { transform: 'translateX(12px)' },
 })

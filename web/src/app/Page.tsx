@@ -1,7 +1,8 @@
 import * as stylex from '@stylexjs/stylex'
 import { useEffect, useRef, useState, type ReactNode, type UIEventHandler } from 'react'
 import { text } from '../theme/text'
-import { colors, radius, size, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, size, space } from '../theme/tokens.stylex'
 import { DesktopTargetNotice } from './DesktopWorkspace'
 
 // 主内容和 Thread 详情面板共用的圆角细边框。
@@ -10,7 +11,7 @@ export const pane = stylex.create({
     overflow: 'hidden',
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.borderSoft,
+    borderColor: semantic.border,
     borderRadius: radius.lg,
   },
 })
@@ -23,7 +24,7 @@ const styles = stylex.create({
     flexGrow: 1,
     minWidth: 0,
     height: '100%',
-    backgroundColor: colors.canvas,
+    backgroundColor: semantic.background,
   },
   header: {
     display: 'flex',
@@ -34,7 +35,7 @@ const styles = stylex.create({
     paddingInline: '20px',
     borderBottomWidth: '1px',
     borderBottomStyle: 'solid',
-    borderBottomColor: colors.borderSoft,
+    borderBottomColor: semantic.border,
   },
   title: { flexShrink: 1, minWidth: 0 },
   spacer: { flexGrow: 1 },
@@ -48,7 +49,7 @@ const styles = stylex.create({
     right: 0,
     height: '48px',
     pointerEvents: 'none',
-    backgroundImage: `linear-gradient(to bottom, transparent, ${colors.canvas})`,
+    backgroundImage: `linear-gradient(to bottom, transparent, ${semantic.background})`,
     opacity: 0,
     transition: 'opacity 160ms ease',
     '@media (prefers-reduced-motion: reduce)': { transition: 'none' },

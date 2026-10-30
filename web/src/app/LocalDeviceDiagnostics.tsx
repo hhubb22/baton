@@ -3,7 +3,8 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { desktopErrorMessage, useLocalDesktop, type DesktopBridge } from '../data/desktop'
 import { text } from '../theme/text'
-import { colors, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { space } from '../theme/tokens.stylex'
 import { Button } from '../ui/Button'
 
 const stateLabels: Record<string, string> = {
@@ -28,10 +29,10 @@ const stateLabel = (state: string) => (Object.hasOwn(stateLabels, state) ? state
 const styles = stylex.create({
   section: { display: 'flex', flexDirection: 'column', gap: space.md },
   facts: { display: 'grid', gridTemplateColumns: '148px minmax(0, 1fr)', gap: '12px 20px', margin: 0 },
-  label: { color: colors.muted },
+  label: { color: semantic.mutedForeground },
   value: { margin: 0, overflowWrap: 'anywhere' },
   actions: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: space.sm },
-  error: { color: colors.danger },
+  error: { color: semantic.destructiveForeground },
 })
 
 export function LocalDeviceDiagnostics({ nodeId }: { nodeId: string }) {

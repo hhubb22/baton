@@ -7,7 +7,8 @@ import { ClientError } from '../data/client'
 import { HttpError } from '../data/http/transport'
 import { useSession, useSignIn } from '../data/queries'
 import { text } from '../theme/text'
-import { colors, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, space } from '../theme/tokens.stylex'
 import { BrandMark } from '../ui/BrandMark'
 import { Button } from '../ui/Button'
 import { Field, Input } from '../ui/Field'
@@ -21,11 +22,11 @@ const styles = stylex.create({
     alignSelf: 'stretch',
     paddingBlock: '10px',
     paddingInline: '14px',
-    backgroundColor: colors.panel,
+    backgroundColor: semantic.sidebar,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.borderSoft,
-    borderRadius: '10px',
+    borderColor: semantic.border,
+    borderRadius: radius.md,
   },
   form: { display: 'flex', flexDirection: 'column', gap: space.lg, width: '100%' },
   note: { alignSelf: 'stretch' },

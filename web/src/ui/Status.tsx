@@ -1,7 +1,8 @@
 import * as stylex from '@stylexjs/stylex'
 import type { ReactNode } from 'react'
+import { semantic } from '../theme/semantic.stylex'
 import { text } from '../theme/text'
-import { colors, radius, size } from '../theme/tokens.stylex'
+import { radius, shadow, size } from '../theme/tokens.stylex'
 
 // 状态点只有六种颜色，含义由旁边的文字说明。
 export type Tone = 'info' | 'neutral' | 'hollow' | 'success' | 'danger' | 'attention' | 'agent'
@@ -14,13 +15,13 @@ const dots = stylex.create({
     height: size.dot,
     borderRadius: radius.pill,
   },
-  info: { backgroundColor: colors.accent },
-  neutral: { backgroundColor: colors.faint },
-  hollow: { boxShadow: `inset 0 0 0 1.2px ${colors.faint}` },
-  success: { backgroundColor: colors.success },
-  danger: { backgroundColor: colors.danger },
-  attention: { backgroundColor: colors.attention },
-  agent: { backgroundColor: colors.agent },
+  info: { backgroundColor: semantic.brand },
+  neutral: { backgroundColor: semantic.faintForeground },
+  hollow: { boxShadow: `inset 0 0 0 1.2px ${semantic.faintForeground}` },
+  success: { backgroundColor: semantic.success },
+  danger: { backgroundColor: semantic.destructiveForeground },
+  attention: { backgroundColor: semantic.warning },
+  agent: { backgroundColor: semantic.agent },
 })
 
 export function StatusDot({ tone, label }: { tone: Tone; label?: string }) {
@@ -42,17 +43,17 @@ const pills = stylex.create({
     height: size.micro,
     paddingInline: '8px',
     borderRadius: radius.pill,
-    color: colors.text,
+    color: semantic.foreground,
     whiteSpace: 'nowrap',
   },
-  info: { backgroundColor: colors.accentSoft },
-  neutral: { backgroundColor: colors.subtle },
-  hollow: { backgroundColor: colors.subtle },
-  success: { backgroundColor: colors.subtle },
-  danger: { backgroundColor: colors.dangerSoft },
-  attention: { backgroundColor: colors.attentionSoft },
-  agent: { backgroundColor: colors.agentSoft },
-  quiet: { color: colors.muted },
+  info: { backgroundColor: semantic.brandSoft },
+  neutral: { backgroundColor: semantic.secondary },
+  hollow: { backgroundColor: semantic.secondary },
+  success: { backgroundColor: semantic.successSoft },
+  danger: { backgroundColor: semantic.destructiveSoft },
+  attention: { backgroundColor: semantic.warningSoft },
+  agent: { backgroundColor: semantic.agentSoft },
+  quiet: { color: semantic.mutedForeground },
 })
 
 export function StatusPill({ tone, quiet, children }: { tone: Tone; quiet?: boolean; children: ReactNode }) {
@@ -72,13 +73,13 @@ const chips = stylex.create({
     height: size.compact,
     paddingInline: '10px',
     borderRadius: radius.pill,
-    backgroundColor: colors.surface,
+    backgroundColor: semantic.card,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.hairline,
-    boxShadow: `0 1px 3px ${colors.shadowSoft}`,
+    borderColor: semantic.border,
+    boxShadow: shadow.control,
   },
-  count: { color: colors.faint },
+  count: { color: semantic.faintForeground },
 })
 
 // 输入区上方的状态片：汇总执行中、等待设备和等你决定的数量。

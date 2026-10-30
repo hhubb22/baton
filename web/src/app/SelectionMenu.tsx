@@ -1,7 +1,8 @@
 import * as stylex from '@stylexjs/stylex'
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { text } from '../theme/text'
-import { colors, radius } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, shadow } from '../theme/tokens.stylex'
 import { focusRing } from '../ui/Button'
 import { Icon, type IconName } from '../ui/Icon'
 
@@ -17,14 +18,14 @@ const styles = stylex.create({
     paddingInline: '10px',
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.border,
+    borderColor: semantic.input,
     borderRadius: radius.sm,
-    backgroundColor: { default: colors.surface, ':hover': colors.hover },
-    boxShadow: `0 8px 24px ${colors.shadowFar}`,
-    color: colors.text,
+    backgroundColor: { default: semantic.card, ':hover': semantic.muted },
+    boxShadow: shadow.floating,
+    color: semantic.foreground,
     whiteSpace: 'nowrap',
   },
-  feedback: { color: colors.muted },
+  feedback: { color: semantic.mutedForeground },
 })
 
 // 选中的文字会做什么：返回 Promise 时，按钮在结束后显示它给出的一句结果，例如 Copied。

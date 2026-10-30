@@ -6,7 +6,8 @@ import { AuthShell } from '../app/AuthShell'
 import { ClientError } from '../data/client'
 import { keys, useClient, useSession } from '../data/queries'
 import { text } from '../theme/text'
-import { colors, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { space } from '../theme/tokens.stylex'
 import { BrandMark } from '../ui/BrandMark'
 import { Button } from '../ui/Button'
 import { Field, Input } from '../ui/Field'
@@ -14,7 +15,7 @@ import { Field, Input } from '../ui/Field'
 const styles = stylex.create({
   brand: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: space.md, textAlign: 'center' },
   form: { display: 'flex', flexDirection: 'column', gap: space.lg, width: '100%' },
-  error: { color: colors.danger },
+  error: { color: semantic.destructiveForeground },
 })
 
 function passwordError(password: string, username: string) {

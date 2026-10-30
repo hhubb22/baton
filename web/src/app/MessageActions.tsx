@@ -1,7 +1,8 @@
 import * as stylex from '@stylexjs/stylex'
 import { useEffect, useState } from 'react'
 import { text } from '../theme/text'
-import { colors, radius, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, space } from '../theme/tokens.stylex'
 import { focusRing } from '../ui/Button'
 import { Icon } from '../ui/Icon'
 import { copyText } from './SelectionMenu'
@@ -17,8 +18,8 @@ const styles = stylex.create({
     paddingInline: space.xs,
     borderWidth: 0,
     borderRadius: radius.sm,
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
-    color: { default: colors.faint, ':hover': colors.text },
+    backgroundColor: { default: 'transparent', ':hover': semantic.muted },
+    color: { default: semantic.faintForeground, ':hover': semantic.foreground },
   },
   projectButton: { width: '30px', height: '30px', marginLeft: '-7px', justifyContent: 'center' },
 })

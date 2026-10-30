@@ -1,7 +1,8 @@
 import * as stylex from '@stylexjs/stylex'
 import type { ComponentProps, ReactNode } from 'react'
+import { semantic } from '../theme/semantic.stylex'
 import { text } from '../theme/text'
-import { colors, radius } from '../theme/tokens.stylex'
+import { radius } from '../theme/tokens.stylex'
 import { focusRing } from './Button'
 import { Icon, type IconName } from './Icon'
 
@@ -14,13 +15,13 @@ const styles = stylex.create({
     maxWidth: '100%',
     paddingInline: '8px',
     borderWidth: 0,
-    borderRadius: radius.pill,
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
-    color: colors.text,
+    borderRadius: radius.sm,
+    backgroundColor: { default: 'transparent', ':hover': semantic.accent },
+    color: semantic.foreground,
   },
-  glyph: { color: colors.muted },
-  caret: { color: colors.faint },
-  composer: { height: '32px', fontSize: '14px' },
+  glyph: { color: semantic.mutedForeground },
+  caret: { color: semantic.faintForeground },
+  composer: { height: '32px', borderRadius: radius.md, fontSize: '13px' },
 })
 
 type ChipProps = Omit<ComponentProps<'button'>, 'className' | 'style'> & {

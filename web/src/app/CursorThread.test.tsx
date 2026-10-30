@@ -562,7 +562,7 @@ describe('remote Cursor threads', () => {
     },
   )
 
-  it('shows full-output reading after a reply mapped from the HTTP timeline', async () => {
+  it('marks a truncated reply without offering full-output reading', async () => {
     const { state } = mount({ existing: true, status: 'idle' })
     state.thread.opened_at = at
     state.events.push({
@@ -572,6 +572,8 @@ describe('remote Cursor threads', () => {
       payload: {
         event_id: 'long-reply',
         content: 'Saved reply summary',
+        truncated: true,
+        original_bytes: 100000,
         metadata: {
           full_output: {
             id: '25689309-82b9-4cf7-8cba-7e84d7d30236',
@@ -583,7 +585,8 @@ describe('remote Cursor threads', () => {
       },
     })
     expect(await screen.findByText('Saved reply summary')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '读取完整输出' })).toBeInTheDocument()
+    expect(screen.getByText('内容已截断，原始大小 100000 字节')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '读取完整输出' })).not.toBeInTheDocument()
   })
 
   it('creates, opens and sends over HTTP while Project endpoints return 501', async () => {
@@ -593,7 +596,9 @@ describe('remote Cursor threads', () => {
     expect(await screen.findByRole('button', { name: 'Cursor · 默认模型' })).toBeInTheDocument()
     expect(screen.getAllByText('无法加载项目').length).toBeGreaterThan(0)
     await user.type(input, 'Inspect the repository')
-    await user.click(within(input.parentElement!).getByRole('button', { name: '发送' }))
+    await user.click(
+      within(input.closest<HTMLElement>('[data-slot="composer"]')!).getByRole('button', { name: '发送' }),
+    )
     expect(await screen.findByRole('heading', { name: 'Remote Cursor thread' })).toBeInTheDocument()
     expect(await screen.findByText('正在启动 Cursor…')).toBeInTheDocument()
     expect(await screen.findByText('Inspect the repository')).toBeInTheDocument()
@@ -611,7 +616,9 @@ describe('remote Cursor threads', () => {
     await waitFor(() => expect(screen.queryByText('正在启动 Cursor…')).not.toBeInTheDocument())
     const followUp = screen.getByLabelText('消息')
     await user.type(followUp, 'Continue')
-    await user.click(within(followUp.parentElement!).getByRole('button', { name: '发送' }))
+    await user.click(
+      within(followUp.closest<HTMLElement>('[data-slot="composer"]')!).getByRole('button', { name: '发送' }),
+    )
     await waitFor(() =>
       expect(
         fetcher.mock.calls.some(

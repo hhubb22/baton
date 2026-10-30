@@ -1,5 +1,5 @@
 import { ClientError } from '../client'
-import type { LiveOutput } from '../types'
+import type { LiveOutput, TraceStep } from '../types'
 import { apiPath, type HttpContext } from './context'
 import { HttpError } from './transport'
 
@@ -10,6 +10,8 @@ export type OutputResult = {
   text?: string
   reply_id?: string
   worker_turn_seq?: number
+  running_steps?: TraceStep[]
+  running_steps_truncated?: boolean
   cursor?: string
   gap?: boolean
 }
@@ -18,6 +20,8 @@ type OutputState = {
   cursor: string
   chunks: LiveOutput['chunks']
   replyId?: string
+  runningSteps?: TraceStep[]
+  runningStepsTruncated?: boolean
   error?: ClientError
 }
 type Subscription = { thread_id: string; cursor?: string }
@@ -75,6 +79,8 @@ export function createOutputAPI(request: HttpContext['request']) {
       chunks: structuredClone(value.chunks),
       ...(value.replyId === undefined ? {} : { replyId: value.replyId }),
       ...(value.seq === undefined ? {} : { workerTurnSeq: value.seq }),
+      ...(value.runningSteps === undefined ? {} : { runningSteps: structuredClone(value.runningSteps) }),
+      ...(value.runningStepsTruncated === undefined ? {} : { runningStepsTruncated: value.runningStepsTruncated }),
     }
   }
   const notify = (id: string) => {
@@ -106,6 +112,8 @@ export function createOutputAPI(request: HttpContext['request']) {
       seq: seq ?? previous.seq,
       cursor: result.cursor!,
       replyId: result.reply_id,
+      runningSteps: result.running_steps,
+      runningStepsTruncated: result.running_steps_truncated,
       chunks: appendOutput(
         epochChanged || turnChanged || previous.replyId !== result.reply_id ? [] : previous.chunks,
         result,

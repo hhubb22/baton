@@ -1,6 +1,7 @@
 import * as stylex from '@stylexjs/stylex'
 import { useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
-import { colors, radius, size } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, size } from '../theme/tokens.stylex'
 
 const styles = stylex.create({
   pane: { position: 'relative', flexShrink: 0, height: '100%', minWidth: 0 },
@@ -49,7 +50,7 @@ const styles = stylex.create({
     pointerEvents: 'auto',
     touchAction: 'none',
     backgroundColor: 'transparent',
-    outline: { default: 'none', ':focus-visible': `2px solid ${colors.focus}` },
+    outline: { default: 'none', ':focus-visible': `2px solid ${semantic.ring}` },
   },
   right: { right: '-5px' },
   rightAcrossGutter: { right: `calc(-5px - ${size.gutter})` },
@@ -63,7 +64,7 @@ const styles = stylex.create({
     width: '0.5px',
     pointerEvents: 'none',
     overflow: 'hidden',
-    backgroundColor: colors.borderStrong,
+    backgroundColor: semantic.input,
     maskImage: 'linear-gradient(to bottom, transparent, black 10%, black 90%, transparent)',
     opacity: 0,
     transition: 'opacity 250ms ease 100ms',
@@ -74,7 +75,7 @@ const styles = stylex.create({
     top: '-50%',
     width: '100%',
     height: '200%',
-    backgroundColor: colors.text,
+    backgroundColor: semantic.foreground,
     opacity: 0.95,
     maskImage:
       'linear-gradient(to bottom, transparent 5%, rgba(0,0,0,0.1) 11.4%, rgba(0,0,0,0.2) 17.2%, rgba(0,0,0,0.3) 22.2%, rgba(0,0,0,0.4) 26.6%, rgba(0,0,0,0.5) 30.3%, rgba(0,0,0,0.6) 33.4%, rgba(0,0,0,0.7) 35.7%, rgba(0,0,0,0.8) 37.4%, rgba(0,0,0,0.9) 38.4%, black 38.75%, black 61.25%, rgba(0,0,0,0.9) 61.6%, rgba(0,0,0,0.8) 62.6%, rgba(0,0,0,0.7) 64.3%, rgba(0,0,0,0.6) 66.6%, rgba(0,0,0,0.5) 69.7%, rgba(0,0,0,0.4) 73.4%, rgba(0,0,0,0.3) 77.8%, rgba(0,0,0,0.2) 82.9%, rgba(0,0,0,0.1) 88.6%, transparent 95%)',

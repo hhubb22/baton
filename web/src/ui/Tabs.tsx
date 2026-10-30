@@ -1,7 +1,8 @@
 import * as stylex from '@stylexjs/stylex'
 import { weight } from '../theme/base.stylex'
+import { semantic } from '../theme/semantic.stylex'
 import { text } from '../theme/text'
-import { colors, radius, size } from '../theme/tokens.stylex'
+import { radius, shadow, size } from '../theme/tokens.stylex'
 import { focusRing } from './Button'
 
 const styles = stylex.create({
@@ -17,18 +18,18 @@ const styles = stylex.create({
     borderStyle: 'solid',
     borderColor: 'transparent',
     backgroundColor: 'transparent',
-    color: { default: colors.muted, ':hover': colors.text },
+    color: { default: semantic.mutedForeground, ':hover': semantic.foreground },
   },
-  tabActive: { borderBottomColor: colors.text, color: colors.text },
-  tabCount: { color: colors.faint },
+  tabActive: { borderBottomColor: semantic.foreground, color: semantic.foreground },
+  tabCount: { color: semantic.faintForeground },
   segmented: {
     display: 'inline-flex',
     alignItems: 'center',
     gap: '2px',
     height: size.compact,
     padding: '2px',
-    borderRadius: radius.pill,
-    backgroundColor: colors.subtle,
+    borderRadius: radius.md,
+    backgroundColor: semantic.secondary,
   },
   segment: {
     display: 'inline-flex',
@@ -36,9 +37,9 @@ const styles = stylex.create({
     height: '100%',
     paddingInline: '10px',
     borderWidth: 0,
-    borderRadius: radius.pill,
+    borderRadius: radius.sm,
     backgroundColor: 'transparent',
-    color: { default: colors.muted, ':hover': colors.text },
+    color: { default: semantic.mutedForeground, ':hover': semantic.foreground },
     fontSize: '12px',
     lineHeight: 1,
     fontWeight: weight.medium,
@@ -47,9 +48,9 @@ const styles = stylex.create({
   segmentedBlock: { flexGrow: 1, height: size.control },
   segmentBlock: { flexGrow: 1, flexBasis: 0, justifyContent: 'center' },
   segmentActive: {
-    backgroundColor: colors.surface,
-    color: colors.text,
-    boxShadow: `0 1px 2px ${colors.shadowNear}, 0 1px 6px ${colors.shadowSoft}`,
+    backgroundColor: semantic.card,
+    color: semantic.foreground,
+    boxShadow: shadow.control,
   },
 })
 

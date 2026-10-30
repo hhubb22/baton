@@ -3,6 +3,7 @@ import {
   Archive,
   ArrowBendUpLeft,
   ArrowClockwise,
+  ArrowDown,
   ArrowSquareOut,
   ArrowUp,
   BookmarkSimple,
@@ -51,6 +52,7 @@ import batonMarkMono from '../assets/baton-mark-mono.svg?raw'
 const icons = {
   alert: Warning,
   archive: Archive,
+  'arrow-down': ArrowDown,
   'arrow-up': ArrowUp,
   check: Check,
   'chevron-down': CaretDown,

@@ -1,8 +1,9 @@
 import * as stylex from '@stylexjs/stylex'
 import { createContext, isValidElement, useContext, useEffect, useState, type ReactNode } from 'react'
-import { fonts } from '../theme/base.stylex'
+import { fonts, fontSize } from '../theme/base.stylex'
 import { text } from '../theme/text'
-import { colors, radius, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, space } from '../theme/tokens.stylex'
 import { focusRing } from '../ui/Button'
 import { Icon } from '../ui/Icon'
 import { HighlightedLine, useHighlightedLines } from './CodeHighlight'
@@ -17,9 +18,9 @@ const styles = stylex.create({
     overflow: 'hidden',
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.codeBorder,
+    borderColor: semantic.border,
     borderRadius: radius.md,
-    backgroundColor: colors.code,
+    backgroundColor: semantic.code,
   },
   header: {
     display: 'flex',
@@ -30,8 +31,8 @@ const styles = stylex.create({
     paddingInline: space.md,
     borderBottomWidth: '1px',
     borderBottomStyle: 'solid',
-    borderBottomColor: colors.codeBorder,
-    color: colors.muted,
+    borderBottomColor: semantic.border,
+    color: semantic.mutedForeground,
   },
   copy: {
     display: 'inline-flex',
@@ -40,8 +41,8 @@ const styles = stylex.create({
     padding: space.xs,
     borderWidth: 0,
     borderRadius: radius.sm,
-    color: { default: colors.muted, ':hover': colors.text },
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
+    color: { default: semantic.mutedForeground, ':hover': semantic.foreground },
+    backgroundColor: { default: 'transparent', ':hover': semantic.muted },
     cursor: 'pointer',
   },
   pre: {
@@ -50,7 +51,7 @@ const styles = stylex.create({
     overflowX: 'auto',
     whiteSpace: 'pre',
     fontFamily: fonts.mono,
-    fontSize: '12px',
+    fontSize: fontSize.caption,
     lineHeight: 1.6,
   },
 })

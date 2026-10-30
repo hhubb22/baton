@@ -1,5 +1,6 @@
 import { Schema, SchemaTransformation } from 'effect'
 import { Cursor, NonNegativeInteger, StorageGeneration, Text, ThreadStatus, UUID, boundedText } from './common.ts'
+import { ThreadTraceStep } from './thread.ts'
 
 export const BrowserSubscription = Schema.Struct({
   thread_id: Schema.Union([Schema.Literal(''), UUID]),
@@ -18,6 +19,8 @@ export const BrowserThreadOutput = Schema.Struct({
   text: Schema.optionalKey(boundedText(16 * 1024)),
   reply_id: Schema.optionalKey(boundedText(512)),
   worker_turn_seq: Schema.optionalKey(NonNegativeInteger),
+  running_steps: Schema.optionalKey(Schema.Array(ThreadTraceStep)),
+  running_steps_truncated: Schema.optionalKey(Schema.Boolean),
   cursor: Schema.optionalKey(Cursor),
   gap: Schema.Boolean,
 })

@@ -78,6 +78,8 @@ type EventDTO = {
     worker_turn_seq?: number
     reason?: string
     content?: string
+    truncated?: boolean
+    original_bytes?: number
     count?: number
     item_count?: number
     attachments?: AttachmentDTO[]
@@ -494,6 +496,8 @@ export function createThreadAPI(
           delivery: 'delivered',
           activity: event.payload.metadata?.activity ?? null,
           fullOutput: fullOutputOf(event.payload.metadata?.full_output),
+          truncated: event.payload.truncated,
+          originalBytes: event.payload.original_bytes,
           attachments: attachmentsOf(event.payload.attachments),
         }
         result.push(reply)

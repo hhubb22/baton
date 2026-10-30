@@ -3,7 +3,8 @@ import ReactMarkdown, { type Components, type UrlTransform } from 'react-markdow
 import remarkGfm from 'remark-gfm'
 import { fonts, weight } from '../theme/base.stylex'
 import { text } from '../theme/text'
-import { colors, radius, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, space } from '../theme/tokens.stylex'
 import { focusRing } from '../ui/Button'
 
 const styles = stylex.create({
@@ -14,18 +15,18 @@ const styles = stylex.create({
     width: '100%',
     minWidth: 0,
     maxWidth: '100%',
-    color: colors.text,
+    color: semantic.foreground,
     overflowWrap: 'anywhere',
   },
   paragraph: { margin: 0 },
-  muted: { color: colors.muted, fontWeight: '400' },
+  muted: { color: semantic.mutedForeground, fontWeight: '400' },
   strong: { fontWeight: weight.semibold },
   code: {
     fontFamily: fonts.mono,
     fontSize: '0.93em',
     paddingInline: space.xxs,
     borderRadius: radius.inner,
-    backgroundColor: colors.code,
+    backgroundColor: semantic.code,
   },
   codeBlock: {
     boxSizing: 'border-box',
@@ -38,9 +39,9 @@ const styles = stylex.create({
     overflowWrap: 'normal',
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.codeBorder,
+    borderColor: semantic.border,
     borderRadius: radius.sm,
-    backgroundColor: colors.code,
+    backgroundColor: semantic.code,
   },
   list: { margin: 0, paddingLeft: space.xl, minWidth: 0 },
   unordered: { listStyleType: 'disc' },
@@ -52,7 +53,7 @@ const styles = stylex.create({
     overflowX: 'auto',
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.borderSoft,
+    borderColor: semantic.border,
     borderRadius: radius.sm,
   },
   table: { width: '100%', borderCollapse: 'collapse', overflowWrap: 'normal' },
@@ -61,14 +62,14 @@ const styles = stylex.create({
     paddingInline: space.sm,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.borderSoft,
+    borderColor: semantic.border,
     textAlign: 'start',
   },
-  header: { fontWeight: weight.semibold, backgroundColor: colors.subtle },
+  header: { fontWeight: weight.semibold, backgroundColor: semantic.secondary },
   left: { textAlign: 'left' },
   center: { textAlign: 'center' },
   right: { textAlign: 'right' },
-  link: { color: colors.accentText, textDecoration: 'underline' },
+  link: { color: semantic.brandForeground, textDecoration: 'underline' },
 })
 
 const allowedElements = [

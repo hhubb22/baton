@@ -4,7 +4,8 @@ import { useClient, useProjects } from '../data/queries'
 import { desktopCapability, useDesktopStatus } from '../data/desktop'
 import type { Device, ModelConnection } from '../data/types'
 import { text } from '../theme/text'
-import { colors, radius, size, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, size, space } from '../theme/tokens.stylex'
 import { Button, focusRing } from '../ui/Button'
 import { Field, Input, TextArea } from '../ui/Field'
 
@@ -13,18 +14,18 @@ const styles = stylex.create({
   actions: { display: 'flex', justifyContent: 'flex-end', gap: space.sm },
   back: { alignSelf: 'flex-start' },
   delete: { marginRight: 'auto' },
-  error: { color: colors.danger },
+  error: { color: semantic.destructiveForeground },
   select: {
     width: '100%',
     height: size.control,
     paddingInline: '10px',
-    backgroundColor: colors.surface,
+    backgroundColor: semantic.card,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: { default: colors.border, ':focus': colors.focus },
+    borderColor: { default: semantic.input, ':focus': semantic.ring },
     borderRadius: radius.sm,
     outline: 'none',
-    color: colors.text,
+    color: semantic.foreground,
   },
 })
 

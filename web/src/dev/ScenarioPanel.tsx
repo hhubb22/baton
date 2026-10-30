@@ -4,7 +4,8 @@ import type { MockControls } from '../data/mock/client'
 import { scenarioIds, scenarioLabels, type ScenarioId } from '../data/mock/scenarios'
 import { useDevices, useSession } from '../data/queries'
 import { text } from '../theme/text'
-import { colors, radius, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, shadow, space } from '../theme/tokens.stylex'
 import { Button, IconButton } from '../ui/Button'
 import { Toggle } from '../ui/Toggle'
 import { rememberScenario } from './mock'
@@ -20,12 +21,12 @@ const styles = stylex.create({
     gap: space.md,
     width: '260px',
     padding: space.md,
-    backgroundColor: colors.surface,
+    backgroundColor: semantic.card,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.border,
+    borderColor: semantic.input,
     borderRadius: radius.lg,
-    boxShadow: `0 8px 24px ${colors.shadowFar}`,
+    boxShadow: shadow.floating,
   },
   collapsed: {
     position: 'fixed',
@@ -41,10 +42,10 @@ const styles = stylex.create({
     paddingInline: space.sm,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.border,
+    borderColor: semantic.input,
     borderRadius: radius.sm,
-    backgroundColor: colors.surface,
-    color: colors.text,
+    backgroundColor: semantic.card,
+    color: semantic.foreground,
     fontFamily: 'inherit',
     fontSize: '13px',
   },

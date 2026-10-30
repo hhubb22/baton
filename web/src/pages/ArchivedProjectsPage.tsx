@@ -3,7 +3,8 @@ import { Link } from '@tanstack/react-router'
 import { Column, Page } from '../app/Page'
 import { useProjects } from '../data/queries'
 import { text } from '../theme/text'
-import { colors, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { space } from '../theme/tokens.stylex'
 import { Avatar } from '../ui/Avatar'
 import { Banner } from '../ui/Banner'
 import { Button, focusRing } from '../ui/Button'
@@ -14,7 +15,7 @@ const styles = stylex.create({
     alignItems: 'center',
     gap: space.md,
     paddingBlock: space.md,
-    color: colors.text,
+    color: semantic.foreground,
     textDecoration: 'none',
   },
   content: { display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0 },

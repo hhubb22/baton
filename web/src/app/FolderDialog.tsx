@@ -5,7 +5,8 @@ import { fileName as folderName, fileParent as parentFolder } from '../data/file
 import { useDevices, useFolders } from '../data/queries'
 import type { Device, FolderListing, ID } from '../data/types'
 import { text } from '../theme/text'
-import { colors, radius, size, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, size, space } from '../theme/tokens.stylex'
 import { Banner } from '../ui/Banner'
 import { Button, focusRing } from '../ui/Button'
 import { Dialog, DialogClose } from '../ui/Dialog'
@@ -19,13 +20,13 @@ const styles = stylex.create({
     width: '100%',
     height: size.control,
     paddingInline: '10px',
-    backgroundColor: colors.surface,
+    backgroundColor: semantic.card,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: { default: colors.border, ':focus': colors.focus },
+    borderColor: { default: semantic.input, ':focus': semantic.ring },
     borderRadius: radius.sm,
     outline: 'none',
-    color: colors.text,
+    color: semantic.foreground,
   },
   box: {
     display: 'flex',
@@ -35,11 +36,11 @@ const styles = stylex.create({
     padding: space.xs,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.border,
+    borderColor: semantic.input,
     borderRadius: radius.md,
   },
-  heading: { paddingBlock: '6px', paddingInline: space.sm, color: colors.faint },
-  path: { paddingBlock: '6px', paddingInline: space.sm, color: colors.muted },
+  heading: { paddingBlock: '6px', paddingInline: space.sm, color: semantic.faintForeground },
+  path: { paddingBlock: '6px', paddingInline: space.sm, color: semantic.mutedForeground },
   row: {
     display: 'flex',
     alignItems: 'center',
@@ -49,15 +50,15 @@ const styles = stylex.create({
     paddingInline: space.sm,
     borderWidth: 0,
     borderRadius: radius.sm,
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
-    color: colors.text,
+    backgroundColor: { default: 'transparent', ':hover': semantic.muted },
+    color: semantic.foreground,
     textAlign: 'left',
   },
-  back: { color: colors.muted },
-  glyph: { color: colors.muted, flexShrink: 0 },
+  back: { color: semantic.mutedForeground },
+  glyph: { color: semantic.mutedForeground, flexShrink: 0 },
   name: { flexGrow: 1 },
-  status: { padding: space.sm, color: colors.faint },
-  hint: { color: colors.faint },
+  status: { padding: space.sm, color: semantic.faintForeground },
+  hint: { color: semantic.faintForeground },
 })
 
 function unavailableText(listing: Extract<FolderListing, { state: 'unavailable' }>, device: Device | undefined) {

@@ -14,9 +14,10 @@ import {
 import { fileSize, previewProblem, readFailure, shortenExcerpt, type PreviewView } from '../data/derive'
 import { useClient, useDevices, useFile, useFolders, useProjects, useThreads } from '../data/queries'
 import type { Device, FilePreview as FilePreviewData, FileReadOptions, ID, Reference } from '../data/types'
-import { fonts } from '../theme/base.stylex'
+import { fonts, fontSize } from '../theme/base.stylex'
 import { text } from '../theme/text'
-import { colors, radius, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, shadow, space } from '../theme/tokens.stylex'
 import { Button, focusRing, IconButton } from '../ui/Button'
 import { Icon } from '../ui/Icon'
 import { ResizablePane } from '../ui/ResizablePane'
@@ -25,7 +26,7 @@ import { HighlightedLine, useHighlightedLines } from './CodeHighlight'
 import { copySelection, copyText, SelectionArea } from './SelectionMenu'
 
 const styles = stylex.create({
-  backdrop: { position: 'fixed', inset: 0, zIndex: 30, backgroundColor: colors.overlay },
+  backdrop: { position: 'fixed', inset: 0, zIndex: 30, backgroundColor: semantic.overlay },
   popup: {
     position: 'fixed',
     top: '50%',
@@ -39,13 +40,13 @@ const styles = stylex.create({
     maxHeight: 'calc(100vh - 64px)',
     overflow: 'hidden',
     transform: 'translate(-50%, -50%)',
-    backgroundColor: colors.surface,
+    backgroundColor: semantic.card,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.border,
-    borderRadius: '14px',
-    boxShadow: `0 12px 32px ${colors.shadowFar}, 0 2px 6px ${colors.shadowNear}`,
-    color: colors.text,
+    borderColor: semantic.input,
+    borderRadius: radius.lg,
+    boxShadow: shadow.modal,
+    color: semantic.foreground,
     outline: 'none',
   },
   header: {
@@ -58,7 +59,7 @@ const styles = stylex.create({
     paddingRight: space.md,
     borderBottomWidth: '1px',
     borderBottomStyle: 'solid',
-    borderBottomColor: colors.borderSoft,
+    borderBottomColor: semantic.border,
   },
   heading: { display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0 },
   split: { display: 'flex', flexGrow: 1, minHeight: 0 },
@@ -69,10 +70,10 @@ const styles = stylex.create({
     width: '100%',
     height: '100%',
     minHeight: 0,
-    backgroundColor: colors.panel,
+    backgroundColor: semantic.sidebar,
     borderRightWidth: '1px',
     borderRightStyle: 'solid',
-    borderRightColor: colors.borderSoft,
+    borderRightColor: semantic.border,
   },
   crumbs: {
     display: 'flex',
@@ -81,15 +82,15 @@ const styles = stylex.create({
     gap: space.xs,
     paddingBlock: space.sm,
     paddingInline: space.md,
-    color: colors.muted,
+    color: semantic.mutedForeground,
   },
   crumb: {
     padding: 0,
     borderWidth: 0,
     backgroundColor: 'transparent',
-    color: { default: colors.muted, ':hover': colors.text },
+    color: { default: semantic.mutedForeground, ':hover': semantic.foreground },
   },
-  crumbCurrent: { color: colors.text },
+  crumbCurrent: { color: semantic.foreground },
   rows: {
     display: 'flex',
     flexDirection: 'column',
@@ -108,25 +109,25 @@ const styles = stylex.create({
     paddingInline: space.sm,
     borderWidth: 0,
     borderRadius: radius.sm,
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
-    color: colors.text,
+    backgroundColor: { default: 'transparent', ':hover': semantic.muted },
+    color: semantic.foreground,
     textAlign: 'left',
   },
-  rowSelected: { backgroundColor: { default: colors.selected, ':hover': colors.selected } },
+  rowSelected: { backgroundColor: { default: semantic.accent, ':hover': semantic.accent } },
   rowName: { flexGrow: 1 },
-  rowIcon: { flexShrink: 0, color: colors.muted },
-  rowSize: { flexShrink: 0, color: colors.faint },
-  navNote: { paddingBlock: space.xs, paddingInline: space.md, color: colors.muted },
+  rowIcon: { flexShrink: 0, color: semantic.mutedForeground },
+  rowSize: { flexShrink: 0, color: semantic.faintForeground },
+  navNote: { paddingBlock: space.xs, paddingInline: space.md, color: semantic.mutedForeground },
   content: { display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0, minHeight: 0 },
   scroll: { flexGrow: 1, minHeight: 0, overflow: 'auto' },
-  lines: { paddingBlock: space.sm, fontFamily: fonts.mono, fontSize: '12px', lineHeight: 1.6 },
+  lines: { paddingBlock: space.sm, fontFamily: fonts.mono, fontSize: fontSize.caption, lineHeight: 1.6 },
   line: { display: 'flex', paddingRight: space.lg },
-  lineSelected: { backgroundColor: colors.accentSoft },
+  lineSelected: { backgroundColor: semantic.brandSoft },
   gutter: {
     flexShrink: 0,
     width: '56px',
     paddingRight: space.md,
-    color: colors.faint,
+    color: semantic.faintForeground,
     textAlign: 'right',
     userSelect: 'none',
   },
@@ -137,9 +138,9 @@ const styles = stylex.create({
     gap: space.md,
     paddingBlock: space.md,
     paddingInline: space.lg,
-    color: colors.faint,
-    '::before': { content: '""', flexGrow: 1, height: '1px', backgroundColor: colors.borderSoft },
-    '::after': { content: '""', flexGrow: 1, height: '1px', backgroundColor: colors.borderSoft },
+    color: semantic.faintForeground,
+    '::before': { content: '""', flexGrow: 1, height: '1px', backgroundColor: semantic.border },
+    '::after': { content: '""', flexGrow: 1, height: '1px', backgroundColor: semantic.border },
   },
   selectionNote: {
     flexShrink: 0,
@@ -147,8 +148,8 @@ const styles = stylex.create({
     paddingInline: space.lg,
     borderTopWidth: '1px',
     borderTopStyle: 'solid',
-    borderTopColor: colors.borderSoft,
-    color: colors.accentText,
+    borderTopColor: semantic.border,
+    color: semantic.brandForeground,
   },
   state: {
     display: 'flex',
@@ -160,9 +161,9 @@ const styles = stylex.create({
     padding: space.xxl,
     textAlign: 'center',
   },
-  stateIcon: { color: colors.faint },
-  stateDetail: { maxWidth: '360px', color: colors.muted },
-  muted: { color: colors.muted },
+  stateIcon: { color: semantic.faintForeground },
+  stateDetail: { maxWidth: '360px', color: semantic.mutedForeground },
+  muted: { color: semantic.mutedForeground },
 })
 
 // 浏览的起点：文件在 Thread 目录里时用 Thread 目录，否则用包含它的允许目录。

@@ -2,7 +2,8 @@ import * as stylex from '@stylexjs/stylex'
 import { useState } from 'react'
 import type { ThreadAnswerInput, ThreadQuestion } from '../data/types'
 import { text } from '../theme/text'
-import { colors, size, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { size, space } from '../theme/tokens.stylex'
 import { Button } from '../ui/Button'
 import { Field, TextArea } from '../ui/Field'
 
@@ -23,12 +24,12 @@ const styles = stylex.create({
     flexDirection: 'column',
     gap: space.sm,
     paddingLeft: space.md,
-    borderLeft: `1px solid ${colors.borderSoft}`,
+    borderLeft: `1px solid ${semantic.border}`,
   },
   option: { display: 'flex', alignItems: 'flex-start', gap: space.sm, cursor: 'pointer' },
-  description: { color: colors.muted, display: 'block', whiteSpace: 'pre-wrap' },
+  description: { color: semantic.mutedForeground, display: 'block', whiteSpace: 'pre-wrap' },
   actions: { display: 'flex', gap: space.sm },
-  error: { color: colors.danger },
+  error: { color: semantic.destructiveForeground },
 })
 
 export function ThreadQuestionForm({

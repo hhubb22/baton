@@ -13,6 +13,36 @@ const setup = () => {
 }
 
 describe('live output subscription', () => {
+  it('replaces running-step snapshots and clears them when the turn ends', async () => {
+    const { api, send, listener } = setup()
+    api.setConnection(send)
+    api.subscribeOutput('one', listener)
+    const step = {
+      item_id: 'tool',
+      type: 'dynamic_tool',
+      status: 'running',
+      ordinal: 0,
+      data: {},
+      truncated: false,
+      original_bytes: 2,
+    }
+    api.receive('one', {
+      ...chunk('', 'epoch:0'),
+      worker_turn_seq: 1,
+      running_steps: [step],
+      running_steps_truncated: true,
+    })
+    expect(await api.readOutput('one')).toMatchObject({ runningSteps: [step], runningStepsTruncated: true })
+    api.receive('one', {
+      ...chunk('', 'epoch:0'),
+      worker_turn_seq: 1,
+      running_steps: [],
+      running_steps_truncated: false,
+    })
+    expect(await api.readOutput('one')).toMatchObject({ runningSteps: [], runningStepsTruncated: false })
+    api.receive('one', { ok: true, state: 'idle' })
+    expect((await api.readOutput('one')).runningSteps).toBeUndefined()
+  })
   it('separates output from consecutive replies', async () => {
     const { api, send, listener } = setup()
     api.setConnection(send)

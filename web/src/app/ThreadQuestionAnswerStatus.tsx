@@ -1,11 +1,11 @@
 import * as stylex from '@stylexjs/stylex'
 import type { ThreadQuestionAnswer } from '@baton/protocol'
 import { text } from '../theme/text'
-import { colors } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
 
 const styles = stylex.create({
-  status: { color: colors.muted },
-  attention: { color: colors.attentionText },
+  status: { color: semantic.mutedForeground },
+  attention: { color: semantic.warningForeground },
 })
 
 export function ThreadQuestionAnswerStatus({ answer, offline }: { answer: ThreadQuestionAnswer; offline: boolean }) {

@@ -1,9 +1,10 @@
 import * as stylex from '@stylexjs/stylex'
-import { colors, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { space } from '../theme/tokens.stylex'
 
-// 分支线：对话里的 Thread 组和附件不加外壳，一行 muted 标题下面的行挂在左侧的 borderSoft 竖线上。
+// 分支线：对话里的 Thread 组和附件不加外壳，一行 muted 标题下面的行挂在左侧的 border 竖线上。
 export const branch = stylex.create({
-  title: { display: 'flex', alignItems: 'center', gap: space.sm, color: colors.muted },
+  title: { display: 'flex', alignItems: 'center', gap: space.sm, color: semantic.mutedForeground },
   line: {
     display: 'flex',
     flexDirection: 'column',
@@ -12,6 +13,6 @@ export const branch = stylex.create({
     paddingLeft: space.sm,
     borderLeftWidth: '1px',
     borderLeftStyle: 'solid',
-    borderLeftColor: colors.borderSoft,
+    borderLeftColor: semantic.border,
   },
 })

@@ -7,7 +7,8 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import 'katex/dist/katex.min.css'
 import { fonts } from '../theme/base.stylex'
-import { colors, radius, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, space } from '../theme/tokens.stylex'
 import { focusRing } from '../ui/Button'
 import { MessageCodeBlock, MessageStreamingContext } from './MessageCodeBlock'
 import { markdownComponents, safeLinkUrl } from './RestrictedMarkdown'
@@ -29,7 +30,7 @@ const styles = stylex.create({
     fontSize: '0.92em',
     paddingInline: space.xxs,
     borderRadius: radius.sm,
-    backgroundColor: colors.subtle,
+    backgroundColor: semantic.secondary,
   },
   path: {
     fontFamily: fonts.mono,
@@ -37,8 +38,8 @@ const styles = stylex.create({
     paddingInline: space.xxs,
     borderWidth: 0,
     borderRadius: radius.sm,
-    backgroundColor: { default: colors.subtle, ':hover': colors.hover },
-    color: colors.accentText,
+    backgroundColor: { default: semantic.secondary, ':hover': semantic.muted },
+    color: semantic.brandForeground,
     cursor: 'pointer',
   },
 })
@@ -58,10 +59,13 @@ export function MessageBody({
   body,
   onOpenPath,
   streaming = false,
+  keepLineBreaks = false,
 }: {
   body: string
   onOpenPath: (path: string) => void
   streaming?: boolean
+  // 人写的消息保留单个换行，Markdown 默认会把它合并成空格。
+  keepLineBreaks?: boolean
 }) {
   const [active, setActive] = useState(streaming)
   const [selectedText, setSelectedText] = useState<string | null>(null)
@@ -128,7 +132,10 @@ export function MessageBody({
     </ReactMarkdown>
   )
   return (
-    <div ref={root} className={`message-body ${stylex.props(styles.body).className ?? ''}`}>
+    <div
+      ref={root}
+      className={`message-body ${keepLineBreaks ? 'message-body-line-breaks ' : ''}${stylex.props(styles.body).className ?? ''}`}
+    >
       <MessageStreamingContext value={streaming}>
         {active && !reducedMotion ? (
           <Suspense fallback={staticContent}>

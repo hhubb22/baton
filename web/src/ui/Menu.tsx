@@ -1,11 +1,13 @@
 import { Menu as BaseMenu } from '@base-ui/react/menu'
 import * as stylex from '@stylexjs/stylex'
 import type { ReactElement, ReactNode } from 'react'
+import { semantic } from '../theme/semantic.stylex'
 import { text } from '../theme/text'
-import { colors, radius, space } from '../theme/tokens.stylex'
+import { radius, shadow, space } from '../theme/tokens.stylex'
 import { Icon } from './Icon'
 import { StatusDot, type Tone } from './Status'
 
+// 外观转写自 coss ui 的 Menu（MIT）。菜单每天打开上百次，直接出现，不加进出场动画。
 const styles = stylex.create({
   positioner: { zIndex: 20, outline: 'none' },
   popup: {
@@ -16,13 +18,13 @@ const styles = stylex.create({
     maxHeight: 'var(--available-height)',
     overflowY: 'auto',
     padding: space.xs,
-    backgroundColor: colors.surface,
+    backgroundColor: semantic.popover,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    boxShadow: `0 8px 24px ${colors.shadowFar}`,
-    color: colors.text,
+    borderColor: semantic.border,
+    borderRadius: radius.lg,
+    boxShadow: shadow.floating,
+    color: semantic.foreground,
     outline: 'none',
   },
   narrow: { width: '232px' },
@@ -30,38 +32,38 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: space.sm,
-    height: '32px',
+    minHeight: '32px',
     paddingInline: space.sm,
     borderRadius: radius.sm,
     cursor: 'default',
     outline: 'none',
     userSelect: 'none',
   },
-  highlighted: { backgroundColor: colors.hover },
+  highlighted: { backgroundColor: semantic.accent },
   // 两行选项：名称和勾选在第一行，下面一行浅色说明
   optionTall: {
     flexWrap: 'wrap',
     rowGap: '2px',
-    height: 'auto',
     paddingBlock: '6px',
   },
-  detail: { flexBasis: '100%', color: colors.muted },
+  detail: { flexBasis: '100%', color: semantic.mutedForeground },
   name: { flexGrow: 1 },
-  note: { color: colors.faint, whiteSpace: 'nowrap' },
-  check: { color: colors.text },
+  note: { color: semantic.faintForeground, whiteSpace: 'nowrap' },
+  check: { color: semantic.foreground },
   heading: {
     display: 'flex',
     alignItems: 'center',
     height: '28px',
     paddingTop: '6px',
     paddingInline: space.sm,
-    color: colors.faint,
+    color: semantic.faintForeground,
   },
   rule: {
     height: '1px',
     marginBlock: space.xs,
+    marginInline: space.sm,
     borderWidth: 0,
-    backgroundColor: colors.borderSoft,
+    backgroundColor: semantic.border,
   },
 })
 
@@ -84,7 +86,7 @@ export function Menu({
     <BaseMenu.Root onOpenChange={onOpenChange}>
       <BaseMenu.Trigger render={trigger} />
       <BaseMenu.Portal>
-        <BaseMenu.Positioner side={side} align={align} sideOffset={6} {...stylex.props(styles.positioner)}>
+        <BaseMenu.Positioner side={side} align={align} sideOffset={4} {...stylex.props(styles.positioner)}>
           <BaseMenu.Popup {...stylex.props(styles.popup, narrow && styles.narrow)}>{children}</BaseMenu.Popup>
         </BaseMenu.Positioner>
       </BaseMenu.Portal>

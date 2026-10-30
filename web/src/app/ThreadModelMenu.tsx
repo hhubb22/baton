@@ -3,7 +3,8 @@ import { useState } from 'react'
 import { agentNames, agentUnavailableReason, canCreateAgent } from '../data/derive'
 import type { AgentKind, DeviceAgent } from '../data/types'
 import { text } from '../theme/text'
-import { colors, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { space } from '../theme/tokens.stylex'
 import { Button } from '../ui/Button'
 import { Chip } from '../ui/Chip'
 import { Dialog, DialogClose } from '../ui/Dialog'
@@ -18,8 +19,14 @@ export interface ThreadModelChoice {
 }
 
 const styles = stylex.create({
-  note: { paddingBlock: '6px', paddingInline: space.sm, color: colors.muted },
-  providerIcon: { display: 'inline-flex', flexShrink: 0, width: '16px', height: '16px', color: colors.muted },
+  note: { paddingBlock: '6px', paddingInline: space.sm, color: semantic.mutedForeground },
+  providerIcon: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    width: '16px',
+    height: '16px',
+    color: semantic.mutedForeground,
+  },
   search: {
     width: '100%',
     minHeight: '36px',
@@ -27,11 +34,11 @@ const styles = stylex.create({
     borderWidth: 0,
     borderBottomWidth: '1px',
     borderBottomStyle: 'solid',
-    borderBottomColor: colors.borderSoft,
+    borderBottomColor: semantic.border,
     outline: 'none',
     backgroundColor: 'transparent',
-    color: colors.text,
-    '::placeholder': { color: colors.faint },
+    color: semantic.foreground,
+    '::placeholder': { color: semantic.faintForeground },
   },
 })
 

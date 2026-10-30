@@ -1,6 +1,7 @@
 import * as stylex from '@stylexjs/stylex'
 import type { ReactNode } from 'react'
-import { colors, radius } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius } from '../theme/tokens.stylex'
 
 const styles = stylex.create({
   kbd: {
@@ -10,10 +11,10 @@ const styles = stylex.create({
     paddingInline: '5px',
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.borderSoft,
+    borderColor: semantic.border,
     borderRadius: radius.inner,
-    backgroundColor: colors.surface,
-    color: colors.faint,
+    backgroundColor: semantic.card,
+    color: semantic.faintForeground,
     fontFamily: 'inherit',
     fontSize: '11px',
     lineHeight: 1,

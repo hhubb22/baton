@@ -1,15 +1,20 @@
 import { Dialog as BaseDialog } from '@base-ui/react/dialog'
 import * as stylex from '@stylexjs/stylex'
 import type { ComponentProps, ReactNode } from 'react'
+import { semantic } from '../theme/semantic.stylex'
 import { text } from '../theme/text'
-import { colors, space } from '../theme/tokens.stylex'
+import { motion, radius, shadow, space } from '../theme/tokens.stylex'
 
 const styles = stylex.create({
   backdrop: {
     position: 'fixed',
     inset: 0,
     zIndex: 30,
-    backgroundColor: colors.overlay,
+    backgroundColor: semantic.overlay,
+    opacity: 1,
+    transitionProperty: 'opacity',
+    transitionDuration: motion.modal,
+    transitionTimingFunction: motion.easeOut,
   },
   popup: {
     position: 'fixed',
@@ -24,26 +29,33 @@ const styles = stylex.create({
     maxHeight: 'calc(100vh - 64px)',
     overflowY: 'auto',
     padding: space.xl,
+    opacity: 1,
     transform: 'translate(-50%, -50%)',
-    backgroundColor: colors.surface,
+    transitionProperty: 'opacity, transform',
+    transitionDuration: motion.modal,
+    transitionTimingFunction: motion.easeOut,
+    backgroundColor: semantic.popover,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.border,
-    borderRadius: '14px',
-    boxShadow: `0 12px 32px ${colors.shadowFar}, 0 2px 6px ${colors.shadowNear}`,
-    color: colors.text,
+    borderColor: semantic.border,
+    borderRadius: radius.xl,
+    boxShadow: shadow.modal,
+    color: semantic.foreground,
     outline: 'none',
   },
+  popupHidden: { opacity: 0, transform: 'translate(-50%, -50%) scale(0.98)' },
+  hidden: { opacity: 0 },
+  leaving: { transitionDuration: motion.exit },
   wide: { width: '600px' },
-  header: { display: 'flex', flexDirection: 'column', gap: '20px' },
-  description: { color: colors.muted },
+  header: { display: 'flex', flexDirection: 'column', gap: space.sm },
+  description: { color: semantic.mutedForeground },
   footer: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: space.sm,
   },
-  note: { color: colors.faint },
+  note: { color: semantic.faintForeground },
   actions: { display: 'flex', gap: space.sm, marginLeft: 'auto' },
 })
 
@@ -73,8 +85,26 @@ export function Dialog({
   return (
     <BaseDialog.Root open={open} onOpenChange={(next) => onOpenChange(next)}>
       <BaseDialog.Portal>
-        <BaseDialog.Backdrop {...stylex.props(styles.backdrop)} />
-        <BaseDialog.Popup finalFocus={finalFocus} {...stylex.props(styles.popup, wide && styles.wide)}>
+        <BaseDialog.Backdrop
+          className={(state) =>
+            stylex.props(
+              styles.backdrop,
+              state.transitionStatus !== undefined && styles.hidden,
+              state.transitionStatus === 'ending' && styles.leaving,
+            ).className ?? ''
+          }
+        />
+        <BaseDialog.Popup
+          finalFocus={finalFocus}
+          className={(state) =>
+            stylex.props(
+              styles.popup,
+              wide && styles.wide,
+              state.transitionStatus !== undefined && styles.popupHidden,
+              state.transitionStatus === 'ending' && styles.leaving,
+            ).className ?? ''
+          }
+        >
           <div {...stylex.props(styles.header)}>
             <BaseDialog.Title {...stylex.props(text.heading)}>{title}</BaseDialog.Title>
             {description && (

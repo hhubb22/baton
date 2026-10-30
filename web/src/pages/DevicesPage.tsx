@@ -25,7 +25,8 @@ import {
 import type { Device, ID, ModelConnection } from '../data/types'
 import { desktopStatusLabel, desktopStatusReason, needsDesktopReauth, useDesktopStatus } from '../data/desktop'
 import { text } from '../theme/text'
-import { colors, radius, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, space } from '../theme/tokens.stylex'
 import { Button, focusRing } from '../ui/Button'
 import { Dialog } from '../ui/Dialog'
 import { Icon } from '../ui/Icon'
@@ -46,17 +47,17 @@ const styles = stylex.create({
   },
   intro: { display: 'flex', alignItems: 'center', gap: space.xl, paddingInline: space.lg },
   heading: { flexGrow: 1, outline: 'none' },
-  desktopLink: { color: colors.accentText, whiteSpace: 'nowrap' },
+  desktopLink: { color: semantic.brandForeground, whiteSpace: 'nowrap' },
   notice: {
     display: 'flex',
     flexDirection: 'column',
     gap: space.sm,
     paddingBlock: '14px',
     paddingInline: space.lg,
-    backgroundColor: colors.panel,
+    backgroundColor: semantic.sidebar,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.borderSoft,
+    borderColor: semantic.border,
     borderRadius: radius.lg,
     outline: 'none',
   },
@@ -67,14 +68,14 @@ const styles = stylex.create({
     flexDirection: 'column',
     borderTopWidth: '1px',
     borderTopStyle: 'solid',
-    borderTopColor: colors.borderSoft,
+    borderTopColor: semantic.border,
   },
   item: {
     borderBottomWidth: '1px',
     borderBottomStyle: 'solid',
-    borderBottomColor: colors.borderSoft,
+    borderBottomColor: semantic.border,
   },
-  rowOpen: { backgroundColor: { default: colors.selected, ':hover': colors.selected } },
+  rowOpen: { backgroundColor: { default: semantic.accent, ':hover': semantic.accent } },
   row: {
     display: 'grid',
     gridTemplateColumns: '32px minmax(0, 1fr) 200px 170px 16px',
@@ -84,8 +85,8 @@ const styles = stylex.create({
     paddingBlock: space.md,
     paddingInline: space.lg,
     borderWidth: 0,
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
-    color: colors.text,
+    backgroundColor: { default: 'transparent', ':hover': semantic.muted },
+    color: semantic.foreground,
     textAlign: 'left',
   },
   tile: {
@@ -94,14 +95,14 @@ const styles = stylex.create({
     justifyContent: 'center',
     width: '32px',
     height: '32px',
-    color: colors.muted,
+    color: semantic.mutedForeground,
   },
   identity: { display: 'flex', flexDirection: 'column', minWidth: 0 },
   nameLine: { display: 'flex', alignItems: 'center', gap: space.sm, minWidth: 0 },
   status: { display: 'flex', alignItems: 'center', gap: space.sm, minWidth: 0 },
-  agentStatus: { color: colors.agentText },
-  attention: { color: colors.attentionText },
-  chevron: { color: colors.faint },
+  agentStatus: { color: semantic.agentForeground },
+  attention: { color: semantic.warningForeground },
+  chevron: { color: semantic.faintForeground },
   details: {
     display: 'flex',
     flexDirection: 'column',
@@ -135,7 +136,7 @@ const styles = stylex.create({
     paddingBlock: space.md,
     borderBottomWidth: '1px',
     borderBottomStyle: 'solid',
-    borderBottomColor: { default: colors.borderSoft, ':last-child': 'transparent' },
+    borderBottomColor: { default: semantic.border, ':last-child': 'transparent' },
   },
   folderPath: { flexGrow: 1, overflowWrap: 'anywhere', minWidth: 0 },
   textButton: {
@@ -143,8 +144,8 @@ const styles = stylex.create({
     paddingInline: space.sm,
     borderWidth: 0,
     borderRadius: radius.sm,
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
-    color: colors.danger,
+    backgroundColor: { default: 'transparent', ':hover': semantic.muted },
+    color: semantic.destructiveForeground,
   },
   empty: {
     display: 'flex',
@@ -154,10 +155,10 @@ const styles = stylex.create({
     paddingBlock: space.section,
     paddingInline: space.xl,
     textAlign: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: semantic.card,
     borderWidth: '1px',
     borderStyle: 'dashed',
-    borderColor: colors.border,
+    borderColor: semantic.input,
     borderRadius: radius.lg,
   },
 })

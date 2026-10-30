@@ -1,14 +1,15 @@
 import * as stylex from '@stylexjs/stylex'
 import type { ReactNode } from 'react'
 import { weight } from '../theme/base.stylex'
-import { colors, radius, size } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, size } from '../theme/tokens.stylex'
 
 const styles = stylex.create({
   count: {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    color: colors.muted,
+    color: semantic.mutedForeground,
     fontSize: '12px',
     lineHeight: 1,
     fontWeight: weight.medium,
@@ -20,20 +21,20 @@ const styles = stylex.create({
     height: '18px',
     paddingInline: '6px',
     borderRadius: radius.inner,
-    backgroundColor: colors.subtle,
-    color: colors.muted,
+    backgroundColor: semantic.secondary,
+    color: semantic.mutedForeground,
     fontSize: '11px',
     lineHeight: 1,
     whiteSpace: 'nowrap',
   },
-  tagAgent: { backgroundColor: colors.agentSoft, color: colors.agentText },
-  tagAttention: { backgroundColor: colors.attentionSoft, color: colors.attentionText },
+  tagAgent: { backgroundColor: semantic.agentSoft, color: semantic.agentForeground },
+  tagAttention: { backgroundColor: semantic.warningSoft, color: semantic.warningForeground },
   unread: {
     display: 'inline-block',
     width: size.dot,
     height: size.dot,
     borderRadius: radius.pill,
-    backgroundColor: colors.accentText,
+    backgroundColor: semantic.brandForeground,
   },
 })
 

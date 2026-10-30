@@ -81,6 +81,22 @@ export const SessionRequest = Schema.Struct({
 })
 export type SessionRequest = typeof SessionRequest.Type
 
+export const ThreadTraceStep = Schema.Struct({
+  item_id: Text,
+  type: Text,
+  status: Text,
+  ordinal: NonNegativeInteger,
+  parent_id: Schema.optionalKey(Text),
+  title: Schema.optionalKey(Text),
+  started_at: Schema.optionalKey(Timestamp),
+  completed_at: Schema.optionalKey(Timestamp),
+  data: Schema.Json,
+  truncated: Schema.Boolean,
+  original_bytes: NonNegativeInteger,
+  full_output: Schema.optionalKey(FullOutputReference),
+})
+export type ThreadTraceStep = typeof ThreadTraceStep.Type
+
 export const SessionResult = Schema.Struct({
   type: Schema.Literal('session.result'),
   operation_id: UUID,
@@ -91,6 +107,8 @@ export const SessionResult = Schema.Struct({
   text: Schema.optionalKey(boundedText(16 * 1024)),
   reply_id: Schema.optionalKey(boundedText(512)),
   worker_turn_seq: Schema.optionalKey(NonNegativeInteger),
+  running_steps: Schema.optionalKey(Schema.Array(ThreadTraceStep)),
+  running_steps_truncated: Schema.optionalKey(Schema.Boolean),
   cursor: Schema.optionalKey(Cursor),
   full_output: Schema.optionalKey(FullOutputPage),
   gap: Schema.Boolean,
@@ -377,22 +395,6 @@ export const ThreadTimeline = Schema.Struct({
   next_cursor: Schema.optionalKey(Text),
 })
 export type ThreadTimeline = typeof ThreadTimeline.Type
-
-export const ThreadTraceStep = Schema.Struct({
-  item_id: Text,
-  type: Text,
-  status: Text,
-  ordinal: NonNegativeInteger,
-  parent_id: Schema.optionalKey(Text),
-  title: Schema.optionalKey(Text),
-  started_at: Schema.optionalKey(Timestamp),
-  completed_at: Schema.optionalKey(Timestamp),
-  data: Schema.Json,
-  truncated: Schema.Boolean,
-  original_bytes: NonNegativeInteger,
-  full_output: Schema.optionalKey(FullOutputReference),
-})
-export type ThreadTraceStep = typeof ThreadTraceStep.Type
 
 export const ThreadTrace = Schema.Struct({
   ok: Schema.Boolean,

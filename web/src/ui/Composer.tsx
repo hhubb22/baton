@@ -1,64 +1,31 @@
 import * as stylex from '@stylexjs/stylex'
-import { useLayoutEffect, useRef, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
-import { text } from '../theme/text'
-import { colors, radius, space } from '../theme/tokens.stylex'
+import { useState, type MouseEvent, type ReactNode, type RefObject } from 'react'
+import { semantic } from '../theme/semantic.stylex'
+import { motion, radius, shadow, space } from '../theme/tokens.stylex'
 import { focusRing } from './Button'
+import {
+  Composer as ComposerEditor,
+  ComposerActions,
+  ComposerInput,
+  getComposerText,
+  type ComposerValue,
+} from './composer-editor'
 import { Icon } from './Icon'
 
 const styles = stylex.create({
-  composer: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: space.sm,
-    width: '100%',
-    maxWidth: '712px',
-    padding: '12px 12px 12px 16px',
-    backgroundColor: colors.surface,
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: colors.hairline,
-    borderRadius: '24px',
-    boxShadow: `0 3px 6px -2px ${colors.shadowSoft}, 0 1px 1px ${colors.shadowNear}`,
-    cursor: 'text',
-  },
+  composer: { width: '100%', maxWidth: '712px' },
+  // 没有工具栏时，输入和发送按钮排在同一行。
   compact: {
     display: 'grid',
     gridTemplateColumns: 'minmax(0, 1fr) auto',
-    alignItems: 'center',
-    padding: '8px',
-    borderRadius: '28px',
+    alignItems: 'end',
   },
   roomy: { maxWidth: '840px' },
-  project: { maxWidth: '640px', boxShadow: 'none' },
-  header: { cursor: 'auto' },
+  project: { maxWidth: '640px' },
+  header: { paddingTop: space.sm, paddingInline: space.sm, cursor: 'auto' },
   compactHeader: { gridColumn: '1 / -1' },
-  input: {
-    width: '100%',
-    height: '24px',
-    minHeight: '24px',
-    maxHeight: '240px',
-    padding: 0,
-    borderWidth: 0,
-    outline: 'none',
-    resize: 'none',
-    overflowY: 'hidden',
-    backgroundColor: 'transparent',
-    color: colors.text,
-    fontSize: '15px',
-    lineHeight: '24px',
-    transition: 'height 150ms cubic-bezier(0.23, 1, 0.32, 1)',
-    '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
-    '::placeholder': { color: colors.faint },
-  },
-  compactInput: { paddingLeft: '8px' },
-  roomyInput: { minHeight: '96px' },
-  toolbar: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: space.sm,
-    cursor: 'default',
-  },
+  input: { lineHeight: '24px' },
+  roomyInput: { minHeight: '104px' },
   chips: {
     display: 'flex',
     flexWrap: 'wrap',
@@ -66,31 +33,40 @@ const styles = stylex.create({
     gap: '2px',
     flexGrow: 1,
     minWidth: 0,
-    marginLeft: '-8px',
+    marginLeft: '-4px',
+    cursor: 'default',
   },
-  actions: { display: 'flex', alignItems: 'center', gap: space.sm, flexShrink: 0 },
+  actions: { display: 'flex', alignItems: 'center', gap: space.sm, flexShrink: 0, marginLeft: 'auto' },
   send: {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
-    width: '36px',
-    height: '36px',
+    width: '32px',
+    height: '32px',
     padding: 0,
     borderWidth: 0,
-    borderRadius: radius.pill,
-    backgroundColor: { default: colors.accent, ':hover': colors.accentHover, ':active': colors.accentPressed },
-    color: colors.onAccent,
+    borderRadius: radius.md,
+    backgroundColor: { default: semantic.primary, ':hover': semantic.primaryHover },
+    boxShadow: shadow.filled,
+    color: semantic.primaryForeground,
+    transform: { default: 'none', ':active': 'scale(0.97)' },
+    transitionProperty: 'background-color, transform',
+    transitionDuration: motion.micro,
   },
-  compactToolbar: { alignSelf: 'end' },
-  // 没有内容时按钮变灰，点击不发送。
+  // 没有内容时按钮变灰，是否发送由页面决定，例如只带引用也可以发。
   sendIdle: {
-    backgroundColor: { default: colors.subtle, ':hover': colors.subtle, ':active': colors.subtle },
-    color: colors.faint,
+    backgroundColor: { default: semantic.secondary, ':hover': semantic.secondary },
+    boxShadow: 'none',
+    color: semantic.faintForeground,
   },
 })
 
-// 输入区：提示文字在上，工具栏在下。Enter 发送，Shift+Enter 换行，输入法组合时不发送。
+const toParts = (value: string): ComposerValue => (value ? [{ type: 'text', text: value }] : [])
+
+const keepFocus = (event: MouseEvent) => event.stopPropagation()
+
+// 页面用的输入区：页面只管文字，编辑器负责草稿结构。Enter 发送，Shift+Enter 换行，输入法组合时不发送。
 export function Composer({
   value,
   onChange,
@@ -115,97 +91,62 @@ export function Composer({
   // 输入框上方的内容，例如要一起发送的引用。
   header?: ReactNode
   label?: string
-  inputRef?: RefObject<HTMLTextAreaElement | null>
+  inputRef?: RefObject<HTMLDivElement | null>
   style?: stylex.StyleXStyles
   roomy?: boolean
   project?: boolean
 }) {
-  const localRef = useRef<HTMLTextAreaElement | null>(null)
-  const empty = value.trim() === ''
+  const [parts, setParts] = useState<ComposerValue>(() => toParts(value))
+  // 页面清空或恢复草稿时，以页面的文字为准。
+  const current = getComposerText(parts) === value ? parts : toParts(value)
   const compact = !chips && !actions
-  const ref = inputRef ?? localRef
-
-  useLayoutEffect(() => {
-    const input = ref.current
-    if (!input) return
-    let width = input.clientWidth
-    const resize = () => {
-      const previous = input.style.height
-      input.style.transition = 'none'
-      input.style.height = '0px'
-      const contentHeight = input.scrollHeight
-      const next = `${Math.max(roomy ? 96 : 24, Math.min(contentHeight, 240))}px`
-      input.style.overflowY = contentHeight > 240 ? 'auto' : 'hidden'
-      input.style.height = previous
-      void input.offsetHeight
-      input.style.transition = ''
-      input.style.height = next
-    }
-    resize()
-    const observer =
-      typeof ResizeObserver === 'undefined'
-        ? null
-        : new ResizeObserver(() => {
-            if (input.clientWidth === width) return
-            width = input.clientWidth
-            resize()
-          })
-    observer?.observe(input)
-    return () => observer?.disconnect()
-  }, [ref, roomy, value])
-
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
-    event.preventDefault()
-    onSend()
-  }
 
   return (
-    <div
-      {...stylex.props(
-        styles.composer,
-        compact && styles.compact,
-        roomy && styles.roomy,
-        project && styles.project,
-        style,
-      )}
-      onClick={() => ref.current?.focus()}
+    // 工具栏里有按钮和菜单，根节点用 div，避免它们触发表单提交。
+    <ComposerEditor
+      render={<div />}
+      value={current}
+      onValueChange={(next) => {
+        setParts(next)
+        onChange(getComposerText(next))
+      }}
+      onSubmit={onSend}
+      allowEmpty
+      style={[styles.composer, compact && styles.compact, roomy && styles.roomy, project && styles.project, style]}
     >
       {header && (
         <div
-          onClick={(event) => event.stopPropagation()}
+          onClick={keepFocus}
+          onMouseDown={keepFocus}
           {...stylex.props(styles.header, compact && styles.compactHeader)}
         >
           {header}
         </div>
       )}
-      <textarea
-        ref={ref}
+      <ComposerInput
+        ref={inputRef}
         aria-label={label}
-        rows={1}
-        value={value}
         placeholder={placeholder}
-        onChange={(event) => onChange(event.target.value)}
-        onKeyDown={onKeyDown}
-        {...stylex.props(text.body, styles.input, compact && styles.compactInput, roomy && styles.roomyInput)}
+        style={[styles.input, roomy && styles.roomyInput]}
       />
-      <div
-        {...stylex.props(styles.toolbar, compact && styles.compactToolbar)}
-        onClick={(event) => event.stopPropagation()}
-      >
-        {chips && <div {...stylex.props(styles.chips)}>{chips}</div>}
+      <ComposerActions>
+        {chips && (
+          <div onClick={keepFocus} onMouseDown={keepFocus} {...stylex.props(styles.chips)}>
+            {chips}
+          </div>
+        )}
         <div {...stylex.props(styles.actions)}>
           {actions}
           <button
             type="button"
             aria-label="发送"
             onClick={onSend}
-            {...stylex.props(styles.send, empty && styles.sendIdle, focusRing.ring)}
+            {...stylex.props(styles.send, value.trim() === '' && styles.sendIdle, focusRing.ring)}
           >
             <Icon name="arrow-up" size={16} />
           </button>
         </div>
-      </div>
-    </div>
+      </ComposerActions>
+    </ComposerEditor>
   )
 }

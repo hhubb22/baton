@@ -3,15 +3,16 @@ import { useEffect, useRef, useState } from 'react'
 import { readFullOutput } from '../data/http/full-output'
 import type { FullOutputReference } from '../data/types'
 import { fileSize } from '../data/derive'
-import { fonts } from '../theme/base.stylex'
+import { fonts, fontSize } from '../theme/base.stylex'
 import { text } from '../theme/text'
-import { colors, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { space } from '../theme/tokens.stylex'
 import { Button } from '../ui/Button'
 
 const styles = stylex.create({
   root: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: space.sm },
   actions: { display: 'flex', flexWrap: 'wrap', gap: space.sm, alignItems: 'center' },
-  muted: { color: colors.muted },
+  muted: { color: semantic.mutedForeground },
   output: {
     margin: 0,
     maxHeight: '320px',
@@ -20,12 +21,12 @@ const styles = stylex.create({
     overflowWrap: 'anywhere',
     alignSelf: 'stretch',
     fontFamily: fonts.mono,
-    fontSize: '12px',
+    fontSize: fontSize.caption,
     lineHeight: 1.55,
     paddingLeft: space.md,
     borderLeftWidth: '2px',
     borderLeftStyle: 'solid',
-    borderLeftColor: colors.borderSoft,
+    borderLeftColor: semantic.border,
   },
 })
 

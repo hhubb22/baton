@@ -6,7 +6,7 @@ import { createMockClient } from '../data/mock/client'
 import type { BatonClient } from '../data/client'
 import type { Device, FullOutputReference, Message, TraceStep } from '../data/types'
 import { readFullOutput } from '../data/http/full-output'
-import { ActivityTrace, LiveOutput } from './ReplyParts'
+import { ActivityTrace, LiveOutput, TurnActivityTrace } from './ReplyParts'
 
 vi.mock('../data/http/full-output', () => ({ readFullOutput: vi.fn() }))
 
@@ -80,6 +80,32 @@ function setup(readTrace: BatonClient['readTrace'], device?: Device, reply: Mess
   return { ...result, client }
 }
 
+it('shows running steps after saved steps and gives saved trace precedence over a late snapshot', async () => {
+  const client = createMockClient('normal', { latency: { read: 0, save: 0, device: 0, run: 8000 } })
+  const saved = step('dynamic_tool', { output: 'saved result' }, { item_id: 'same', title: 'Saved step' })
+  client.readTurnTrace = async () => ({ state: 'ready', messageId: message.id, steps: [saved] })
+  const running = [
+    step('dynamic_tool', { input: 'stale' }, { item_id: 'same', title: 'Stale step', status: 'running' }),
+    step(
+      'dynamic_tool',
+      { input: 'current' },
+      { item_id: 'next', title: 'Running step', status: 'running', ordinal: 1 },
+    ),
+  ]
+  render(
+    <ClientProvider client={client}>
+      <TurnActivityTrace threadId="thread" turnSeq={1} device={undefined} runningSteps={running} />
+    </ClientProvider>,
+  )
+  expect(await screen.findByText('Saved step')).toBeInTheDocument()
+  expect(screen.queryByText('Stale step')).not.toBeInTheDocument()
+  expect(screen.getByText('Running step')).toBeInTheDocument()
+  expect(
+    screen.getByText('Saved step').compareDocumentPosition(screen.getByText('Running step')) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy()
+})
+
 it('renders typed steps, gap sizes and full output actions while the device is offline', async () => {
   const user = userEvent.setup()
   const client = createMockClient('normal', { latency: { read: 0, save: 0, device: 0, run: 8000 } })
@@ -95,7 +121,12 @@ it('renders typed steps, gap sizes and full output actions while the device is o
     ),
     step(
       'dynamic_tool',
-      { toolName: 'Read', input: { path: '/work/source.ts' }, output: [{ type: 'text', text: 'Saved detail' }] },
+      {
+        toolName: 'Read',
+        nativeToolId: 'read_file',
+        input: { path: '/work/source.ts' },
+        output: [{ type: 'text', text: 'Saved detail' }],
+      },
       { truncated: true, original_bytes: 2048 },
     ),
     step('file_change', { fileName: '/work/source.ts', diffStr: '+ saved change', additions: 1, deletions: 0 }),
@@ -124,6 +155,9 @@ it('renders typed steps, gap sizes and full output actions while the device is o
   expect(await screen.findByText('Saved fragment')).toBeInTheDocument()
   expect(screen.getByText('退出码 0')).toBeInTheDocument()
   expect(screen.getByLabelText('工具输入')).toHaveTextContent('/work/source.ts')
+  expect(screen.getByText('read_file')).toBeInTheDocument()
+  expect(screen.getByText('输入')).toBeInTheDocument()
+  expect(screen.getByText('结果')).toBeInTheDocument()
   expect(screen.getByText('Saved detail')).toBeInTheDocument()
   expect(screen.getByText('已更改 source.ts')).toBeInTheDocument()
   expect(screen.getByLabelText('文件改动')).toHaveTextContent('+ saved change')

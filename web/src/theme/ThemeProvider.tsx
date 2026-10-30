@@ -1,7 +1,14 @@
 import * as stylex from '@stylexjs/stylex'
 import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { darkTheme, lightTheme } from './themes'
-import { colors } from './tokens.stylex'
+import {
+  colorProperty,
+  defaultInputs,
+  generateTheme,
+  highContrastInputs,
+  type SemanticColor,
+  type ThemeInputs,
+} from './generate'
+import { semantic } from './semantic.stylex'
 
 export type ThemeMode = 'system' | 'light' | 'dark'
 
@@ -9,8 +16,8 @@ const storageKey = 'baton.theme'
 
 const page = stylex.create({
   root: {
-    backgroundColor: colors.canvas,
-    color: colors.text,
+    backgroundColor: semantic.background,
+    color: semantic.foreground,
     colorScheme: 'light dark',
   },
   light: { colorScheme: 'light' },
@@ -21,6 +28,19 @@ const ThemeContext = createContext<{ mode: ThemeMode; setMode: (mode: ThemeMode)
   mode: 'system',
   setMode: () => {},
 })
+
+const moreContrastQuery = '(prefers-contrast: more)'
+
+// 用生成器的结果覆盖 <html> 上的语义颜色。传 null 时恢复样式表里的默认值。
+export function applyThemeInputs(inputs: ThemeInputs | null) {
+  const root = document.documentElement
+  const theme = generateTheme(inputs ?? defaultInputs)
+  for (const name of Object.keys(theme) as SemanticColor[]) {
+    const property = colorProperty(name)
+    if (inputs) root.style.setProperty(property, theme[name])
+    else root.style.removeProperty(property)
+  }
+}
 
 function readMode(): ThemeMode {
   try {
@@ -37,16 +57,21 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [mode, setModeState] = useState<ThemeMode>(readMode)
 
   useEffect(() => {
-    const props = stylex.props(
-      page.root,
-      mode === 'light' && [lightTheme, page.light],
-      mode === 'dark' && [darkTheme, page.dark],
-    )
+    const props = stylex.props(page.root, mode === 'light' && page.light, mode === 'dark' && page.dark)
     const root = document.documentElement
     root.className = props.className ?? ''
     if (mode === 'system') delete root.dataset.openuiTheme
     else root.dataset.openuiTheme = mode
   }, [mode])
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return
+    const query = window.matchMedia(moreContrastQuery)
+    const apply = () => applyThemeInputs(query.matches ? highContrastInputs : null)
+    apply()
+    query.addEventListener('change', apply)
+    return () => query.removeEventListener('change', apply)
+  }, [])
 
   const setMode = (next: ThemeMode) => {
     setModeState(next)

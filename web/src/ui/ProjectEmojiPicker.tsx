@@ -1,5 +1,6 @@
 import * as stylex from '@stylexjs/stylex'
-import { colors, radius, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, space } from '../theme/tokens.stylex'
 import { text } from '../theme/text'
 import { focusRing } from './Button'
 import { Field, Input } from './Field'
@@ -15,10 +16,10 @@ const styles = stylex.create({
     height: '32px',
     borderWidth: 0,
     borderRadius: radius.md,
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
+    backgroundColor: { default: 'transparent', ':hover': semantic.muted },
     fontSize: '18px',
   },
-  selected: { backgroundColor: { default: colors.selected, ':hover': colors.selected } },
+  selected: { backgroundColor: { default: semantic.accent, ':hover': semantic.accent } },
 })
 
 export function validProjectEmoji(value: string) {

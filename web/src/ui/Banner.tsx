@@ -2,8 +2,9 @@ import * as stylex from '@stylexjs/stylex'
 import { useSyncExternalStore, type ReactNode } from 'react'
 import { DiagnosticCopy } from '../telemetry/DiagnosticCopy'
 import { hasFailure, subscribeFailures } from '../telemetry/diagnostics'
+import { semantic } from '../theme/semantic.stylex'
 import { text } from '../theme/text'
-import { colors, size, space } from '../theme/tokens.stylex'
+import { radius, shadow, size, space } from '../theme/tokens.stylex'
 import { Icon, type IconName } from './Icon'
 
 const styles = stylex.create({
@@ -16,28 +17,28 @@ const styles = stylex.create({
     paddingBlock: '10px',
     paddingLeft: '14px',
     paddingRight: space.md,
-    backgroundColor: colors.panel,
+    backgroundColor: semantic.sidebar,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.borderSoft,
-    borderRadius: '10px',
+    borderColor: semantic.border,
+    borderRadius: radius.lg,
   },
   // 需要人处理的横幅反色显示，在一屏内容里最先被看到。
   attention: {
     paddingBlock: '14px',
     paddingLeft: '18px',
     paddingRight: '14px',
-    backgroundColor: colors.inverse,
+    backgroundColor: semantic.inverse,
     borderColor: 'transparent',
-    borderRadius: '16px',
-    boxShadow: `0 1px 3px ${colors.shadowNear}, 0 12px 32px ${colors.shadowFar}`,
-    color: colors.onInverse,
+    borderRadius: radius.xl,
+    boxShadow: shadow.floating,
+    color: semantic.onInverse,
   },
-  glyph: { color: colors.muted },
-  glyphAttention: { color: colors.attention },
+  glyph: { color: semantic.mutedForeground },
+  glyphAttention: { color: semantic.warning },
   body: { display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0 },
-  detail: { color: colors.muted },
-  detailInverse: { color: colors.onInverseMuted },
+  detail: { color: semantic.mutedForeground },
+  detailInverse: { color: semantic.onInverseMuted },
 })
 
 // 等待和异常状态的横幅：一句标题、一句说明，能处理时才配一个动作。

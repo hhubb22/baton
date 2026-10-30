@@ -10,14 +10,15 @@ import {
 import { useClient, useDevices, useEnrollment } from '../data/queries'
 import type { Device } from '../data/types'
 import { text } from '../theme/text'
-import { colors, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { space } from '../theme/tokens.stylex'
 import { Button } from '../ui/Button'
 import { Dialog } from '../ui/Dialog'
 import { Input } from '../ui/Field'
 
 const styles = stylex.create({
   field: { display: 'flex', flexDirection: 'column', gap: space.sm },
-  error: { color: colors.danger },
+  error: { color: semantic.destructiveForeground },
 })
 
 export function DesktopEnrollDialog({

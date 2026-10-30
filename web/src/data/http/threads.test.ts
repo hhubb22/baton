@@ -507,6 +507,8 @@ describe('HTTP thread contracts', () => {
           event_id: 'reply-report',
           worker_turn_seq: 4,
           content: 'Actual reply',
+          truncated: true,
+          original_bytes: 40000,
           metadata: { full_output: fullOutputReference },
         },
         later,
@@ -520,6 +522,8 @@ describe('HTTP thread contracts', () => {
         body: 'Actual reply',
         activity: null,
         fullOutput: fullOutputReference,
+        truncated: true,
+        originalBytes: 40000,
         attachments: [],
       },
     ])

@@ -2,7 +2,8 @@ import * as stylex from '@stylexjs/stylex'
 import type { ReactNode } from 'react'
 import { glass, sceneImage } from '../theme/backdrop'
 import { useResolvedTheme } from '../theme/ThemeProvider'
-import { colors, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, shadow, space } from '../theme/tokens.stylex'
 
 // 场景图缓慢平移和缩放，一个来回 60 秒；系统开启减少动态效果时停在原位。
 const drift = stylex.keyframes({
@@ -17,7 +18,7 @@ const styles = stylex.create({
     justifyContent: 'center',
     minHeight: '100vh',
     padding: space.xl,
-    backgroundColor: colors.canvas,
+    backgroundColor: semantic.background,
     isolation: 'isolate',
     overflow: 'hidden',
   },
@@ -46,9 +47,9 @@ const styles = stylex.create({
     paddingBottom: '28px',
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.glassEdge,
-    borderRadius: '24px',
-    boxShadow: `0 24px 64px ${colors.shadowFar}`,
+    borderColor: semantic.glassEdge,
+    borderRadius: radius.xl,
+    boxShadow: shadow.modal,
   },
   backdrop: (image: string) => ({ backgroundImage: image }),
 })

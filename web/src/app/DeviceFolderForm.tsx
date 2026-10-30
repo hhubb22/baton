@@ -3,7 +3,8 @@ import { useState } from 'react'
 import { useAddDeviceFolder } from '../data/queries'
 import type { Device, ID } from '../data/types'
 import { text } from '../theme/text'
-import { colors, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { space } from '../theme/tokens.stylex'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Field'
 
@@ -11,8 +12,8 @@ const styles = stylex.create({
   form: { display: 'flex', flexDirection: 'column', gap: space.xs },
   row: { display: 'flex', alignItems: 'center', gap: space.sm },
   input: { minWidth: 0, flexGrow: 1 },
-  error: { color: colors.danger },
-  hint: { color: colors.faint },
+  error: { color: semantic.destructiveForeground },
+  hint: { color: semantic.faintForeground },
 })
 
 export function DeviceFolderForm({

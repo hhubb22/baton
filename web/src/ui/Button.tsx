@@ -1,7 +1,8 @@
 import * as stylex from '@stylexjs/stylex'
 import type { ComponentProps, ReactNode } from 'react'
 import { weight } from '../theme/base.stylex'
-import { colors, radius, size } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { motion, radius, shadow, size } from '../theme/tokens.stylex'
 import { Icon, type IconName } from './Icon'
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'dangerSolid'
@@ -10,12 +11,13 @@ export const focusRing = stylex.create({
   ring: {
     outline: {
       default: 'none',
-      ':focus-visible': `2px solid ${colors.focus}`,
+      ':focus-visible': `2px solid ${semantic.ring}`,
     },
-    outlineOffset: '2px',
+    outlineOffset: '1px',
   },
 })
 
+// 结构和状态转写自 coss ui 的 Button（MIT），变体名沿用 Baton 页面已有的调用。
 const styles = stylex.create({
   base: {
     display: 'inline-flex',
@@ -23,55 +25,58 @@ const styles = stylex.create({
     justifyContent: 'center',
     gap: '6px',
     flexShrink: 0,
-    height: size.compact,
+    height: size.control,
     paddingBlock: 0,
-    paddingInline: '10px',
+    paddingInline: '11px',
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderRadius: radius.pill,
-    fontSize: '12px',
+    borderRadius: radius.md,
+    fontSize: '13px',
     lineHeight: 1.45,
     fontWeight: weight.medium,
     whiteSpace: 'nowrap',
     userSelect: 'none',
-    transitionProperty: 'background-color, border-color, color',
-    transitionDuration: '120ms',
+    transform: { default: 'none', ':active': 'scale(0.97)' },
+    transitionProperty: 'background-color, border-color, color, box-shadow, transform',
+    transitionDuration: motion.micro,
+    transitionTimingFunction: motion.easeOut,
+    opacity: { default: 1, ':disabled': 0.64 },
   },
   small: {
     height: size.compact,
-    paddingInline: '10px',
+    gap: '4px',
+    paddingInline: '9px',
     fontSize: '12px',
   },
   block: { width: '100%' },
   primary: {
-    backgroundColor: {
-      default: colors.accent,
-      ':hover': colors.accentHover,
-      ':active': colors.accentPressed,
-    },
-    borderColor: 'transparent',
-    color: colors.onAccent,
+    backgroundColor: { default: semantic.primary, ':hover': semantic.primaryHover },
+    borderColor: semantic.primary,
+    boxShadow: { default: shadow.filled, ':active': 'none' },
+    color: semantic.primaryForeground,
   },
   dangerSolid: {
-    backgroundColor: colors.dangerFill,
-    borderColor: 'transparent',
-    color: colors.onAccent,
+    backgroundColor: semantic.destructive,
+    borderColor: semantic.destructive,
+    boxShadow: { default: shadow.filled, ':active': 'none' },
+    color: semantic.brandOn,
   },
   secondary: {
-    backgroundColor: { default: colors.surface, ':hover': colors.subtle, ':active': colors.selected },
-    borderColor: colors.border,
-    boxShadow: `0 3px 6px -2px ${colors.shadowSoft}, 0 1px 1px ${colors.shadowSoft}`,
-    color: colors.text,
+    backgroundColor: { default: semantic.popover, ':hover': semantic.secondary },
+    borderColor: semantic.input,
+    boxShadow: { default: shadow.control, ':active': 'none' },
+    color: semantic.foreground,
   },
   ghost: {
-    backgroundColor: { default: 'transparent', ':hover': colors.hover, ':active': colors.selected },
+    backgroundColor: { default: 'transparent', ':hover': semantic.accent },
     borderColor: 'transparent',
-    color: colors.text,
+    color: semantic.foreground,
   },
   danger: {
-    backgroundColor: { default: colors.surface, ':hover': colors.dangerSoft },
-    borderColor: colors.border,
-    color: colors.danger,
+    backgroundColor: { default: semantic.popover, ':hover': semantic.destructiveSoft },
+    borderColor: semantic.input,
+    boxShadow: { default: shadow.control, ':active': 'none' },
+    color: semantic.destructiveForeground,
   },
   icon: {
     width: size.compact,
@@ -79,12 +84,12 @@ const styles = stylex.create({
     padding: 0,
     borderWidth: 0,
     borderRadius: radius.sm,
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
-    color: { default: colors.muted, ':hover': colors.text },
+    backgroundColor: { default: 'transparent', ':hover': semantic.accent },
+    color: { default: semantic.mutedForeground, ':hover': semantic.foreground },
   },
   iconActive: {
-    backgroundColor: colors.selected,
-    color: colors.text,
+    backgroundColor: semantic.accent,
+    color: semantic.foreground,
   },
 })
 
@@ -96,7 +101,7 @@ type ButtonProps = Omit<ComponentProps<'button'>, 'className' | 'style'> & {
   style?: stylex.StyleXStyles
 }
 
-// 不可用的操作仍然可以点击，由调用方在 onClick 里说明原因，所以这里没有禁用态样式。
+// 不可用的操作通常仍然可以点击，由调用方在 onClick 里说明原因；真正传 disabled 时才显示为半透明。
 export function Button({
   variant = 'secondary',
   small,

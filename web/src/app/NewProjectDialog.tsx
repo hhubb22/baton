@@ -5,7 +5,7 @@ import { ClientError } from '../data/client'
 import { subscriptionReach } from '../data/derive'
 import { newClientId, useCreateProject } from '../data/queries'
 import { text } from '../theme/text'
-import { colors } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
 import { Button } from '../ui/Button'
 import { Dialog, DialogClose } from '../ui/Dialog'
 import { Field, Input, TextArea } from '../ui/Field'
@@ -13,8 +13,8 @@ import { ProjectEmojiPicker, validProjectEmoji } from '../ui/ProjectEmojiPicker'
 import { ProjectModelFields, useProjectModelCatalog } from './ProjectModelFields'
 
 const styles = stylex.create({
-  hint: { color: colors.muted },
-  failure: { color: colors.danger },
+  hint: { color: semantic.mutedForeground },
+  failure: { color: semantic.destructiveForeground },
 })
 
 // 订阅和模型属于这个 Project，之后每次运行助手都用它们。

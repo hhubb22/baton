@@ -1,0 +1,20 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "geist",
+        "createdAt": "2026-10-30T18:01:28.447Z",
+        "reason": "user confirmed: 英文字体统一用 Geist 家族"
+      },
+      {
+        "rule": "overused-font",
+        "value": "geist mono",
+        "createdAt": "2026-10-30T18:01:28.467Z",
+        "reason": "user confirmed: 英文字体统一用 Geist 家族"
+      }
+    ]
+  }
+}

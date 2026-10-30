@@ -1,49 +1,43 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
-import { afterEach, expect, it, vi } from 'vite-plus/test'
+import { expect, it, vi } from 'vite-plus/test'
 import { Composer } from './Composer'
 
-afterEach(() => vi.restoreAllMocks())
+function Example({ onSend }: { onSend: (value: string) => void }) {
+  const [value, setValue] = useState('')
+  return (
+    <Composer
+      value={value}
+      onChange={setValue}
+      onSend={() => {
+        onSend(value)
+        setValue('')
+      }}
+      placeholder="Message"
+    />
+  )
+}
 
-it('expands and shrinks with the message and limits the input height', () => {
-  vi.spyOn(HTMLTextAreaElement.prototype, 'scrollHeight', 'get').mockImplementation(function (
-    this: HTMLTextAreaElement,
-  ) {
-    return Math.max(24, this.value.split('\n').length * 24)
-  })
-  function Example() {
-    const [value, setValue] = useState('')
-    return <Composer value={value} onChange={setValue} onSend={() => {}} placeholder="Message" />
-  }
-  render(<Example />)
+it('sends typed text on Enter and clears when the page clears the draft', async () => {
+  const user = userEvent.setup()
+  const onSend = vi.fn()
+  render(<Example onSend={onSend} />)
   const input = screen.getByRole('textbox', { name: '消息' })
-  expect(input).toHaveStyle({ height: '24px' })
-  fireEvent.change(input, { target: { value: 'one\ntwo\nthree' } })
-  expect(input).toHaveStyle({ height: '72px' })
-  expect(input).toHaveStyle({ overflowY: 'hidden' })
-  fireEvent.change(input, { target: { value: Array(20).fill('line').join('\n') } })
-  expect(input).toHaveStyle({ height: '240px' })
-  expect(input).toHaveStyle({ overflowY: 'auto' })
-  fireEvent.change(input, { target: { value: '' } })
-  expect(input).toHaveStyle({ height: '24px' })
-  expect(input).toHaveStyle({ overflowY: 'hidden' })
+  await user.type(input, 'Hello there{Enter}')
+  expect(onSend).toHaveBeenCalledWith('Hello there')
+  expect(input.textContent).toBe('')
 })
 
-it('keeps the roomy input at least four lines tall as its content changes', () => {
-  vi.spyOn(HTMLTextAreaElement.prototype, 'scrollHeight', 'get').mockImplementation(function (
-    this: HTMLTextAreaElement,
-  ) {
-    return this.value.split('\n').length * 24
-  })
-  function Example() {
-    const [value, setValue] = useState('')
-    return <Composer roomy value={value} onChange={setValue} onSend={() => {}} placeholder="Message" />
-  }
-  render(<Example />)
-  const input = screen.getByRole('textbox', { name: '消息' })
-  expect(input).toHaveStyle({ height: '96px' })
-  fireEvent.change(input, { target: { value: 'one\ntwo\nthree\nfour\nfive' } })
-  expect(input).toHaveStyle({ height: '120px' })
-  fireEvent.change(input, { target: { value: '' } })
-  expect(input).toHaveStyle({ height: '96px' })
+it('keeps a newline on Shift+Enter without sending', async () => {
+  const user = userEvent.setup()
+  const onSend = vi.fn()
+  render(<Example onSend={onSend} />)
+  await user.type(screen.getByRole('textbox', { name: '消息' }), 'one{Shift>}{Enter}{/Shift}')
+  expect(onSend).not.toHaveBeenCalled()
+})
+
+it('shows a draft restored by the page', () => {
+  render(<Composer value="saved draft" onChange={() => {}} onSend={() => {}} placeholder="Message" />)
+  expect(screen.getByRole('textbox', { name: '消息' })).toHaveTextContent('saved draft')
 })

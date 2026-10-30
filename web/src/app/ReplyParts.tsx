@@ -3,9 +3,10 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { activityLine, baseName, clockTime, fileSize, runTimer } from '../data/derive'
 import { useClient, useLiveTrace, useTrace } from '../data/queries'
 import type { Attachment, Device, LiveOutput as LiveOutputData, Message, Thread } from '../data/types'
-import { fonts } from '../theme/base.stylex'
+import { fonts, fontSize } from '../theme/base.stylex'
 import { text } from '../theme/text'
-import { colors, radius, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, space } from '../theme/tokens.stylex'
 import { Button, focusRing } from '../ui/Button'
 import { Icon } from '../ui/Icon'
 import { StatusDot } from '../ui/Status'
@@ -25,7 +26,7 @@ const styles = stylex.create({
     padding: 0,
     borderWidth: 0,
     backgroundColor: 'transparent',
-    color: { default: colors.muted, ':hover': colors.text },
+    color: { default: semantic.mutedForeground, ':hover': semantic.foreground },
   },
   steps: {
     display: 'flex',
@@ -37,15 +38,15 @@ const styles = stylex.create({
     paddingLeft: space.md,
     borderLeftWidth: '1px',
     borderLeftStyle: 'solid',
-    borderLeftColor: colors.borderSoft,
+    borderLeftColor: semantic.border,
   },
-  muted: { color: colors.muted },
-  info: { color: colors.accentText },
+  muted: { color: semantic.mutedForeground },
+  info: { color: semantic.brandForeground },
   link: {
     padding: 0,
     borderWidth: 0,
     backgroundColor: 'transparent',
-    color: colors.accentText,
+    color: semantic.brandForeground,
     textDecoration: { default: 'none', ':hover': 'underline' },
   },
   attachment: {
@@ -63,7 +64,7 @@ const styles = stylex.create({
     margin: 0,
     listStyle: 'none',
   },
-  attachmentIcon: { flexShrink: 0, marginTop: '3px', color: colors.muted },
+  attachmentIcon: { flexShrink: 0, marginTop: '3px', color: semantic.mutedForeground },
   attachmentBody: { display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0 },
   attachmentAction: {
     display: 'inline-flex',
@@ -75,8 +76,8 @@ const styles = stylex.create({
     padding: 0,
     borderWidth: 0,
     borderRadius: radius.sm,
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
-    color: { default: colors.muted, ':hover': colors.text },
+    backgroundColor: { default: 'transparent', ':hover': semantic.muted },
+    color: { default: semantic.mutedForeground, ':hover': semantic.foreground },
   },
   live: { display: 'flex', flexDirection: 'column', gap: space.sm },
   liveHead: { display: 'inline-flex', alignItems: 'center', gap: '6px' },
@@ -88,11 +89,11 @@ const styles = stylex.create({
     paddingInline: space.md,
     borderLeftWidth: '2px',
     borderLeftStyle: 'solid',
-    borderLeftColor: colors.border,
+    borderLeftColor: semantic.input,
     borderRadius: radius.sm,
-    backgroundColor: colors.subtle,
+    backgroundColor: semantic.secondary,
     fontFamily: fonts.mono,
-    fontSize: '12px',
+    fontSize: fontSize.caption,
     lineHeight: 1.55,
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
@@ -102,10 +103,10 @@ const styles = stylex.create({
     alignItems: 'center',
     gap: '6px',
     paddingBlock: space.xxs,
-    color: colors.faint,
+    color: semantic.faintForeground,
     fontFamily: fonts.ui,
   },
-  liveFoot: { display: 'inline-flex', alignItems: 'center', gap: '6px', color: colors.faint },
+  liveFoot: { display: 'inline-flex', alignItems: 'center', gap: '6px', color: semantic.faintForeground },
 })
 
 // 回复上方的一行过程摘要，展开后分页读取中心保存的步骤。
@@ -196,6 +197,8 @@ export function TurnActivityTrace({
   live = true,
   count,
   messageId,
+  runningSteps = [],
+  runningStepsTruncated = false,
 }: {
   threadId: string
   turnSeq: number
@@ -203,6 +206,8 @@ export function TurnActivityTrace({
   live?: boolean
   count?: number
   messageId?: string
+  runningSteps?: import('../data/types').TraceStep[]
+  runningStepsTruncated?: boolean
 }) {
   const [open, setOpen] = useState(live)
   const client = useClient()
@@ -216,7 +221,11 @@ export function TurnActivityTrace({
     wasLive.current = live
   }, [live, refetch])
   const steps = trace.data?.pages.flatMap((page) => (page.state === 'ready' ? page.steps : [])) ?? []
-  if (steps.length === 0 && !(count && count > 0)) return null
+  const completedIds = new Set(steps.map((step) => step.item_id))
+  const activeSteps = runningSteps
+    .filter((step) => !completedIds.has(step.item_id))
+    .sort((a, b) => a.ordinal - b.ordinal)
+  if (steps.length === 0 && activeSteps.length === 0 && !(count && count > 0)) return null
   return (
     <div {...stylex.props(styles.trace)}>
       <button
@@ -226,13 +235,17 @@ export function TurnActivityTrace({
         {...stylex.props(text.caption, styles.toggle, focusRing.ring)}
       >
         <Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} />
-        执行过程 · {count ?? steps.length} 个步骤
+        执行过程 · {count ?? steps.length + activeSteps.length} 个步骤
       </button>
       {open && (
         <div {...stylex.props(styles.steps)}>
           {steps.map((step) => (
             <ActivityStep key={step.item_id} step={step} threadId={threadId} device={device} />
           ))}
+          {activeSteps.map((step) => (
+            <ActivityStep key={step.item_id} step={step} threadId={threadId} device={device} />
+          ))}
+          {runningStepsTruncated && <p {...stylex.props(text.caption, styles.muted)}>部分进行中的步骤未完整显示。</p>}
           {trace.isPending && <p {...stylex.props(text.small, styles.muted)}>正在加载执行过程…</p>}
           {trace.hasNextPage && (
             <Button

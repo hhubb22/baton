@@ -1,6 +1,7 @@
 import * as stylex from '@stylexjs/stylex'
 import { weight } from '../theme/base.stylex'
-import { colors, radius } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius } from '../theme/tokens.stylex'
 
 export type Hue = 'slate' | 'amber' | 'violet' | 'green' | 'blue' | 'rose'
 
@@ -25,9 +26,9 @@ const styles = stylex.create({
     width: '16px',
     height: '16px',
     borderRadius: radius.pill,
-    backgroundColor: colors.agentSoft,
+    backgroundColor: semantic.agentSoft,
   },
-  agentCore: { width: '6px', height: '6px', borderRadius: radius.pill, backgroundColor: colors.agent },
+  agentCore: { width: '6px', height: '6px', borderRadius: radius.pill, backgroundColor: semantic.agent },
   person: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -36,11 +37,11 @@ const styles = stylex.create({
     width: '24px',
     height: '24px',
     borderRadius: radius.pill,
-    backgroundColor: colors.subtle,
+    backgroundColor: semantic.secondary,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.borderSoft,
-    color: colors.text,
+    borderColor: semantic.border,
+    color: semantic.foreground,
     fontSize: '11px',
     lineHeight: 1,
     fontWeight: weight.medium,

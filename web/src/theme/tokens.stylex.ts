@@ -1,148 +1,14 @@
-// 设计 token：颜色、间距、圆角和尺寸。新颜色同时在 themes.ts 补上浅色和深色取值。
+// 设计 token：间距、圆角、尺寸、阴影和动效。颜色在 semantic.stylex.ts，组件直接使用那里的语义名。
 import * as stylex from '@stylexjs/stylex'
-
-// 主题默认跟随系统；用户手动选择时由 themes.ts 覆盖。
-export const colors = stylex.defineVars({
-  glass: { default: 'rgb(100% 100% 100% / 66%)', '@media (prefers-color-scheme: dark)': 'rgb(4% 5% 8% / 72%)' },
-  glassLift: {
-    default: 'rgb(100% 100% 100% / 50%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(100% 100% 100% / 4%)',
-  },
-  glassEdge: {
-    default: 'rgb(100% 100% 100% / 55%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(100% 100% 100% / 9%)',
-  },
-  raised: { default: 'rgb(0% 0% 0% / 5%)', '@media (prefers-color-scheme: dark)': 'rgb(100% 100% 100% / 9%)' },
-  shadowSoft: {
-    default: 'rgb(10.2% 12.3% 16.1% / 5%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(0.4% 0.7% 1.3% / 20%)',
-  },
-  shadowNear: {
-    default: 'rgb(10.2% 12.3% 16.1% / 8%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(0.4% 0.7% 1.3% / 30%)',
-  },
-  shadowFar: {
-    default: 'rgb(10.2% 12.3% 16.1% / 14%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(0.4% 0.7% 1.3% / 45%)',
-  },
-  highlight: {
-    default: 'rgb(100% 100% 100% / 28%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(100% 100% 100% / 20%)',
-  },
-  sheen: { default: 'rgb(100% 100% 100% / 14%)', '@media (prefers-color-scheme: dark)': 'rgb(100% 100% 100% / 10%)' },
-  keyTop: { default: 'rgb(100% 100% 100% / 8%)', '@media (prefers-color-scheme: dark)': 'rgb(100% 100% 100% / 6%)' },
-  keyBottom: {
-    default: 'rgb(10.2% 12.3% 16.1% / 4%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(0.4% 0.7% 1.3% / 14%)',
-  },
-  keyHighlight: {
-    default: 'rgb(100% 100% 100% / 95%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(100% 100% 100% / 7%)',
-  },
-  keyShade: {
-    default: 'rgb(10.2% 12.3% 16.1% / 6%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(0.4% 0.7% 1.3% / 30%)',
-  },
-  keyPress: {
-    default: 'rgb(10.2% 12.3% 16.1% / 14%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(0.4% 0.7% 1.3% / 45%)',
-  },
-  keyGround: {
-    default: 'rgb(100% 100% 100% / 90%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(100% 100% 100% / 4%)',
-  },
-  keyEdgeSolid: {
-    default: 'rgb(0.4% 0.7% 1.3% / 22%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(0.4% 0.7% 1.3% / 45%)',
-  },
-  keyShadeSolid: {
-    default: 'rgb(0.4% 0.7% 1.3% / 22%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(0.4% 0.7% 1.3% / 30%)',
-  },
-  keyPressSolid: {
-    default: 'rgb(0.4% 0.7% 1.3% / 40%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(0.4% 0.7% 1.3% / 50%)',
-  },
-  keyLiftSolid: {
-    default: 'rgb(10.2% 12.3% 16.1% / 22%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(0.4% 0.7% 1.3% / 45%)',
-  },
-  canvas: { default: '#f9f9fa', '@media (prefers-color-scheme: dark)': '#121213' },
-  panel: { default: '#efeff0', '@media (prefers-color-scheme: dark)': '#09090a' },
-  surface: { default: '#fff', '@media (prefers-color-scheme: dark)': '#1c1c1d' },
-  subtle: { default: '#e9e9ea', '@media (prefers-color-scheme: dark)': '#252627' },
-  hover: {
-    default: 'rgb(10.2% 12.3% 16.1% / 4%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(93.5% 94.2% 95.2% / 6%)',
-  },
-  selected: {
-    default: 'rgb(10.2% 12.3% 16.1% / 7%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(93.5% 94.2% 95.2% / 9%)',
-  },
-  hairline: {
-    default: 'rgb(10.2% 12.3% 16.1% / 7%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(93.5% 94.2% 95.2% / 7%)',
-  },
-  borderSoft: { default: '#e2e2e2', '@media (prefers-color-scheme: dark)': '#212224' },
-  border: {
-    default: 'rgb(10.2% 12.3% 16.1% / 13%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(93.5% 94.2% 95.2% / 12%)',
-  },
-  borderStrong: {
-    default: 'rgb(10.2% 12.3% 16.1% / 19%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(93.5% 94.2% 95.2% / 17%)',
-  },
-  text: { default: '#1b1b1b', '@media (prefers-color-scheme: dark)': 'rgb(93.5% 94.2% 95.2%)' },
-  muted: { default: '#5c5c5e', '@media (prefers-color-scheme: dark)': 'rgb(69.3% 70.7% 73.2%)' },
-  faint: { default: 'rgb(41.1% 42.9% 46.1%)', '@media (prefers-color-scheme: dark)': 'rgb(53.4% 55% 57.9%)' },
-  accent: { default: '#6d78d5', '@media (prefers-color-scheme: dark)': 'rgb(15.8% 43.6% 89%)' },
-  accentHover: { default: '#5e6ac1', '@media (prefers-color-scheme: dark)': 'rgb(20.3% 50.2% 92.7%)' },
-  accentPressed: { default: '#5e6ac1', '@media (prefers-color-scheme: dark)': 'rgb(9.7% 38% 82.9%)' },
-  accentSoft: { default: 'rgb(90.6% 94.6% 99.8%)', '@media (prefers-color-scheme: dark)': 'rgb(9.8% 16.9% 28.6%)' },
-  accentText: { default: 'rgb(15.6% 36% 76.2%)', '@media (prefers-color-scheme: dark)': 'rgb(48.5% 70.6% 98.8%)' },
-  accentShadow: {
-    default: 'rgb(16.5% 41.2% 90% / 28%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(0.4% 0.7% 1.3% / 40%)',
-  },
-  onAccent: '#fff',
-  focus: { default: '#6d78d5', '@media (prefers-color-scheme: dark)': '#6d78d5' },
-  agent: { default: 'rgb(0.7% 66.4% 59.4%)', '@media (prefers-color-scheme: dark)': 'rgb(21% 76.5% 69.2%)' },
-  agentText: { default: 'rgb(2.7% 45.2% 40.4%)', '@media (prefers-color-scheme: dark)': 'rgb(42.2% 82.7% 76.3%)' },
-  agentSoft: { default: 'rgb(89.5% 97.5% 95.9%)', '@media (prefers-color-scheme: dark)': 'rgb(5.3% 20.8% 18.6%)' },
-  success: { default: 'rgb(9.5% 47.8% 23.1%)', '@media (prefers-color-scheme: dark)': 'rgb(37.7% 78% 50.5%)' },
-  attention: { default: 'rgb(93% 43% 7.1%)', '@media (prefers-color-scheme: dark)': 'rgb(97.2% 54% 24%)' },
-  attentionText: { default: 'rgb(61.6% 27.3% 8.6%)', '@media (prefers-color-scheme: dark)': 'rgb(96.6% 66.9% 41.9%)' },
-  attentionSoft: { default: 'rgb(99.9% 94.3% 90.1%)', '@media (prefers-color-scheme: dark)': 'rgb(24.7% 13.9% 7.6%)' },
-  attentionEdge: {
-    default: 'rgb(93% 43% 7.1% / 22%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(97.2% 54% 24% / 24%)',
-  },
-  danger: { default: 'rgb(74.4% 18.4% 18.2%)', '@media (prefers-color-scheme: dark)': 'rgb(96.5% 42.5% 41.1%)' },
-  dangerSoft: { default: 'rgb(99.8% 93.3% 93.1%)', '@media (prefers-color-scheme: dark)': 'rgb(26.9% 11.7% 11.6%)' },
-  dangerFill: { default: 'rgb(74.4% 18.4% 18.2%)', '@media (prefers-color-scheme: dark)': 'rgb(70% 20% 19.5%)' },
-  inverse: { default: 'rgb(13.5% 14.6% 16.8%)', '@media (prefers-color-scheme: dark)': 'rgb(18.6% 19.9% 22.6%)' },
-  onInverse: { default: 'rgb(97% 97.5% 98.2%)', '@media (prefers-color-scheme: dark)': 'rgb(93.5% 94.2% 95.2%)' },
-  onInverseMuted: { default: 'rgb(68% 69.5% 72.5%)', '@media (prefers-color-scheme: dark)': 'rgb(69.3% 70.7% 73.2%)' },
-  code: { default: 'rgb(95.8% 96.4% 97.4%)', '@media (prefers-color-scheme: dark)': 'rgb(4.9% 5.6% 7%)' },
-  codeBorder: {
-    default: 'rgb(10.2% 12.3% 16.1% / 8%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(93.5% 94.2% 95.2% / 8%)',
-  },
-  overlay: {
-    default: 'rgb(10.2% 12.3% 16.1% / 32%)',
-    '@media (prefers-color-scheme: dark)': 'rgb(0.4% 0.7% 1.3% / 60%)',
-  },
-  transparent: 'transparent',
-})
 
 // Project 头像底色，按创建顺序轮换。
 export const hues = stylex.defineConsts({
-  slate: 'rgb(45.8% 50.5% 58.7%)',
-  amber: 'rgb(70.7% 42.8% 6.3%)',
-  violet: 'rgb(52.7% 43.3% 77.3%)',
-  green: 'rgb(29.2% 57.4% 36.1%)',
-  blue: 'rgb(25.8% 51.8% 77.2%)',
-  rose: 'rgb(75.3% 35.8% 43.3%)',
+  slate: 'oklch(0.58 0.03 255)',
+  amber: 'oklch(0.56 0.11 75)',
+  violet: 'oklch(0.56 0.11 295)',
+  green: 'oklch(0.55 0.1 150)',
+  blue: 'oklch(0.56 0.1 245)',
+  rose: 'oklch(0.56 0.13 10)',
 })
 
 export const space = stylex.defineConsts({
@@ -157,11 +23,13 @@ export const space = stylex.defineConsts({
   canvas: '64px',
 })
 
+// 控件和小面板用 sm、md，卡片、菜单、弹窗用 lg，外框用 xl。
 export const radius = stylex.defineConsts({
-  inner: '4px',
-  sm: '6px',
-  md: '8px',
-  lg: '12px',
+  inner: 'var(--radius-inner)',
+  sm: 'var(--radius-sm)',
+  md: 'var(--radius-md)',
+  lg: 'var(--radius-lg)',
+  xl: 'var(--radius-xl)',
   pill: '999px',
 })
 
@@ -177,4 +45,27 @@ export const size = stylex.defineConsts({
   dot: '6px',
   screenWidth: '1440px',
   screenHeight: '900px',
+})
+
+// 控件贴地、Frame 面板稍浮、菜单和 Tooltip 浮起、弹窗最高。
+export const shadow = stylex.defineConsts({
+  control: '0 1px 2px var(--color-shadow-soft), inset 0 1px var(--color-edge-high), inset 0 -1px var(--color-edge-low)',
+  panel:
+    '0 1px 2px var(--color-shadow-soft), 0 2px 6px -2px var(--color-shadow-soft), inset 0 1px var(--color-edge-high), inset 0 -1px var(--color-edge-low)',
+  floating:
+    '0 8px 24px var(--color-shadow-far), 0 1px 3px var(--color-shadow-soft), inset 0 1px var(--color-edge-high)',
+  modal: '0 16px 40px var(--color-shadow-far), 0 2px 6px var(--color-shadow-near), inset 0 1px var(--color-edge-high)',
+  // 深色填充上的顶部高光，主按钮和危险按钮用。
+  filled: '0 1px 2px var(--color-shadow-near), inset 0 1px oklch(1 0 0 / 0.16)',
+  focus: '0 0 0 3px color-mix(in oklab, var(--color-ring) 24%, transparent)',
+  focusDanger: '0 0 0 3px color-mix(in oklab, var(--color-destructive) 20%, transparent)',
+})
+
+export const motion = stylex.defineConsts({
+  micro: '120ms',
+  popover: '180ms',
+  modal: '240ms',
+  exit: '140ms',
+  easeOut: 'cubic-bezier(0.23, 1, 0.32, 1)',
+  easeInOut: 'cubic-bezier(0.77, 0, 0.175, 1)',
 })

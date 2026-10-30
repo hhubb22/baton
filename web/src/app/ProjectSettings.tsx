@@ -6,7 +6,8 @@ import { useSetProjectStatus, useThreads, useUpdateProject } from '../data/queri
 import type { Device, Project, ProjectPatch, Thread } from '../data/types'
 import { ProjectEmojiPicker, validProjectEmoji } from '../ui/ProjectEmojiPicker'
 import { text } from '../theme/text'
-import { colors, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { space } from '../theme/tokens.stylex'
 import { Banner } from '../ui/Banner'
 import { Button, focusRing } from '../ui/Button'
 import { Dialog } from '../ui/Dialog'
@@ -43,16 +44,16 @@ const styles = stylex.create({
     borderWidth: 0,
     borderTopWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.borderSoft,
+    borderColor: semantic.border,
   },
   link: {
     padding: 0,
     borderWidth: 0,
     backgroundColor: 'transparent',
-    color: colors.accentText,
+    color: semantic.brandForeground,
     cursor: 'pointer',
   },
-  error: { color: colors.danger },
+  error: { color: semantic.destructiveForeground },
   progress: { display: 'flex', alignItems: 'center', gap: space.sm },
 })
 

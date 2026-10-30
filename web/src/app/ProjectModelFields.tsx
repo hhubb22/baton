@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react'
 import { assistantModels } from '../data/derive'
 import { useClient, useDevices } from '../data/queries'
 import { text } from '../theme/text'
-import { colors, radius, size, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, size, space } from '../theme/tokens.stylex'
 import { Button, focusRing } from '../ui/Button'
 import { Field, Input } from '../ui/Field'
 
@@ -18,15 +19,15 @@ const styles = stylex.create({
     width: '100%',
     height: size.control,
     paddingInline: '10px',
-    backgroundColor: colors.surface,
+    backgroundColor: semantic.card,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: { default: colors.border, ':focus': colors.focus },
+    borderColor: { default: semantic.input, ':focus': semantic.ring },
     borderRadius: radius.sm,
     outline: 'none',
-    color: colors.text,
+    color: semantic.foreground,
   },
-  link: { color: colors.accent },
+  link: { color: semantic.brand },
   action: { alignSelf: 'flex-start' },
 })
 

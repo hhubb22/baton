@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useStartSubscriptionLogin } from '../data/queries'
 import type { Device } from '../data/types'
 import { text } from '../theme/text'
-import { colors, radius, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, space } from '../theme/tokens.stylex'
 import { Button } from '../ui/Button'
 import { Dialog } from '../ui/Dialog'
 import { useNow } from './useNow'
@@ -11,14 +12,14 @@ import { useNow } from './useNow'
 const styles = stylex.create({
   code: {
     padding: space.lg,
-    backgroundColor: colors.code,
+    backgroundColor: semantic.code,
     borderRadius: radius.md,
     textAlign: 'center',
     userSelect: 'all',
   },
   actions: { display: 'flex', alignItems: 'center', gap: space.md },
-  link: { color: colors.accentText },
-  error: { color: colors.danger },
+  link: { color: semantic.brandForeground },
+  error: { color: semantic.destructiveForeground },
 })
 
 export function SubscriptionLoginDialog({

@@ -38,7 +38,8 @@ import {
 import { SyncStatus } from '../app/SyncStatus'
 import type { Device, Project, Thread } from '../data/types'
 import { text } from '../theme/text'
-import { colors, radius, size, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, size, space } from '../theme/tokens.stylex'
 import { Avatar } from '../ui/Avatar'
 import { UnreadDot } from '../ui/Badge'
 import { Banner } from '../ui/Banner'
@@ -79,10 +80,16 @@ const styles = stylex.create({
     paddingInline: '8px',
     borderBottomLeftRadius: '16px',
     borderBottomRightRadius: '16px',
-    backgroundColor: colors.subtle,
+    backgroundColor: semantic.secondary,
   },
-  status: { width: '100%', maxWidth: '840px', minHeight: '18px', paddingInline: space.xs, color: colors.muted },
-  danger: { color: colors.danger },
+  status: {
+    width: '100%',
+    maxWidth: '840px',
+    minHeight: '18px',
+    paddingInline: space.xs,
+    color: semantic.mutedForeground,
+  },
+  danger: { color: semantic.destructiveForeground },
   filters: {
     display: 'flex',
     alignItems: 'center',
@@ -93,7 +100,7 @@ const styles = stylex.create({
     marginInline: 'auto',
     paddingLeft: space.xs,
   },
-  count: { marginLeft: 'auto', color: colors.faint },
+  count: { marginLeft: 'auto', color: semantic.faintForeground },
   group: { display: 'flex', flexDirection: 'column', width: '100%', maxWidth: '960px', marginInline: 'auto' },
   groupLabel: {
     display: 'flex',
@@ -105,11 +112,11 @@ const styles = stylex.create({
     borderWidth: 0,
     borderRadius: radius.md,
     textAlign: 'left',
-    color: colors.text,
-    backgroundColor: { default: colors.subtle, ':hover': colors.hover, ':active': colors.selected },
+    color: semantic.foreground,
+    backgroundColor: { default: semantic.secondary, ':hover': semantic.muted, ':active': semantic.accent },
   },
-  groupChevron: { color: colors.muted },
-  groupCount: { color: colors.muted },
+  groupChevron: { color: semantic.mutedForeground },
+  groupCount: { color: semantic.mutedForeground },
   row: {
     display: 'flex',
     alignItems: 'center',
@@ -118,11 +125,11 @@ const styles = stylex.create({
     paddingInline: space.md,
     paddingLeft: '24px',
     borderRadius: radius.md,
-    color: colors.text,
+    color: semantic.foreground,
     textDecoration: 'none',
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
+    backgroundColor: { default: 'transparent', ':hover': semantic.muted },
   },
-  rowSelected: { backgroundColor: { default: colors.selected, ':hover': colors.selected } },
+  rowSelected: { backgroundColor: { default: semantic.accent, ':hover': semantic.accent } },
   unreadSlot: { display: 'inline-flex', flexShrink: 0, width: size.dot, height: size.dot },
   rowIcon: {
     display: 'inline-flex',
@@ -131,10 +138,10 @@ const styles = stylex.create({
     flexShrink: 0,
     width: '24px',
     height: '24px',
-    color: colors.muted,
+    color: semantic.mutedForeground,
   },
-  rowIconAttention: { color: colors.attentionText },
-  rowIconRunning: { color: colors.agentText },
+  rowIconAttention: { color: semantic.warningForeground },
+  rowIconRunning: { color: semantic.agentForeground },
   title: { display: 'inline-flex', alignItems: 'center', gap: space.xs, flexGrow: 1, flexBasis: 0, minWidth: 0 },
   titleText: { minWidth: 0 },
   project: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: '20px' },
@@ -143,11 +150,11 @@ const styles = stylex.create({
     alignItems: 'center',
     gap: '4px',
     flexShrink: 0,
-    color: colors.muted,
+    color: semantic.mutedForeground,
     whiteSpace: 'nowrap',
     '@media (max-width: 700px)': { display: 'none' },
   },
-  time: { flexShrink: 0, width: '72px', textAlign: 'right', color: colors.faint, whiteSpace: 'nowrap' },
+  time: { flexShrink: 0, width: '72px', textAlign: 'right', color: semantic.faintForeground, whiteSpace: 'nowrap' },
   empty: {
     display: 'flex',
     flexDirection: 'column',
@@ -156,7 +163,7 @@ const styles = stylex.create({
     paddingBlock: space.section,
     textAlign: 'center',
   },
-  muted: { color: colors.muted },
+  muted: { color: semantic.mutedForeground },
   locationPath: { display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   locationSearch: {
     width: '100%',
@@ -165,13 +172,13 @@ const styles = stylex.create({
     borderWidth: 0,
     borderBottomWidth: '1px',
     borderBottomStyle: 'solid',
-    borderBottomColor: colors.borderSoft,
+    borderBottomColor: semantic.border,
     outline: 'none',
     backgroundColor: 'transparent',
-    color: colors.text,
-    '::placeholder': { color: colors.faint },
+    color: semantic.foreground,
+    '::placeholder': { color: semantic.faintForeground },
   },
-  locationEmpty: { padding: space.sm, color: colors.muted },
+  locationEmpty: { padding: space.sm, color: semantic.mutedForeground },
 })
 
 type AgentChoice = ThreadModelChoice
@@ -392,7 +399,7 @@ export function ThreadsPage() {
   const devices = useDevices()
   const projects = useProjects()
   const create = useCreateThread()
-  const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const inputRef = useRef<HTMLDivElement | null>(null)
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [location, setLocation] = useState<Location | null>(null)

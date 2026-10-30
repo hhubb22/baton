@@ -2,9 +2,10 @@ import * as stylex from '@stylexjs/stylex'
 import { lazy, Suspense, type ReactNode } from 'react'
 import { baseName, fileSize } from '../data/derive'
 import type { Device, TraceStep } from '../data/types'
-import { fonts } from '../theme/base.stylex'
+import { fonts, fontSize } from '../theme/base.stylex'
 import { text } from '../theme/text'
-import { colors, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { space } from '../theme/tokens.stylex'
 import { Icon, type IconName } from '../ui/Icon'
 import { FullOutput } from './FullOutput'
 
@@ -12,7 +13,7 @@ const ChangeDiff = lazy(() => import('./ChangeDiff').then((module) => ({ default
 
 const styles = stylex.create({
   root: { display: 'flex', flexDirection: 'column', gap: space.xs, alignSelf: 'stretch', minWidth: 0 },
-  head: { display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: '6px', color: colors.muted },
+  head: { display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: '6px', color: semantic.mutedForeground },
   label: { overflowWrap: 'anywhere', minWidth: 0 },
   output: {
     margin: 0,
@@ -21,14 +22,14 @@ const styles = stylex.create({
     paddingLeft: space.md,
     borderLeftWidth: '1px',
     borderLeftStyle: 'solid',
-    borderLeftColor: colors.borderSoft,
+    borderLeftColor: semantic.border,
     fontFamily: fonts.mono,
-    fontSize: '12px',
+    fontSize: fontSize.caption,
     lineHeight: 1.55,
     whiteSpace: 'pre-wrap',
     overflowWrap: 'anywhere',
   },
-  muted: { color: colors.muted },
+  muted: { color: semantic.mutedForeground },
   list: { display: 'flex', flexDirection: 'column', gap: space.xs, paddingLeft: space.lg, margin: 0 },
 })
 
@@ -89,7 +90,12 @@ function presentation(step: TraceStep): { label: string; icon: IconName; body: R
         icon: 'tool',
         body: (
           <>
+            {string(data.nativeToolId) && (
+              <span {...stylex.props(text.caption, styles.muted)}>{String(data.nativeToolId)}</span>
+            )}
+            {outputText(data.input) !== undefined && <span {...stylex.props(text.caption, styles.muted)}>输入</span>}
             <Output label="工具输入" value={data.input} />
+            {outputText(data.output) !== undefined && <span {...stylex.props(text.caption, styles.muted)}>结果</span>}
             <Output label="工具输出" value={data.output} />
           </>
         ),

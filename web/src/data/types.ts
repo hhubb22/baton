@@ -243,6 +243,8 @@ export interface Message {
   // 结束记录的步骤数。0 表示此消息不承载过程入口，同轮只在一条消息上展示。
   traceItemCount?: number
   fullOutput?: FullOutputReference | null
+  truncated?: boolean
+  originalBytes?: number
   attachments: Attachment[]
 }
 
@@ -272,6 +274,8 @@ export interface LiveOutput {
   chunks: OutputChunk[]
   replyId?: string
   workerTurnSeq?: number
+  runningSteps?: TraceStep[]
+  runningStepsTruncated?: boolean
 }
 
 // 选中一段内容去问 Project 助手时带上的来源。

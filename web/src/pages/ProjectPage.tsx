@@ -69,14 +69,17 @@ import type {
   Thread,
   ThreadFailureCause,
 } from '../data/types'
-import { fonts } from '../theme/base.stylex'
+import { fonts, fontSize } from '../theme/base.stylex'
 import { text } from '../theme/text'
-import { colors, radius, size, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, shadow, size, space } from '../theme/tokens.stylex'
 import { Avatar } from '../ui/Avatar'
 import { Banner } from '../ui/Banner'
 import { Button, focusRing, IconButton } from '../ui/Button'
 import { Composer } from '../ui/Composer'
 import { Icon } from '../ui/Icon'
+import { JumpToLatest } from '../ui/JumpToLatest'
+import { useChatScroll } from '../ui/useChatScroll'
 import { Menu, MenuOption, MenuRule } from '../ui/Menu'
 import { ResizablePane } from '../ui/ResizablePane'
 import { StatusChip, type Tone } from '../ui/Status'
@@ -90,14 +93,14 @@ const styles = stylex.create({
     flexGrow: 1,
     minWidth: 0,
     height: '100%',
-    backgroundColor: colors.canvas,
+    backgroundColor: semantic.background,
   },
   title: { display: 'flex', alignItems: 'center', gap: space.sm },
   headerStatus: { display: 'inline-flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' },
-  agentText: { color: colors.agentText },
-  muted: { color: colors.muted },
-  faint: { color: colors.faint },
-  danger: { color: colors.danger },
+  agentText: { color: semantic.agentForeground },
+  muted: { color: semantic.mutedForeground },
+  faint: { color: semantic.faintForeground },
+  danger: { color: semantic.destructiveForeground },
   main: {
     position: 'relative',
     display: 'flex',
@@ -123,19 +126,19 @@ const styles = stylex.create({
     padding: space.xl,
     paddingBottom: 'calc(var(--project-dock-height, 160px) + 16px)',
   },
-  day: { alignSelf: 'center', color: colors.faint },
+  day: { alignSelf: 'center', color: semantic.faintForeground },
   userItem: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' },
   user: {
     maxWidth: '85%',
     paddingBlock: space.sm,
     paddingInline: space.md,
-    borderRadius: '24px',
-    backgroundColor: colors.subtle,
-    fontSize: '16px',
+    borderRadius: radius.xl,
+    backgroundColor: semantic.secondary,
+    fontSize: fontSize.large,
   },
-  withdrawn: { color: colors.muted },
+  withdrawn: { color: semantic.mutedForeground },
   assistant: { display: 'flex', flexDirection: 'column', gap: space.lg, minWidth: 0 },
-  assistantBody: { fontSize: '16px', lineHeight: 1.65 },
+  assistantBody: { fontSize: fontSize.large, lineHeight: 1.65 },
   process: {
     display: 'flex',
     flexDirection: 'column',
@@ -144,7 +147,7 @@ const styles = stylex.create({
     paddingBottom: space.sm,
     borderBottomWidth: '1px',
     borderBottomStyle: 'solid',
-    borderBottomColor: colors.borderSoft,
+    borderBottomColor: semantic.border,
   },
   processToggle: {
     display: 'inline-flex',
@@ -155,7 +158,7 @@ const styles = stylex.create({
     paddingInline: 0,
     borderWidth: 0,
     backgroundColor: 'transparent',
-    color: { default: colors.muted, ':hover': colors.text },
+    color: { default: semantic.mutedForeground, ':hover': semantic.foreground },
   },
   steps: {
     display: 'flex',
@@ -173,13 +176,19 @@ const styles = stylex.create({
     paddingInline: 0,
     borderWidth: 0,
     borderRadius: radius.sm,
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
-    color: colors.muted,
+    backgroundColor: { default: 'transparent', ':hover': semantic.muted },
+    color: semantic.mutedForeground,
     textAlign: 'left',
   },
-  stepIcon: { marginTop: '2px', color: colors.faint },
+  stepIcon: { marginTop: '2px', color: semantic.faintForeground },
   stepName: { flexGrow: 1, minWidth: 0, overflowWrap: 'anywhere' },
-  stepStatus: { flexShrink: 1, maxWidth: '45%', overflowWrap: 'anywhere', color: colors.faint, textAlign: 'right' },
+  stepStatus: {
+    flexShrink: 1,
+    maxWidth: '45%',
+    overflowWrap: 'anywhere',
+    color: semantic.faintForeground,
+    textAlign: 'right',
+  },
   stepDetail: {
     display: 'flex',
     flexDirection: 'column',
@@ -188,16 +197,22 @@ const styles = stylex.create({
     paddingBlock: space.sm,
     paddingInline: 0,
   },
-  detailLabel: { color: colors.faint },
+  detailLabel: { color: semantic.faintForeground },
   detailText: { margin: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
-  noteRow: { display: 'flex', alignItems: 'flex-start', gap: space.sm, paddingBlock: space.xs, color: colors.muted },
+  noteRow: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space.sm,
+    paddingBlock: space.xs,
+    color: semantic.mutedForeground,
+  },
   noteBody: { minWidth: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
   output: {
     margin: 0,
     maxHeight: '200px',
     overflow: 'auto',
     fontFamily: fonts.mono,
-    fontSize: '12px',
+    fontSize: fontSize.caption,
     whiteSpace: 'pre-wrap',
     overflowWrap: 'anywhere',
   },
@@ -210,12 +225,12 @@ const styles = stylex.create({
     minHeight: size.comfortable,
     paddingInline: 0,
     borderRadius: radius.md,
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
+    backgroundColor: { default: 'transparent', ':hover': semantic.muted },
     borderWidth: 0,
-    color: colors.text,
+    color: semantic.foreground,
     textAlign: 'left',
   },
-  threadSelected: { backgroundColor: { default: colors.selected, ':hover': colors.selected } },
+  threadSelected: { backgroundColor: { default: semantic.accent, ':hover': semantic.accent } },
   threadOpen: {
     display: 'flex',
     alignItems: 'center',
@@ -229,9 +244,9 @@ const styles = stylex.create({
     textAlign: 'left',
   },
   threadTitle: { flexGrow: 1, flexBasis: 0, minWidth: 0 },
-  threadIcon: { flexShrink: 0, color: colors.muted },
-  threadMeta: { flexShrink: 0, color: colors.muted, whiteSpace: 'nowrap' },
-  note: { alignSelf: 'center', color: colors.faint, textAlign: 'center' },
+  threadIcon: { flexShrink: 0, color: semantic.mutedForeground },
+  threadMeta: { flexShrink: 0, color: semantic.mutedForeground, whiteSpace: 'nowrap' },
+  note: { alignSelf: 'center', color: semantic.faintForeground, textAlign: 'center' },
   failure: {
     display: 'grid',
     gridTemplateColumns: '16px minmax(0, 1fr) auto',
@@ -243,15 +258,15 @@ const styles = stylex.create({
     paddingBlock: space.sm,
     paddingInline: space.sm,
     borderRadius: radius.md,
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
+    backgroundColor: { default: 'transparent', ':hover': semantic.muted },
     borderWidth: 0,
-    color: colors.text,
+    color: semantic.foreground,
     textAlign: 'start',
     cursor: { default: 'pointer', ':disabled': 'default' },
   },
   failureStatus: { display: 'inline-flex', alignItems: 'center', gap: space.xs, whiteSpace: 'nowrap' },
-  failureReason: { gridColumn: '2 / 4', color: colors.muted },
-  activity: { display: 'inline-flex', alignItems: 'center', gap: space.sm, color: colors.agentText },
+  failureReason: { gridColumn: '2 / 4', color: semantic.mutedForeground },
+  activity: { display: 'inline-flex', alignItems: 'center', gap: space.sm, color: semantic.agentForeground },
   empty: {
     display: 'flex',
     flexDirection: 'column',
@@ -260,7 +275,7 @@ const styles = stylex.create({
     paddingBlock: space.section,
     textAlign: 'center',
   },
-  emptyHint: { maxWidth: '420px', color: colors.muted },
+  emptyHint: { maxWidth: '420px', color: semantic.mutedForeground },
   dock: {
     position: 'absolute',
     bottom: 0,
@@ -273,7 +288,7 @@ const styles = stylex.create({
     alignItems: 'center',
     gap: space.sm,
     paddingTop: '24px',
-    backgroundImage: `linear-gradient(to bottom, transparent, color-mix(in srgb, ${colors.canvas} 70%, transparent))`,
+    backgroundImage: `linear-gradient(to bottom, transparent, color-mix(in srgb, ${semantic.background} 70%, transparent))`,
     paddingInline: space.xl,
     paddingBottom: space.md,
     opacity: 1,
@@ -287,10 +302,11 @@ const styles = stylex.create({
     transition: 'opacity 280ms ease, transform 280ms cubic-bezier(0.23, 1, 0.32, 1)',
     '@media (prefers-reduced-motion: reduce)': { transition: 'opacity 120ms ease', transform: 'none' },
   },
+  jumpToLatest: { bottom: 'calc(var(--project-dock-height, 160px) + 8px)' },
   dockInteractive: { pointerEvents: 'auto' },
   dockBanner: { width: '100%', maxWidth: '640px', pointerEvents: 'auto', ':empty': { display: 'none' } },
   chips: { display: 'flex', flexWrap: 'wrap', gap: space.xs, width: '100%', maxWidth: '640px' },
-  status: { width: '100%', maxWidth: '640px', minHeight: '18px', color: colors.muted },
+  status: { width: '100%', maxWidth: '640px', minHeight: '18px', color: semantic.mutedForeground },
   overview: {
     display: 'flex',
     pointerEvents: 'auto',
@@ -301,15 +317,15 @@ const styles = stylex.create({
     width: '100%',
     overflowY: 'auto',
     padding: space.lg,
-    backgroundColor: colors.surface,
+    backgroundColor: semantic.card,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.glassEdge,
+    borderColor: semantic.glassEdge,
     borderRadius: radius.lg,
-    boxShadow: `0 8px 24px ${colors.shadowSoft}, 0 2px 6px ${colors.shadowNear}`,
+    boxShadow: shadow.floating,
   },
   section: { display: 'flex', flexDirection: 'column', gap: space.xs },
-  sectionLabel: { color: colors.faint },
+  sectionLabel: { color: semantic.faintForeground },
   assistantDevice: {
     display: 'flex',
     alignItems: 'center',
@@ -318,7 +334,7 @@ const styles = stylex.create({
   },
   assistantDeviceText: { display: 'flex', flexDirection: 'column', gap: space.xxs, minWidth: 0 },
   group: { display: 'flex', flexDirection: 'column' },
-  groupLabel: { paddingBlock: space.xs, paddingInline: space.sm, color: colors.faint },
+  groupLabel: { paddingBlock: space.xs, paddingInline: space.sm, color: semantic.faintForeground },
   groupHead: {
     display: 'flex',
     alignItems: 'center',
@@ -329,11 +345,11 @@ const styles = stylex.create({
     borderWidth: 0,
     borderRadius: radius.sm,
     backgroundColor: 'transparent',
-    color: { default: colors.muted, ':hover': colors.text },
+    color: { default: semantic.mutedForeground, ':hover': semantic.foreground },
     textAlign: 'left',
   },
-  groupCount: { color: colors.faint },
-  groupChevron: { marginLeft: 'auto', color: colors.faint },
+  groupCount: { color: semantic.faintForeground },
+  groupChevron: { marginLeft: 'auto', color: semantic.faintForeground },
   overviewRow: {
     display: 'flex',
     alignItems: 'center',
@@ -344,12 +360,12 @@ const styles = stylex.create({
     paddingInline: space.sm,
     borderWidth: 0,
     borderRadius: radius.sm,
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
-    color: colors.text,
+    backgroundColor: { default: 'transparent', ':hover': semantic.muted },
+    color: semantic.foreground,
     textAlign: 'left',
   },
   rowTime: {
-    color: colors.faint,
+    color: semantic.faintForeground,
     display: {
       default: 'none',
       [stylex.when.ancestor(':hover')]: 'inline',
@@ -362,7 +378,7 @@ const styles = stylex.create({
     paddingInline: space.sm,
     borderWidth: 0,
     backgroundColor: 'transparent',
-    color: colors.accentText,
+    color: semantic.brandForeground,
   },
 })
 
@@ -678,7 +694,7 @@ const Entry = memo(function Entry({
         <div {...stylex.props(styles.userItem)}>
           <div {...stylex.props(text.body, styles.user, entry.delivery === 'withdrawn' && styles.withdrawn)}>
             {entry.reference && <ReferenceBlock reference={entry.reference} />}
-            <MessageBody body={entry.body} onOpenPath={onOpenPath} />
+            <MessageBody body={entry.body} onOpenPath={onOpenPath} keepLineBreaks />
           </div>
           {note && <span {...stylex.props(text.caption, styles.faint)}>{note}</span>}
         </div>
@@ -1038,12 +1054,10 @@ export function ProjectPage() {
   const stop = useStopProjectRun()
   const retry = useRetryProject()
   const changeStatus = useSetProjectStatus()
-  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const inputRef = useRef<HTMLDivElement>(null)
   const timelineRef = useRef<HTMLDivElement>(null)
   const dockRef = useRef<HTMLDivElement>(null)
   const scrollAnchor = useRef(0)
-  const atLiveEdge = useRef(true)
-  const scrollProject = useRef(projectId)
   const [dockState, setDockState] = useState({ projectId, hidden: false })
   if (dockState.projectId !== projectId) setDockState({ projectId, hidden: false })
   const dockHidden = dockState.projectId === projectId && dockState.hidden
@@ -1247,41 +1261,31 @@ export function ProjectPage() {
     }
   }, [previousPreview, projectId, runId, runState, lastSeq, client, queryClient, confirmationAttempt])
 
-  // 新内容只在用户停留在底部时跟随；切换项目时回到最新内容。
-  useEffect(() => {
-    const timeline = timelineRef.current
-    if (scrollProject.current !== projectId) {
-      scrollProject.current = projectId
-      atLiveEdge.current = true
-    }
-    if (timeline && atLiveEdge.current) {
-      timeline.scrollTop = timeline.scrollHeight
-      scrollAnchor.current = timeline.scrollTop
-    }
-  }, [entries.data, livePreview?.text, projectId])
-
-  useLayoutEffect(() => {
-    const timeline = timelineRef.current
-    const content = timeline?.firstElementChild
-    if (!timeline || !content || typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(() => {
-      if (!atLiveEdge.current) return
-      timeline.scrollTop = timeline.scrollHeight
-      scrollAnchor.current = timeline.scrollTop
-    })
-    observer.observe(content)
-    return () => observer.disconnect()
-  }, [projectId, projects.isSuccess])
+  const onFollow = useCallback((top: number) => {
+    scrollAnchor.current = top
+  }, [])
+  const {
+    awayFromLatest,
+    followLatest,
+    onScroll: onChatScroll,
+    scrollToLatest,
+  } = useChatScroll(timelineRef, { resetKey: projectId, ready: projects.isSuccess, onFollow })
+  useEffect(() => followLatest(), [entries.data, livePreview?.text, followLatest])
 
   // 从别处选中内容带过来时，把焦点放到输入区。
   useEffect(() => {
     if (reference) inputRef.current?.focus()
   }, [reference])
 
+  function jumpToLatest() {
+    scrollToLatest()
+    setDockHidden(false)
+  }
+
   function onTimelineScroll(event: UIEvent<HTMLDivElement>) {
+    onChatScroll(event)
     const timeline = event.currentTarget
     const top = timeline.scrollTop
-    atLiveEdge.current = timeline.scrollHeight - timeline.clientHeight - top <= 32
     const delta = top - scrollAnchor.current
     if (timeline.scrollHeight - timeline.clientHeight - top <= 2) {
       scrollAnchor.current = top
@@ -1671,6 +1675,7 @@ export function ProjectPage() {
               )}
             </div>
           </div>
+          {awayFromLatest && <JumpToLatest style={styles.jumpToLatest} onClick={jumpToLatest} />}
           <div
             ref={dockRef}
             inert={hideDock || undefined}

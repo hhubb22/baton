@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useProjects, useSession, useSignOut } from '../data/queries'
 import type { ID, ProjectPatch, Reference } from '../data/types'
 import { text } from '../theme/text'
-import { colors, size, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { size, space } from '../theme/tokens.stylex'
 import { Button } from '../ui/Button'
 import { ResizablePane } from '../ui/ResizablePane'
 import { createDraftStore } from './drafts'
@@ -22,7 +23,7 @@ const styles = stylex.create({
     height: '100vh',
     overflow: 'hidden',
     padding: size.gutter,
-    backgroundColor: colors.panel,
+    backgroundColor: semantic.sidebar,
   },
   shellCollapsed: { gap: '2px' },
   problem: {

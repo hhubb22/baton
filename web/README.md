@@ -6,7 +6,8 @@
 
 | 目录 | 内容 |
 |---|---|
-| `src/theme` | 设计 token、字体、浅色和深色主题；新颜色在 `tokens.stylex.ts` 声明，在 `themes.ts` 补上两套主题的取值 |
+| `src/theme` | 设计 token、字体和主题生成；新颜色加在 `generate.ts` 的浅色和深色两组里，把结果同步到 `colors.css`，再在 `semantic.stylex.ts` 声明。设计规则见 [Web UI 设计系统](../specs/web-ui/DESIGN.md) |
+| `src/dev/Gallery.tsx` | 组件画廊和调节面板，开发服务器上用 `?gallery=1` 打开 |
 | `src/assets` | 品牌标识、favicon 和背景图；通用图标使用 Phosphor Icons，由 `Icon` 统一尺寸、颜色和语义 |
 | `src/ui` | 通用组件：按钮、状态点、横幅、卡片、输入区、菜单、弹窗等 |
 | `src/app` | 路由、侧栏和页面框架，以及多个页面共用的 Thread 行、Thread 详情、受限 Markdown、项目设置与记忆编辑、文件预览和选择目录弹窗 |

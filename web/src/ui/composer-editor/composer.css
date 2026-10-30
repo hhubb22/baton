@@ -1,0 +1,45 @@
+/* 依赖编辑器写入的 data 属性的规则，StyleX 表达不了。其余外观在 index.tsx。 */
+[data-slot='composer-input'][data-empty]::before {
+  position: absolute;
+  color: var(--color-faint-foreground);
+  content: attr(data-placeholder);
+  pointer-events: none;
+}
+
+[data-slot='composer'][data-layout='adaptive'] {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+[data-slot='composer'][data-layout='adaptive'][data-multiline] {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+[data-slot='composer'][data-layout='adaptive'] > [data-slot='composer-scroll-area'] {
+  grid-row-start: 1;
+  grid-column-start: 2;
+}
+
+[data-slot='composer'][data-layout='adaptive'][data-multiline] > [data-slot='composer-scroll-area'] {
+  grid-column: 1 / -1;
+}
+
+[data-slot='composer'][data-layout='adaptive'] > [data-slot='composer-actions'] {
+  grid-row-start: 2;
+  grid-column: 1 / -1;
+}
+
+[data-slot='composer'][data-layout='adaptive']:not([data-multiline]) > [data-slot='composer-actions'] {
+  display: contents;
+}
+
+[data-slot='composer'][data-layout='adaptive']:not([data-multiline]) [data-slot='composer-action-group'] {
+  grid-row-start: 1;
+  grid-column-start: 1;
+}
+
+[data-slot='composer'][data-layout='adaptive']:not([data-multiline])
+  [data-slot='composer-action-group'][data-align='end'] {
+  grid-column-start: 3;
+}

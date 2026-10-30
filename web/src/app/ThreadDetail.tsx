@@ -1,17 +1,7 @@
 import * as stylex from '@stylexjs/stylex'
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ReactNode,
-  type RefObject,
-  type UIEvent,
-} from 'react'
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { ClientError, isAccessError } from '../data/client'
 import {
   agentNames,
@@ -41,13 +31,16 @@ import {
 } from '../data/queries'
 import type { Device, DeviceAgent, ID, Message, Reference, SendMode, Thread } from '../data/types'
 import { text } from '../theme/text'
-import { colors, radius, size, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, shadow, size, space } from '../theme/tokens.stylex'
 import { AgentMark } from '../ui/Avatar'
 import { Banner } from '../ui/Banner'
 import { Button, focusRing, IconButton } from '../ui/Button'
 import { Composer } from '../ui/Composer'
 import { Dialog, DialogClose } from '../ui/Dialog'
 import { Icon } from '../ui/Icon'
+import { JumpToLatest } from '../ui/JumpToLatest'
+import { useChatScroll } from '../ui/useChatScroll'
 import { Menu, MenuOption } from '../ui/Menu'
 import { StatusDot, type Tone } from '../ui/Status'
 import { ThreadAccessMenu } from './ThreadAccessMenu'
@@ -55,7 +48,6 @@ import { LocalThreadActions } from './LocalThreadActions'
 import { FilePreview } from './FilePreview'
 import { MessageBody } from './MessageBody'
 import { MessageActions } from './MessageActions'
-import { FullOutput } from './FullOutput'
 import { Page, pane } from './Page'
 import { ActivityTrace, Attachments, TurnActivityTrace, LiveOutput } from './ReplyParts'
 import { copySelection, SelectionArea } from './SelectionMenu'
@@ -74,7 +66,7 @@ const styles = stylex.create({
     width: '100%',
     minWidth: 0,
     height: '100%',
-    backgroundColor: colors.surface,
+    backgroundColor: semantic.card,
   },
   header: {
     display: 'flex',
@@ -86,14 +78,15 @@ const styles = stylex.create({
     paddingRight: space.sm,
     borderBottomWidth: '1px',
     borderBottomStyle: 'solid',
-    borderBottomColor: colors.borderSoft,
+    borderBottomColor: semantic.border,
   },
   headerTitle: { flexShrink: 1 },
   headerStatus: { display: 'inline-flex', alignItems: 'center', gap: '6px', flexGrow: 1, whiteSpace: 'nowrap' },
   split: { display: 'flex', height: '100%', minHeight: 0 },
   main: { position: 'relative', display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0, minHeight: 0 },
+  timelineFrame: { position: 'relative', display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: 0 },
   timeline: { flexGrow: 1, minHeight: 0, overflowY: 'auto', outline: 'none' },
-  syncNotice: { position: 'absolute', top: space.sm, right: space.md, zIndex: 1, backgroundColor: colors.surface },
+  syncNotice: { position: 'absolute', top: space.sm, right: space.md, zIndex: 1, backgroundColor: semantic.card },
   messages: {
     display: 'flex',
     flexDirection: 'column',
@@ -112,24 +105,24 @@ const styles = stylex.create({
     minWidth: 0,
     paddingBlock: space.sm,
     paddingInline: space.md,
-    borderRadius: '14px',
-    backgroundColor: colors.subtle,
+    borderRadius: radius.lg,
+    backgroundColor: semantic.secondary,
   },
-  withdrawn: { color: colors.muted },
+  withdrawn: { color: semantic.mutedForeground },
   agent: { display: 'flex', flexDirection: 'column', gap: space.md, alignSelf: 'stretch', minWidth: 0 },
-  note: { display: 'inline-flex', alignItems: 'center', gap: '4px', color: colors.faint },
-  noteUnknown: { color: colors.attentionText },
+  note: { display: 'inline-flex', alignItems: 'center', gap: '4px', color: semantic.faintForeground },
+  noteUnknown: { color: semantic.warningForeground },
   link: {
     padding: 0,
     borderWidth: 0,
     backgroundColor: 'transparent',
-    color: colors.accentText,
+    color: semantic.brandForeground,
     textDecoration: { default: 'none', ':hover': 'underline' },
   },
-  info: { color: colors.accentText },
-  muted: { color: colors.muted },
-  danger: { color: colors.danger },
-  attention: { color: colors.attentionText },
+  info: { color: semantic.brandForeground },
+  muted: { color: semantic.mutedForeground },
+  danger: { color: semantic.destructiveForeground },
+  attention: { color: semantic.warningForeground },
   dock: {
     display: 'flex',
     flexDirection: 'column',
@@ -140,7 +133,6 @@ const styles = stylex.create({
     paddingTop: space.md,
     paddingInline: space.xl,
     paddingBottom: space.md,
-    backgroundColor: colors.surface,
   },
   dockContent: {
     display: 'flex',
@@ -159,43 +151,43 @@ const styles = stylex.create({
     maxWidth: size.measure,
     paddingBlock: '10px',
     paddingInline: '14px',
-    backgroundColor: colors.panel,
+    backgroundColor: semantic.sidebar,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.borderSoft,
-    borderRadius: '10px',
+    borderColor: semantic.border,
+    borderRadius: radius.md,
   },
-  noticeDanger: { backgroundColor: colors.dangerSoft },
+  noticeDanger: { backgroundColor: semantic.destructiveSoft },
   noticeCompact: { padding: 0, borderWidth: 0, backgroundColor: 'transparent' },
   noticeBodyCompact: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', gap: '4px' },
   noticeAttention: {
     paddingBlock: '14px',
     paddingLeft: '18px',
     paddingRight: '14px',
-    backgroundColor: colors.inverse,
+    backgroundColor: semantic.inverse,
     borderColor: 'transparent',
-    borderRadius: '16px',
-    boxShadow: `0 1px 3px ${colors.shadowNear}, 0 12px 32px ${colors.shadowFar}`,
-    color: colors.onInverse,
+    borderRadius: radius.xl,
+    boxShadow: shadow.floating,
+    color: semantic.onInverse,
   },
-  noticeDetailInverse: { color: colors.onInverseMuted },
+  noticeDetailInverse: { color: semantic.onInverseMuted },
   noticeBody: { display: 'flex', flexDirection: 'column', gap: '2px', flexGrow: 1, minWidth: 0 },
   composer: { maxWidth: size.measure },
-  status: { width: '100%', maxWidth: size.measure, color: colors.muted },
+  status: { width: '100%', maxWidth: size.measure, color: semantic.mutedForeground },
   footer: {
     display: 'flex',
     alignItems: 'center',
     gap: space.md,
     width: '100%',
     maxWidth: size.measure,
-    color: colors.faint,
+    color: semantic.faintForeground,
   },
   footerItem: { display: 'inline-flex', alignItems: 'center', gap: '4px', minWidth: 0 },
   segmented: {
     display: 'inline-flex',
     padding: '2px',
     borderRadius: radius.pill,
-    backgroundColor: colors.subtle,
+    backgroundColor: semantic.secondary,
   },
   segment: {
     height: '24px',
@@ -203,18 +195,18 @@ const styles = stylex.create({
     borderWidth: 0,
     borderRadius: radius.pill,
     backgroundColor: 'transparent',
-    color: colors.muted,
+    color: semantic.mutedForeground,
   },
-  segmentOn: { backgroundColor: colors.surface, color: colors.text, boxShadow: `0 1px 2px ${colors.shadowNear}` },
+  segmentOn: { backgroundColor: semantic.card, color: semantic.foreground, boxShadow: shadow.control },
   stop: {
     width: '32px',
     height: '32px',
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.border,
+    borderColor: semantic.input,
     borderRadius: radius.pill,
   },
-  empty: { padding: space.xl, color: colors.muted },
+  empty: { padding: space.xl, color: semantic.mutedForeground },
 })
 
 const toneText: Partial<Record<Tone, stylex.StyleXStyles>> = {
@@ -319,7 +311,9 @@ const MessageItem = memo(function MessageItem({
           {outputGap && <span {...stylex.props(text.caption, styles.muted)}>较早的输出未保留</span>}
           <MessageBody body={message.body} onOpenPath={onOpenPath} streaming={message.streaming} />
         </div>
-        {message.fullOutput && <FullOutput threadId={message.threadId} reference={message.fullOutput} />}
+        {message.truncated && (
+          <span {...stylex.props(text.caption, styles.muted)}>内容已截断，原始大小 {message.originalBytes} 字节</span>
+        )}
         <Attachments
           attachments={message.attachments}
           devices={devices}
@@ -360,7 +354,7 @@ const MessageItem = memo(function MessageItem({
       <div {...stylex.props(styles.userLine)}>
         {message.sender === 'projectAgent' && <AgentMark label="来自项目助手" />}
         <div {...stylex.props(text.body, styles.user, message.delivery === 'withdrawn' && styles.withdrawn)}>
-          <MessageBody body={message.body} onOpenPath={onOpenPath} />
+          <MessageBody body={message.body} onOpenPath={onOpenPath} keepLineBreaks />
         </div>
       </div>
       {message.delivery === 'unknown' ? (
@@ -505,8 +499,6 @@ export function ThreadDetail({
   } | null>(null)
   const [preview, setPreview] = useState<{ deviceId: ID; path: string; reply: number | null } | null>(null)
   const timelineRef = useRef<HTMLDivElement | null>(null)
-  const atLiveEdge = useRef(true)
-  const scrollThread = useRef(threadId)
   const workspace = useWorkspace()
   const resumeOperation = useOperation(resumeId)
   const openMessageFile = useCallback((reply: number | null, deviceId: ID, path: string) => {
@@ -673,35 +665,13 @@ export function ThreadDetail({
     : null
   const now = useNow(view?.live ? 1000 : null)
 
-  // 用户停留在底部时跟随新消息；切换 Thread 时回到最新内容。
-  useEffect(() => {
-    const node = timelineRef.current
-    if (scrollThread.current !== threadId) {
-      scrollThread.current = threadId
-      atLiveEdge.current = true
-    }
-    if (node && atLiveEdge.current) {
-      node.scrollTop = node.scrollHeight
-    }
-  }, [list.length, threadId])
-
-  useLayoutEffect(() => {
-    const timeline = timelineRef.current
-    const content = timeline?.firstElementChild
-    if (!timeline || !content || typeof ResizeObserver === 'undefined') return
-    const follow = () => {
-      if (!atLiveEdge.current) return
-      timeline.scrollTop = timeline.scrollHeight
-    }
-    const observer = new ResizeObserver(follow)
-    const viewportObserver = new ResizeObserver(follow)
-    observer.observe(content)
-    viewportObserver.observe(timeline)
-    return () => {
-      observer.disconnect()
-      viewportObserver.disconnect()
-    }
-  }, [threadId, threadQuery.isSuccess])
+  const {
+    awayFromLatest,
+    followLatest,
+    onScroll: onTimelineScroll,
+    scrollToLatest: jumpToLatest,
+  } = useChatScroll(timelineRef, { resetKey: threadId, ready: threadQuery.isSuccess })
+  useEffect(() => followLatest(), [list.length, followLatest])
 
   useEffect(() => {
     if (thread?.unread && messages.isSuccess && !messages.isFetching) client.markThreadRead?.(threadId)
@@ -930,11 +900,6 @@ export function ThreadDetail({
   else if (thread.pending === 'stop' && view.live) status = '正在停止…'
   else if (running) status = mode === 'now' ? '在当前回复期间发送' : '当前回复结束后发送'
 
-  function onTimelineScroll(event: UIEvent<HTMLDivElement>) {
-    const timeline = event.currentTarget
-    atLiveEdge.current = timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop <= 32
-  }
-
   const menuItems = [
     (running || thread.starting || thread.resumePending) && !thread.pending && (
       <MenuOption key="stop" onSelect={() => setConfirm('stop')}>
@@ -978,97 +943,110 @@ export function ThreadDetail({
             </button>
           </div>
         )}
-        <div
-          ref={timelineRef}
-          tabIndex={-1}
-          aria-label="消息记录"
-          role="region"
-          onScroll={onTimelineScroll}
-          {...stylex.props(styles.timeline)}
-        >
-          <SelectionArea
-            label={canAsk ? '询问项目助手' : '复制所选内容'}
-            icon={canAsk ? 'reply' : 'copy'}
-            describe={describeSelection}
-            style={[styles.messages, layout === 'panel' && styles.messagesPanel]}
+        <div {...stylex.props(styles.timelineFrame)}>
+          <div
+            ref={timelineRef}
+            tabIndex={-1}
+            aria-label="消息记录"
+            role="region"
+            onScroll={onTimelineScroll}
+            {...stylex.props(styles.timeline)}
           >
-            {messages.isPending && <p {...stylex.props(text.caption, styles.muted)}>正在加载消息…</p>}
-            {messages.isError && !messages.data && (
-              <Banner
-                icon="alert"
-                title="无法加载消息"
-                action={
-                  <Button small onClick={() => void messages.refetch()}>
-                    重试
-                  </Button>
-                }
-              />
-            )}
-            {[
-              ...timelineMessages,
-              ...(thread.status === 'running' &&
-              thread.runTurnSeq !== undefined &&
-              !activityTurns.has(thread.runTurnSeq)
-                ? [
-                    {
-                      id: `activity:${thread.runTurnSeq}`,
-                      at: Number.MAX_SAFE_INTEGER - 1,
-                      order: Number.MAX_SAFE_INTEGER,
-                      message: null,
-                      liveTurn: thread.runTurnSeq,
-                      count: undefined,
-                      active: true,
-                    },
-                  ]
-                : []),
-            ]
-              .sort((a, b) => a.at - b.at || a.order - b.order || a.id.localeCompare(b.id))
-              .map(({ message, id, liveTurn, count, active }) => {
-                if (liveTurn !== null)
+            <SelectionArea
+              label={canAsk ? '询问项目助手' : '复制所选内容'}
+              icon={canAsk ? 'reply' : 'copy'}
+              describe={describeSelection}
+              style={[styles.messages, layout === 'panel' && styles.messagesPanel]}
+            >
+              {messages.isPending && <p {...stylex.props(text.caption, styles.muted)}>正在加载消息…</p>}
+              {messages.isError && !messages.data && (
+                <Banner
+                  icon="alert"
+                  title="无法加载消息"
+                  action={
+                    <Button small onClick={() => void messages.refetch()}>
+                      重试
+                    </Button>
+                  }
+                />
+              )}
+              {[
+                ...timelineMessages,
+                ...(thread.status === 'running' &&
+                thread.runTurnSeq !== undefined &&
+                !activityTurns.has(thread.runTurnSeq)
+                  ? [
+                      {
+                        id: `activity:${thread.runTurnSeq}`,
+                        at: Number.MAX_SAFE_INTEGER - 1,
+                        order: Number.MAX_SAFE_INTEGER,
+                        message: null,
+                        liveTurn: thread.runTurnSeq,
+                        count: undefined,
+                        active: true,
+                      },
+                    ]
+                  : []),
+              ]
+                .sort((a, b) => a.at - b.at || a.order - b.order || a.id.localeCompare(b.id))
+                .map(({ message, id, liveTurn, count, active }) => {
+                  if (liveTurn !== null)
+                    return (
+                      <TurnActivityTrace
+                        key={id}
+                        threadId={threadId}
+                        turnSeq={liveTurn}
+                        device={device}
+                        live={active}
+                        count={count}
+                        messageId={activityCounts.get(liveTurn)?.messageId}
+                        runningSteps={
+                          active && liveOutput.data?.workerTurnSeq === liveTurn
+                            ? liveOutput.data.runningSteps
+                            : undefined
+                        }
+                        runningStepsTruncated={
+                          active && liveOutput.data?.workerTurnSeq === liveTurn
+                            ? liveOutput.data.runningStepsTruncated
+                            : false
+                        }
+                      />
+                    )
+                  if (!message) return null
+                  const reply = message.role === 'agent' ? ++replies : null
                   return (
-                    <TurnActivityTrace
+                    <MessageItem
                       key={id}
-                      threadId={threadId}
-                      turnSeq={liveTurn}
+                      message={message}
+                      agent={thread.agent}
+                      deviceId={thread.deviceId}
                       device={device}
-                      live={active}
-                      count={count}
-                      messageId={activityCounts.get(liveTurn)?.messageId}
+                      devices={deviceList}
+                      reply={reply}
+                      command={false}
+                      latest={message.id === latestReplyId}
+                      outputGap={message === liveReply && output?.chunks.some((chunk) => chunk.kind === 'gap')}
+                      traceInMessage={message.workerTurnSeq === undefined || !activityTurns.has(message.workerTurnSeq)}
+                      onOpen={openMessageFile}
+                      onCancel={onCancel}
                     />
                   )
-                if (!message) return null
-                const reply = message.role === 'agent' ? ++replies : null
-                return (
-                  <MessageItem
-                    key={id}
-                    message={message}
-                    agent={thread.agent}
-                    deviceId={thread.deviceId}
-                    device={device}
-                    devices={deviceList}
-                    reply={reply}
-                    command={false}
-                    latest={message.id === latestReplyId}
-                    outputGap={message === liveReply && output?.chunks.some((chunk) => chunk.kind === 'gap')}
-                    traceInMessage={message.workerTurnSeq === undefined || !activityTurns.has(message.workerTurnSeq)}
-                    onOpen={openMessageFile}
-                    onCancel={onCancel}
-                  />
-                )
-              })}
-            <LiveOutput
-              thread={thread}
-              device={device}
-              live={view.live}
-              now={now}
-              messages={list}
-              onOpenPath={(path) => openFile(null)(thread.deviceId, path)}
-              output={output}
-              outputError={liveOutput.isError && device?.connection === 'online'}
-              onRetryOutput={() => void liveOutput.refetch()}
-              showReply={liveReply === null && output?.workerTurnSeq === undefined}
-            />
-          </SelectionArea>
+                })}
+              <LiveOutput
+                thread={thread}
+                device={device}
+                live={view.live}
+                now={now}
+                messages={list}
+                onOpenPath={(path) => openFile(null)(thread.deviceId, path)}
+                output={output}
+                outputError={liveOutput.isError && device?.connection === 'online'}
+                onRetryOutput={() => void liveOutput.refetch()}
+                showReply={liveReply === null && output?.workerTurnSeq === undefined}
+              />
+            </SelectionArea>
+          </div>
+          {awayFromLatest && <JumpToLatest onClick={jumpToLatest} />}
         </div>
         <div {...stylex.props(styles.dock, layout === 'panel' && styles.dockPanel)}>
           <div {...stylex.props(styles.dockContent)}>

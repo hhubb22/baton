@@ -1,38 +1,42 @@
 import * as stylex from '@stylexjs/stylex'
 import { useId, type ComponentProps, type ReactNode } from 'react'
+import { semantic } from '../theme/semantic.stylex'
 import { text } from '../theme/text'
-import { colors, radius, size, space } from '../theme/tokens.stylex'
+import { motion, radius, shadow, size, space } from '../theme/tokens.stylex'
 
+// 输入框的边框、阴影和焦点转写自 coss ui 的 Input（MIT）。
 const styles = stylex.create({
   field: { display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 },
-  label: { color: colors.text },
-  optional: { color: colors.faint, fontWeight: 400 },
-  helper: { color: colors.muted },
-  error: { color: colors.danger },
+  label: { color: semantic.foreground },
+  optional: { color: semantic.faintForeground, fontWeight: 400 },
+  helper: { color: semantic.mutedForeground },
+  error: { color: semantic.destructiveForeground },
   input: {
     width: '100%',
     height: size.control,
     paddingBlock: 0,
-    paddingInline: '10px',
-    backgroundColor: colors.surface,
+    paddingInline: '11px',
+    backgroundColor: semantic.card,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: { default: colors.border, ':focus': colors.focus },
-    borderRadius: radius.sm,
+    borderColor: { default: semantic.input, ':focus': semantic.ring },
+    borderRadius: radius.md,
     outline: 'none',
-    boxShadow: { default: 'none', ':focus': `0 0 0 0.5px ${colors.focus}` },
-    color: colors.text,
-    '::placeholder': { color: colors.faint },
+    boxShadow: { default: shadow.control, ':focus': shadow.focus },
+    color: semantic.foreground,
+    transitionProperty: 'border-color, box-shadow',
+    transitionDuration: motion.micro,
+    '::placeholder': { color: semantic.faintForeground },
   },
   textarea: {
     height: 'auto',
     minHeight: '80px',
     paddingBlock: space.sm,
-    paddingInline: '10px',
     resize: 'vertical',
   },
   invalid: {
-    borderColor: colors.danger,
+    borderColor: semantic.destructiveForeground,
+    boxShadow: { default: 'none', ':focus': shadow.focusDanger },
   },
 })
 

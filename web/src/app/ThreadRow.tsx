@@ -3,7 +3,8 @@ import { Link } from '@tanstack/react-router'
 import { agentNames, folderName, threadView } from '../data/derive'
 import type { Device, Thread } from '../data/types'
 import { text } from '../theme/text'
-import { colors, radius, size, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, size, space } from '../theme/tokens.stylex'
 import { UnreadDot } from '../ui/Badge'
 import { focusRing } from '../ui/Button'
 import { StatusDot } from '../ui/Status'
@@ -16,13 +17,13 @@ const styles = stylex.create({
     minHeight: size.comfortable,
     paddingInline: space.md,
     borderRadius: radius.md,
-    color: colors.text,
+    color: semantic.foreground,
     textDecoration: 'none',
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
+    backgroundColor: { default: 'transparent', ':hover': semantic.muted },
   },
   title: { flexGrow: 1 },
-  folder: { color: colors.faint, flexShrink: 1 },
-  meta: { color: colors.muted, whiteSpace: 'nowrap' },
+  folder: { color: semantic.faintForeground, flexShrink: 1 },
+  meta: { color: semantic.mutedForeground, whiteSpace: 'nowrap' },
 })
 
 // Thread 行：状态点、名称、目录最后一段，右侧是设备 · Agent 和状态。

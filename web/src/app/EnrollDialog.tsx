@@ -7,7 +7,8 @@ import { DesktopEnrollDialog } from './DesktopEnrollDialog'
 import { useCreateEnrollment, useDevices, useDownloads, useEnrollment } from '../data/queries'
 import type { Device, DeviceOS, IssuedEnrollment } from '../data/types'
 import { text } from '../theme/text'
-import { colors, radius, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, space } from '../theme/tokens.stylex'
 import { Button, focusRing, IconButton } from '../ui/Button'
 import { Dialog } from '../ui/Dialog'
 import { Input } from '../ui/Field'
@@ -28,7 +29,7 @@ const styles = stylex.create({
     paddingBlock: space.sm,
     paddingLeft: space.md,
     paddingRight: space.xs,
-    backgroundColor: colors.code,
+    backgroundColor: semantic.code,
     borderRadius: radius.md,
   },
   boxText: {
@@ -40,24 +41,24 @@ const styles = stylex.create({
     overflowWrap: 'anywhere',
     userSelect: 'all',
   },
-  dim: { color: colors.faint },
-  helper: { color: colors.muted },
-  link: { color: colors.accentText },
+  dim: { color: semantic.faintForeground },
+  helper: { color: semantic.mutedForeground },
+  link: { color: semantic.brandForeground },
   checksum: { overflowWrap: 'anywhere', userSelect: 'all' },
-  warning: { color: colors.attentionText },
-  error: { color: colors.danger },
-  status: { display: 'inline-flex', alignItems: 'center', gap: space.sm, color: colors.muted },
-  countdown: { color: colors.faint },
+  warning: { color: semantic.warningForeground },
+  error: { color: semantic.destructiveForeground },
+  status: { display: 'inline-flex', alignItems: 'center', gap: space.sm, color: semantic.mutedForeground },
+  countdown: { color: semantic.faintForeground },
   device: {
     display: 'flex',
     alignItems: 'center',
     gap: space.md,
     paddingBlock: space.md,
     paddingInline: space.lg,
-    backgroundColor: colors.panel,
+    backgroundColor: semantic.sidebar,
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: colors.borderSoft,
+    borderColor: semantic.border,
     borderRadius: radius.lg,
   },
   deviceBody: { display: 'flex', flexDirection: 'column', minWidth: 0 },

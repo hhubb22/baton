@@ -401,7 +401,7 @@ describe('projects', () => {
     await advance(scheduler, 500)
     expect(await screen.findByText('暂无对话')).toBeInTheDocument()
     expect(router.state.location.pathname).toMatch(/^\/projects\/prj-/)
-    expect(screen.getByLabelText('给项目助手发消息')).toHaveAttribute('placeholder', '描述你想完成或验证的事…')
+    expect(screen.getByLabelText('给项目助手发消息')).toHaveAttribute('aria-placeholder', '描述你想完成或验证的事…')
   })
 
   it('keeps the entries when saving fails and saves on retry', async () => {
@@ -859,7 +859,7 @@ describe('threads', () => {
     await advance(scheduler, browserLatency.read + browserLatency.save)
     const detail = await panel('Add a health check')
     expect(await within(detail).findByText('运行中')).toBeInTheDocument()
-    expect(screen.getByLabelText('新对话消息')).toHaveValue('')
+    expect(screen.getByLabelText('新对话消息')).toHaveTextContent(/^$/)
 
     await advance(scheduler, browserLatency.read + browserLatency.run)
     expect(await within(detail).findByText('空闲')).toBeInTheDocument()
@@ -948,7 +948,7 @@ describe('threads', () => {
     expect(screen.getByRole('button', { name: '文件夹：baton' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '设备：Windows Desktop' })).toBeInTheDocument()
     expect(screen.getByLabelText('新对话消息')).toHaveFocus()
-    expect(screen.getByLabelText('新对话消息')).toHaveValue('')
+    expect(screen.getByLabelText('新对话消息')).toHaveTextContent(/^$/)
   })
 
   it('adds and selects a folder path directly from the folder dialog', async () => {

@@ -12,7 +12,8 @@ import {
 } from '../data/queries'
 import type { MemoryNote, MemoryVersion, Project } from '../data/types'
 import { text } from '../theme/text'
-import { colors, radius, size, space } from '../theme/tokens.stylex'
+import { semantic } from '../theme/semantic.stylex'
+import { radius, size, space } from '../theme/tokens.stylex'
 import { Banner } from '../ui/Banner'
 import { Button, focusRing } from '../ui/Button'
 import { Dialog } from '../ui/Dialog'
@@ -32,20 +33,20 @@ const styles = stylex.create({
     width: '100%',
     minHeight: size.control,
     minWidth: 0,
-    backgroundColor: { default: 'transparent', ':hover': colors.hover },
+    backgroundColor: { default: 'transparent', ':hover': semantic.muted },
     borderWidth: 0,
     borderRadius: radius.sm,
     paddingBlock: '6px',
     paddingInline: space.sm,
-    color: colors.text,
+    color: semantic.foreground,
     textAlign: 'left',
     cursor: 'pointer',
   },
   history: { display: 'flex', flexDirection: 'column', gap: space.sm, paddingBlock: space.sm },
   latest: {
     padding: space.md,
-    backgroundColor: colors.subtle,
-    borderRadius: '8px',
+    backgroundColor: semantic.secondary,
+    borderRadius: radius.md,
     whiteSpace: 'pre-wrap',
     overflowWrap: 'anywhere',
   },
