@@ -459,6 +459,7 @@ class Manager implements ProjectManager {
             () => this.stop(run),
           )
         },
+        run.command.project_id,
       )
       run.started = true
       run.lastAttempt = started

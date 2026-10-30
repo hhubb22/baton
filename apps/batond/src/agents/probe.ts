@@ -212,6 +212,7 @@ const probeHost = Effect.fn('Agents.probeHost')(function* (agentType: HostedAgen
     probeWorkspace({
       command: { file: invocation.executable, args: invocation.args },
       agentType,
+      dataDirectory,
       ...(watchdog ? { watchdog } : {}),
       ...(records ? { records } : {}),
     }),
@@ -242,7 +243,11 @@ const probeAgent = Effect.fn('Agents.probeAgent')(function* (agentType: HostedAg
         reason: 'Cursor SDK 安装不完整',
       })
     }
-    if (!process.env.CURSOR_API_KEY?.trim())
+    const { loadEnvironment, resolveEnvironment, baseEnvironment } = yield* Effect.promise(
+      () => import('../environment.ts'),
+    )
+    const environment = yield* Effect.tryPromise(() => loadEnvironment(dataDirectory))
+    if (!resolveEnvironment(environment, baseEnvironment(process.env), { agent: agentType }).env.CURSOR_API_KEY?.trim())
       return hostedAgentReport(agentType, {
         authenticated: 'missing',
         models: [],

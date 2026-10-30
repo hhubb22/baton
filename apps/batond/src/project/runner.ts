@@ -76,15 +76,29 @@ export class RuntimeRunner {
     cwd?: string,
     env?: NodeJS.ProcessEnv,
     onSpawn?: SpawnOwnedProcessOptions['onSpawn'],
+    project?: string,
   ) {
     if (this.closing) throw new Error('Project Runtime 宿主已关闭')
     const command = this.options.runtimeCommand ?? defaultRuntimeCommand()
+    let resolved = process.env
+    if (process.env.BATON_ENV_DATA_DIR) {
+      const { loadEnvironment, resolveEnvironment, baseEnvironment } = await import('../environment.ts')
+      const config = await loadEnvironment(process.env.BATON_ENV_DATA_DIR)
+      if (config.revision) {
+        resolved = {
+          ...resolveEnvironment(config, baseEnvironment(process.env), project ? { project } : {}).env,
+          ...(process.env.BATON_PROJECT_RUNTIME_DATA_DIR
+            ? { BATON_PROJECT_RUNTIME_DATA_DIR: process.env.BATON_PROJECT_RUNTIME_DATA_DIR }
+            : {}),
+        }
+      }
+    }
     const startup = spawnOwnedProcess(
       {
         ...command,
         args: [...(command.args ?? []), ...args],
         ...((cwd ?? command.cwd) ? { cwd: cwd ?? command.cwd! } : {}),
-        env: { ...process.env, ...telemetryEnvironment(this.options.telemetry), ...command.env, ...env },
+        env: { ...resolved, ...telemetryEnvironment(this.options.telemetry), ...command.env, ...env },
       },
       {
         watchdog: this.watchdog,

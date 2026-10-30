@@ -78,6 +78,8 @@ function makeAgent(config: WorkerOpenConfig, options: HostedAgentOptions): Threa
   const hostOptions = (): AgentHostProcessOptions => ({
     command: options.command,
     agentType: options.agentType,
+    ...(options.dataDirectory ? { dataDirectory: options.dataDirectory } : {}),
+    ...(config.project_id ? { project: config.project_id } : {}),
     paths,
     ...(options.watchdog ? { watchdog: options.watchdog } : {}),
     ...(options.records ? { records: options.records } : {}),

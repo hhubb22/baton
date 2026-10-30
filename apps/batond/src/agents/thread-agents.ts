@@ -15,6 +15,7 @@ export function makeThreadAgentFactory(options: {
     const type = config.agent_type as keyof typeof agentCatalog
     return makeAgentHostFactory({
       command: options.command,
+      dataDirectory: options.dataDirectory,
       records: options.records,
       ...(options.watchdog ? { watchdog: options.watchdog } : {}),
       agentType: type,

@@ -1,4 +1,5 @@
 import { parseArgs } from 'node:util'
+import { createReadStream } from 'node:fs'
 import type { Readable } from 'node:stream'
 import { Effect, Option } from 'effect'
 import { telemetryEnvironment, telemetryLayer } from '@baton/telemetry'
@@ -58,6 +59,12 @@ export async function runDaemonCLI(
   }
   const controller = new AbortController()
   const stop = () => controller.abort()
+  const parent =
+    process.env.BATON_ENV_PARENT_PIPE === '1' ? createReadStream('', { fd: 3, autoClose: true }) : undefined
+  delete process.env.BATON_ENV_PARENT_PIPE
+  parent?.once('end', stop)
+  parent?.once('error', stop)
+  parent?.resume()
   process.once('SIGINT', stop)
   process.once('SIGTERM', stop)
   const stdin = dependencies.stdin ?? process.stdin
@@ -155,6 +162,7 @@ export async function runDaemonCLI(
   } catch (error) {
     if (!controller.signal.aborted) throw error
   } finally {
+    parent?.destroy()
     process.removeListener('SIGINT', stop)
     process.removeListener('SIGTERM', stop)
     if (values['exit-with-stdin']) {

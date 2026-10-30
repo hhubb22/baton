@@ -130,10 +130,18 @@ it('引导持久入口后通过同一入口运行和查询更新', async () => {
   await batond.update()
   await batond.cancelUpdate()
   expect(calls[0]?.args).toEqual(['update', 'bootstrap', '--data-dir', '/data'])
-  expect(calls.slice(1).map((call) => call.file)).toEqual([launcher, launcher, launcher])
-  expect(calls[1]?.args).toEqual([...prefix, 'update', 'status', '--data-dir', '/data'])
-  expect(calls[2]?.args).toEqual([...prefix, 'update', '--data-dir', '/data'])
-  expect(calls[3]?.args).toEqual([...prefix, 'update', 'cancel', '--data-dir', '/data'])
+  expect(calls.slice(1).map((call) => call.file)).toEqual([launcher, launcher, launcher, launcher])
+  expect(calls[1]?.args).toEqual([
+    ...prefix,
+    'env',
+    'init',
+    ...(process.platform === 'win32' ? [] : ['--shell']),
+    '--data-dir',
+    '/data',
+  ])
+  expect(calls[2]?.args).toEqual([...prefix, 'update', 'status', '--data-dir', '/data'])
+  expect(calls[3]?.args).toEqual([...prefix, 'update', '--data-dir', '/data'])
+  expect(calls[4]?.args).toEqual([...prefix, 'update', 'cancel', '--data-dir', '/data'])
 })
 
 it('通过设备命令读取并保存更新策略', async () => {

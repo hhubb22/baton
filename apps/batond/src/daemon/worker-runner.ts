@@ -28,6 +28,12 @@ export const runWorker = (options: {
     if (process.platform !== 'win32') process.umask(0o077)
     const paths = yield* Effect.promise(() => initializeWorkerDirectory(options.dataDirectory, options.threadId))
     yield* acquireProcessLockScoped(paths.lock)
+    yield* Effect.tryPromise(() =>
+      writePrivateFileAtomic(
+        join(paths.threadDirectory, 'environment-process.json'),
+        JSON.stringify({ pid: process.pid, revision: process.env.BATON_ENV_REVISION ?? '' }),
+      ),
+    )
     yield* Effect.tryPromise(() => assertNoUpdateRollback(options.dataDirectory))
     if (upgradeOffline(yield* Effect.tryPromise(() => readUpgradeState(options.dataDirectory)))) return
     const token = (yield* Effect.promise(() => readPrivateFile(paths.token))).toString('utf8')
@@ -134,8 +140,25 @@ export const runWorker = (options: {
     yield* Effect.raceFirst(
       worker.failed,
       Effect.gen(function* () {
+        let lastEnvironmentCheck = 0
         while (true) {
           if (yield* worker.drain) return
+          if (Date.now() - lastEnvironmentCheck >= 1000) {
+            lastEnvironmentCheck = Date.now()
+            const { loadEnvironment } = yield* Effect.promise(() => import('../environment.ts'))
+            const result = yield* Effect.result(Effect.tryPromise(() => loadEnvironment(options.dataDirectory)))
+            if (result._tag === 'Failure') {
+              yield* Effect.logWarning('无法检查设备环境配置，Worker 将继续运行并重试')
+            } else {
+              const config = result.success
+              if (
+                config.revision &&
+                config.revision !== (process.env.BATON_ENV_REVISION ?? '') &&
+                (yield* worker.drainForEnvironment)
+              )
+                return
+            }
+          }
           yield* Effect.sleep(100)
         }
       }),

@@ -1,6 +1,7 @@
 import { BUNDLED, releaseMetadata, NodeVersionIncompatibility } from '@baton/protocol/release'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
+import type { Writable } from 'node:stream'
 import { realpath, lstat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, relative } from 'node:path'
@@ -46,6 +47,7 @@ up/run 支持 --control-timeout-seconds <秒>，认证与同步各默认等待 3
 设备管理：
 
   service install|uninstall|status
+  env import [--shell] | list | doctor | set|unset|reset <名称> [--scope <范围>]
   update
   update status | cancel
   update policy [manual|idle]
@@ -121,6 +123,57 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
           process.exitCode = await dispatchInstallation(directory, argv)
           return
         }
+      }
+    }
+  }
+  if (action === 'env') {
+    const { runEnvironmentCLI } = await import('./environment-cli.ts')
+    await runEnvironmentCLI(args)
+    return
+  }
+  if ((action === 'run' || action === 'up') && process.env.BATON_ENV_REEXEC !== '1') {
+    const index = argv.findIndex((arg) => arg === '--data-dir' || arg.startsWith('--data-dir='))
+    const directory =
+      index < 0
+        ? join(homedir(), '.baton-ts')
+        : argv[index] === '--data-dir'
+          ? argv[index + 1]
+          : argv[index]!.slice('--data-dir='.length)
+    if (directory) {
+      const { initializeEnvironment, applyEnvironment } = await import('./environment.ts')
+      const config = await initializeEnvironment(directory, process.env)
+      if (config.revision) {
+        const env = applyEnvironment(config, process.env)
+        Object.assign(env, {
+          BATON_ENV_REEXEC: '1',
+          BATON_ENV_DATA_DIR: directory,
+          BATON_ENV_REVISION: config.revision,
+        })
+        const nextArgs = [...(isSea() ? [] : [...process.execArgv, process.argv[1]!]), ...argv]
+        if (process.platform !== 'win32') {
+          if (!process.execve) throw new Error('当前 Node 不支持环境启动入口')
+          process.execve(process.execPath, [process.execPath, ...nextArgs], env)
+        }
+        env.BATON_ENV_PARENT_PIPE = '1'
+        const child = spawn(process.execPath, nextArgs, {
+          env,
+          stdio: ['inherit', 'inherit', 'inherit', 'pipe'],
+          windowsHide: true,
+        })
+        const forwardInt = () => (child.stdio[3] as Writable | null)?.end()
+        const forwardTerm = forwardInt
+        process.on('SIGINT', forwardInt)
+        process.on('SIGTERM', forwardTerm)
+        try {
+          process.exitCode = await new Promise<number>((resolve, reject) => {
+            child.once('error', reject)
+            child.once('exit', (code, signal) => resolve(code ?? (signal === 'SIGTERM' ? 0 : 1)))
+          })
+        } finally {
+          process.off('SIGINT', forwardInt)
+          process.off('SIGTERM', forwardTerm)
+        }
+        return
       }
     }
   }

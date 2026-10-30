@@ -272,7 +272,19 @@ export async function launchInstallation(dataDirectory: string, args: readonly s
   }
   const current = await readCurrentInstallation(dataDirectory)
   const binary = args[0] === 'update' ? process.execPath : join(current.path, paths.binary)
-  const child = spawn(binary, [...args], { stdio: 'inherit', windowsHide: true })
+  let env = process.env
+  if (args[0] === 'run' || args[0] === 'up') {
+    const { initializeEnvironment, applyEnvironment } = await import('../environment.ts')
+    const config = await initializeEnvironment(dataDirectory, process.env)
+    if (config.revision)
+      env = {
+        ...applyEnvironment(config, process.env),
+        BATON_ENV_REEXEC: '1',
+        BATON_ENV_DATA_DIR: dataDirectory,
+        BATON_ENV_REVISION: config.revision,
+      }
+  }
+  const child = spawn(binary, [...args], { stdio: 'inherit', windowsHide: true, env })
   const exited = new Promise<number>((resolve, reject) => {
     child.once('error', reject)
     child.once('exit', (code, signal) => resolve(code ?? (signal === 'SIGTERM' ? 0 : 1)))

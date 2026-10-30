@@ -41,7 +41,7 @@ it('passes certificate and proxy variables unchanged to every Agent', () => {
   for (const agent of ['cursor', 'pi', 'codex', 'kiro']) {
     expect(
       agentEnvironment(agent, { ...network, OPENAI_API_KEY: 'secret', NODE_TLS_REJECT_UNAUTHORIZED: '0' }),
-    ).toEqual(network)
+    ).toEqual({ ...network, NODE_USE_ENV_PROXY: '1' })
   }
 })
 

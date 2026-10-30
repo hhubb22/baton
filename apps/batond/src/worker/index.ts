@@ -73,6 +73,7 @@ export interface Worker {
   /** Authentication and the exclusive process lock belong to the IPC/platform owner. */
   readonly handle: (request: WorkerRequest) => Effect.Effect<WorkerIPCMessage, WorkerFailure>
   readonly drain: Effect.Effect<boolean, WorkerFailure>
+  readonly drainForEnvironment: Effect.Effect<boolean, WorkerFailure>
   /** Fails once execution is frozen; the owner must exit the Scope and release the Worker lock. */
   readonly failed: Effect.Effect<never, WorkerFailure>
   readonly records: {
@@ -1924,21 +1925,28 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       ),
     list: () => submit(Effect.sync(() => structuredClone(Object.values(state.processes)))),
   }
-  const drain = submit(
-    Effect.gen(function* () {
-      if (
-        !(yield* paused) ||
-        operation ||
-        stopFiber ||
-        recovering ||
-        state.activeMessage ||
-        ['busy', 'stopping', 'unknown'].includes(state.phase)
-      )
-        return false
-      // 与 intent 共用串行队列；取消准备后也不会在关闭过程中启动下一回合。
-      closing = true
-      return true
-    }),
-  )
-  return { handle, records, drain, failed: Deferred.await(fatal) } satisfies Worker
+  const drain = (environmentChanged: boolean) =>
+    submit(
+      Effect.gen(function* () {
+        if (
+          (!environmentChanged && !(yield* paused)) ||
+          operation ||
+          stopFiber ||
+          recovering ||
+          state.activeMessage ||
+          ['busy', 'stopping', 'unknown'].includes(state.phase)
+        )
+          return false
+        // 与 intent 共用串行队列；取消准备后也不会在关闭过程中启动下一回合。
+        closing = true
+        return true
+      }),
+    )
+  return {
+    handle,
+    records,
+    drain: drain(false),
+    drainForEnvironment: drain(true),
+    failed: Deferred.await(fatal),
+  } satisfies Worker
 })

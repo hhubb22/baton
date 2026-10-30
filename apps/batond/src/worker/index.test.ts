@@ -419,6 +419,70 @@ describe('reliable Worker', () => {
     ),
   )
 
+  it.effect('waits for the active turn before retiring a Worker for an environment change', () =>
+    fixture((dbPath) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const cfg = config()
+          const f = yield* fake
+          const worker = yield* makeWorker({ dbPath, dataDirectory: dirname(dbPath), agentFactory: () => f.agent })
+          yield* worker.handle(request(cfg, 'thread_open'))
+          yield* opened(worker)
+          const input = message(cfg)
+          yield* worker.handle(input)
+          yield* completed(worker, input.command_id!)
+          expect(yield* worker.drainForEnvironment).toBe(false)
+          yield* Queue.offer(f.events, event(input.client_message_id!, 'end'))
+          yield* until(reports(worker), (rows) => rows.some((row) => row.kind === 'turn.ended'))
+          expect(yield* until(worker.drainForEnvironment, Boolean)).toBe(true)
+        }),
+      ),
+    ),
+  )
+
+  it.effect('recovers queued input after retiring a Worker for an environment change', () =>
+    fixture((dbPath) =>
+      Effect.gen(function* () {
+        const cfg = config()
+        const first = message(cfg)
+        const queued = message(cfg, 'queued')
+        const upgrade = {
+          operation_id: randomUUID(),
+          source_version: 'development',
+          target_version: 'v1',
+          target_path: '/tmp/package',
+          phase: 'draining' as const,
+        }
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const f = yield* fake
+            const worker = yield* makeWorker({ dbPath, dataDirectory: dirname(dbPath), agentFactory: () => f.agent })
+            yield* worker.handle(request(cfg, 'thread_open'))
+            yield* opened(worker)
+            yield* worker.handle(first)
+            yield* completed(worker, first.command_id!)
+            yield* Effect.promise(() => saveUpgradeState(dirname(dbPath), upgrade))
+            yield* worker.handle(queued)
+            expect(yield* worker.drainForEnvironment).toBe(false)
+            yield* Queue.offer(f.events, event(first.client_message_id!, 'end'))
+            yield* until(reports(worker), (rows) => rows.some((row) => row.kind === 'turn.ended'))
+            expect(yield* until(worker.drainForEnvironment, Boolean)).toBe(true)
+          }),
+        )
+        yield* Effect.promise(() => saveUpgradeState(dirname(dbPath), { ...upgrade, phase: 'cancelled' }))
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const f = yield* fake
+            const worker = yield* makeWorker({ dbPath, dataDirectory: dirname(dbPath), agentFactory: () => f.agent })
+            yield* completed(worker, queued.command_id!)
+            expect(f.sentInputs.map((input) => input.id)).toContain(queued.client_message_id)
+            yield* Queue.offer(f.events, event(queued.client_message_id!, 'end'))
+          }),
+        )
+      }),
+    ),
+  )
+
   it.effect(
     'preserves queued inputs while draining, finishes the active turn and resumes only after cancellation',
     () =>

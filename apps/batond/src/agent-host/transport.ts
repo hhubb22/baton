@@ -47,6 +47,8 @@ export interface AgentHostProcessOptions {
   /** batond invocation before the agent-host subcommand. */
   readonly command: ProcessCommand
   readonly agentType: string
+  readonly project?: string
+  readonly dataDirectory?: string
   readonly paths: AgentHostPaths
   readonly watchdog?: ProcessWatchdog
   readonly records?: ProcessRecordCallbacks
@@ -114,12 +116,27 @@ export const connectAgentHost = (
       return new AgentError(`Agent host operation failed (${detail})`, cause)
     }
     const connected = Effect.gen(function* () {
+      const environment = yield* Effect.tryPromise({
+        try: async () => {
+          const directory = options.dataDirectory ?? process.env.BATON_ENV_DATA_DIR
+          if (!directory) return agentEnvironment(options.agentType)
+          const { loadEnvironment, resolveEnvironment, baseEnvironment } = await import('../environment.ts')
+          const config = await loadEnvironment(directory)
+          return config.revision
+            ? resolveEnvironment(config, baseEnvironment(process.env), {
+                agent: options.agentType,
+                project: options.project ?? options.paths.workingDirectory,
+              }).env
+            : agentEnvironment(options.agentType)
+        },
+        catch: fail,
+      })
       owned = yield* spawnOwnedProcessEffect(
         {
           ...options.command,
           args: [...(options.command.args ?? []), ...agentHostArguments(options.agentType, options.paths)],
           env: {
-            ...agentEnvironment(options.agentType),
+            ...environment,
             ...Object.fromEntries(Object.entries(process.env).filter(([name]) => name.startsWith('OTEL_'))),
             ...(process.env.BATON_TELEMETRY_LOCAL_RELAY
               ? { BATON_TELEMETRY_LOCAL_RELAY: process.env.BATON_TELEMETRY_LOCAL_RELAY }

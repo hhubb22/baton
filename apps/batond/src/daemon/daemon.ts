@@ -571,11 +571,16 @@ async function writeDaemonStatus(
 ) {
   const identity = await readOwnProcessIdentity()
   await writePrivateFileAtomic(
+    join(directory, 'environment-process.json'),
+    JSON.stringify({ pid: process.pid, revision: process.env.BATON_ENV_REVISION ?? '' }),
+  )
+  await writePrivateFileAtomic(
     join(directory, 'daemon-status.json'),
     JSON.stringify({
       pid: process.pid,
       ...(identity ? { creation_time: identity.creationTime } : {}),
       batond_version: BUILD.version,
+      environment_revision: process.env.BATON_ENV_REVISION ?? '',
       state,
       ...(state === 'rejected'
         ? {

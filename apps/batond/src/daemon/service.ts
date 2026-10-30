@@ -295,6 +295,8 @@ export async function manageService(
     if (isMissing(error)) throw new ServiceError('service_not_registered', '设备尚未注册，请先运行 batond register')
     throw error
   }
+  const { initializeEnvironment } = await import('../environment.ts')
+  await initializeEnvironment(directory, env)
   const command: BatondCommand =
     options.command !== undefined
       ? options.command

@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from 'vite-plus/test'
 import type { NodeIdentity } from '@baton/protocol'
 import { manageService, renderLaunchAgent, renderSystemdUnit, type ServiceRunner } from './service.ts'
 import { acquireProcessLock } from '../platform/lock.ts'
+import { loadEnvironment, updateEnvironment } from '../environment.ts'
 
 const directories: string[] = []
 afterEach(async () => {
@@ -66,6 +67,17 @@ async function statusFixture(platform: 'darwin' | 'linux') {
   }))
   return f
 }
+
+it.each(['darwin', 'linux'] as const)('preserves configured environment across %s reinstall', async (platform) => {
+  const f = await fixture(platform)
+  await manageService('install', f.data, { ...f.options, env: { ...f.options.env, PATH: '/first' } })
+  await updateEnvironment(f.data, (config) => ({ ...config, scopes: { device: { PATH: '/custom' } } }))
+  const before = await loadEnvironment(f.data)
+  await manageService('install', f.data, { ...f.options, env: { ...f.options.env, PATH: '/second' } })
+  const after = await loadEnvironment(f.data)
+  expect(after).toEqual(before)
+  expect(after.scopes.device?.PATH).toBe('/custom')
+})
 
 it.each(['darwin', 'linux'] as const)(
   'reports daemon states and rejection details from the installed %s data directory',

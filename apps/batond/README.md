@@ -116,7 +116,11 @@ pnpm --filter @baton/batond dev resume --thread-id <UUID>
 
 Kiro 的 local settings 使用 `agentId: kiro`、`commandPath: kiro-cli`，从 PATH 查找程序；host 仅继承系统必要环境变量，不提供 `BATON_KIRO_*` 或 `KIRO_HOME` 入口。Kiro 模型取 `model ?? adapter_config.model ?? 'default'`；`default` 在原生 `session/new` 中省略，具体 ID 经 `_meta.kiro.modelId` 传递，整个 Thread 固定该选择。
 
-Agent host 继承启动 Worker 时环境中的 `NODE_EXTRA_CA_CERTS`、`SSL_CERT_FILE`、`SSL_CERT_DIR`，以及 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY` 和对应的小写变量，值原样传递。证书文件和目录应使用绝对路径，并位于运行 Agent 的设备上。修改环境变量后重启 batond 和相关 Thread Worker，使新启动的 Agent host 读取新值。各 Agent 及其网络库对 CA 和代理变量的支持不同；变量传入进程不保证 Agent 会使用它们。`--ca-file` 用于节点与中心的连接，不配置 Agent 的证书信任。
+设备环境保存在数据目录的 `environment/` 私有目录，服务首次安装时导入通用系统、代理和证书变量，后续安装与升级复用已保存的配置。桌面客户端首次启动尝试从登录 shell 读取；读取失败时使用启动环境，并在 `env doctor` 中报告。`batond env import [--shell]` 重新导入通用变量；`env list` 列出变量名称，`env doctor` 检查代理冲突、证书和 SSH socket 路径、常见 Agent 程序以及已记录进程的配置版本，均不输出变量值。
+
+使用 `batond env set <名称> --scope <范围>` 从标准输入读取值，`env unset <名称>` 抑制继承，`env reset <名称>` 删除当前范围的设置。范围依次为 `device`、`project:<项目 ID>`、`agent:<类型>`、`project:<项目 ID>:agent:<类型>`；未关联项目的 Thread 可使用工作目录代替项目 ID。各命令支持 `--data-dir`。显式设置值和包含凭据的代理地址保存在独立私有文件中；不采集父进程的全部密钥，也不允许设置 Node 注入选项、TLS 校验关闭变量和 Baton 内部变量。SSH socket 与图形会话地址从当前进程读取，不保存快照。
+
+新进程按系统基础、导入值、设备、项目、Agent 和项目内 Agent 的顺序合并环境。修改配置不会中断正在执行的任务；空闲 Worker 退出后由下一次请求重新启动。daemon 自身的网络代理和证书设置需要重启 daemon 才能生效。Node 中心连接支持 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` 及小写形式，设置 HTTP 代理时默认启用 `NODE_USE_ENV_PROXY`，可显式设置为 `0`；`ALL_PROXY` 透传给支持它的下游工具。证书路径应位于运行设备上。`--ca-file` 用于节点与中心的连接，Agent 对证书和代理变量的支持由各自的网络库决定。
 
 `open` 返回 Thread ID 和持久接收回执。启动、发送、恢复和停止的实际终态通过 `command --command-id <UUID>` 或 `reports` 查询；Worker 就绪与 Agent 就绪分别报告。`message` 支持 `--message-id`，执行命令支持 `--command-id`，重试时保留原标识。相同命令 ID、相同内容复用回执和结果，内容冲突会被拒绝。
 

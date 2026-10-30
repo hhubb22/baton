@@ -147,6 +147,9 @@ export class LocalWorkerHost implements DaemonWorkerHost {
           }
           const log = await openPrivateFile(paths.log, constants.O_WRONLY | constants.O_APPEND)
           try {
+            const { loadEnvironment, applyEnvironment } = await import('../environment.ts')
+            const config = await loadEnvironment(this.dataDirectory)
+            const env = config.revision ? applyEnvironment(config, process.env) : process.env
             const child = spawn(
               this.command.executable,
               [...this.command.args, 'worker', '--data-dir', paths.root, '--thread-id', threadId],
@@ -155,7 +158,9 @@ export class LocalWorkerHost implements DaemonWorkerHost {
                 stdio: ['ignore', log.fd, log.fd],
                 windowsHide: true,
                 env: {
-                  ...process.env,
+                  ...env,
+                  BATON_ENV_DATA_DIR: this.dataDirectory,
+                  BATON_ENV_REVISION: config.revision,
                   ...telemetryEnvironment(this.telemetry),
                   BATON_TELEMETRY_NODE_ID: (await loadIdentity(this.dataDirectory).catch(() => undefined))?.node_id,
                 },

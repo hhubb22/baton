@@ -183,8 +183,13 @@ export const runExecutionWorker = (dataDirectory: string, executionId: string, s
         }
         const start = yield* Effect.result(
           Effect.tryPromise({
-            try: () =>
-              spawnOwnedProcess(
+            try: async () => {
+              const { loadEnvironment, resolveEnvironment, baseEnvironment } = await import('../environment.ts')
+              const config = await loadEnvironment(dataDirectory)
+              const env = config.revision
+                ? resolveEnvironment(config, baseEnvironment(process.env), { project: command.project_id! }).env
+                : process.env
+              return spawnOwnedProcess(
                 {
                   file: shell,
                   args:
@@ -192,6 +197,7 @@ export const runExecutionWorker = (dataDirectory: string, executionId: string, s
                       ? ['-NoProfile', '-Command', command.command!]
                       : ['-lc', command.command!],
                   cwd,
+                  env,
                 },
                 {
                   watchdog,
@@ -214,7 +220,8 @@ export const runExecutionWorker = (dataDirectory: string, executionId: string, s
                     ]).then(() => undefined)
                   },
                 },
-              ),
+              )
+            },
             catch: (cause) => ({ missing: hasCode(cause, 'ENOENT') }),
           }),
         )

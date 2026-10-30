@@ -110,6 +110,7 @@ export class Batond {
     )
       throw new Error('设备更新入口无效')
     this.command = { executable: command.executable, args: [...command.args] }
+    await this.execute(['env', 'init', ...(process.platform === 'win32' ? [] : ['--shell'])])
   }
 
   async update(): Promise<void> {
