@@ -97,21 +97,36 @@ it('applies imported proxy and CA before child startup for HTTP, HTTPS and coord
     ).rejects.toThrow()
     forwarded.length = 0
     const result = await execute(process.execPath, args, { env, timeout: 15000 })
-    expect(JSON.parse(result.stdout)).toEqual({ http: 'plain', https: 'secure', websocket: true })
+    expect(JSON.parse(result.stdout)).toEqual({
+      http: 'plain',
+      https: 'secure',
+      updateRequest: 'secure',
+      websocket: true,
+    })
     expect(forwarded).toContain(plainPort)
-    expect(forwarded.filter((port) => port === securePort)).toHaveLength(2)
+    expect(forwarded.filter((port) => port === securePort)).toHaveLength(3)
     forwarded.length = 0
     const direct = await execute(process.execPath, args, {
       env: { ...env, NO_PROXY: '*', no_proxy: '*' },
       timeout: 15000,
     })
-    expect(JSON.parse(direct.stdout)).toEqual({ http: 'plain', https: 'secure', websocket: true })
+    expect(JSON.parse(direct.stdout)).toEqual({
+      http: 'plain',
+      https: 'secure',
+      updateRequest: 'secure',
+      websocket: true,
+    })
     expect(forwarded).toEqual([])
     const disabled = await execute(process.execPath, args, {
       env: { ...env, NODE_USE_ENV_PROXY: '0' },
       timeout: 15000,
     })
-    expect(JSON.parse(disabled.stdout)).toEqual({ http: 'plain', https: 'secure', websocket: true })
+    expect(JSON.parse(disabled.stdout)).toEqual({
+      http: 'plain',
+      https: 'secure',
+      updateRequest: 'secure',
+      websocket: true,
+    })
     expect(forwarded).toEqual([])
   } finally {
     websocket.clients.forEach((socket) => socket.terminate())

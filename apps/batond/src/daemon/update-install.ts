@@ -254,6 +254,7 @@ export async function launchInstallation(dataDirectory: string, args: readonly s
       await spawnDetachedWorker({
         file: join(paths.versions, state.package_directory, paths.binary),
         args: ['update-recover', '--data-dir', dataDirectory],
+        env: await (await import('../environment.ts')).loadProcessEnvironment(dataDirectory),
       })
       return 75
     } catch (error) {
@@ -273,6 +274,11 @@ export async function launchInstallation(dataDirectory: string, args: readonly s
   const current = await readCurrentInstallation(dataDirectory)
   const binary = args[0] === 'update' ? process.execPath : join(current.path, paths.binary)
   let env = process.env
+  if (
+    args[0] === 'update' &&
+    (args[1] === undefined || args[1].startsWith('--') || ['start', 'manifest', 'desktop-feed'].includes(args[1]))
+  )
+    env = await (await import('../environment.ts')).loadProcessEnvironment(dataDirectory)
   if (args[0] === 'run' || args[0] === 'up') {
     const { initializeEnvironment, applyEnvironment } = await import('../environment.ts')
     const config = await initializeEnvironment(dataDirectory, process.env)

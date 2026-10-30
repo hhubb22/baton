@@ -33,6 +33,7 @@ import { readUpgradePackage, sameRelease } from './upgrade-check.ts'
 import { Schema } from 'effect'
 import { manageService } from './service.ts'
 import { resumeUpdateRollback, rollbackUpdate } from './update-rollback.ts'
+import { loadProcessEnvironment } from '../environment.ts'
 
 const final = (state: UpdateState) => state.phase === 'completed' || state.phase === 'cancelled'
 const updateLock = (directory: string) => join(directory, 'update-worker.lock')
@@ -94,6 +95,7 @@ async function restartInstalledDaemon(directory: string, managedByDesktop: boole
       await spawnDetachedWorker({
         file: join(paths.launcher, paths.binary),
         args: ['dispatch', '--data-dir', directory, '--', 'run', '--data-dir', directory],
+        env: await loadProcessEnvironment(directory),
       })
     for (let n = 0; n < 100 && !(await processLockIsHeld(join(directory, 'daemon.lock'))); n++) await delay(100)
   } finally {
@@ -212,7 +214,11 @@ export async function startUpdate(directory: string, pending?: { operation_id: s
           state.package_directory && ['ready', 'migrating', 'syncing'].includes(state.phase)
             ? join(paths.versions, state.package_directory, paths.binary)
             : join(paths.launcher, paths.binary)
-        await spawnDetachedWorker({ file: executable, args: ['update-worker', '--data-dir', directory] })
+        await spawnDetachedWorker({
+          file: executable,
+          args: ['update-worker', '--data-dir', directory],
+          env: await loadProcessEnvironment(directory),
+        })
       }
       return { state }
     })
@@ -520,6 +526,7 @@ export async function runUpdateWorker(directory: string) {
       await spawnDetachedWorker({
         file: join(paths.versions, installed.directory, paths.binary),
         args: ['update-worker', '--data-dir', directory],
+        env: await loadProcessEnvironment(directory),
       })
     } finally {
       await rm(work, { recursive: true, force: true })

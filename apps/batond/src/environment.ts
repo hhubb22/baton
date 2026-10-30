@@ -373,3 +373,11 @@ export function applyEnvironment(
   env.BATON_ENV_MANAGED_KEYS = JSON.stringify([...managed])
   return env
 }
+
+export async function loadProcessEnvironment(
+  dataDirectory: string,
+  source: NodeJS.ProcessEnv = process.env,
+): Promise<NodeJS.ProcessEnv> {
+  const config = await loadEnvironment(dataDirectory)
+  return config.revision ? applyEnvironment(config, source) : source
+}
