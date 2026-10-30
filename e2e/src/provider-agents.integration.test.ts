@@ -46,6 +46,7 @@ interface ProviderThreadContext {
   nodeId: string
   employeeId: string
   syncResults: unknown[]
+  traceDiagnostics: { reportAcks: number; batondBatchAttempts: number; batondTraceBatchAttempts: number }
   firstMessageId: string
   threadPath: string
   request: (path: string, method?: string, data?: unknown) => Promise<{ status: number; body: unknown }>
@@ -106,6 +107,7 @@ async function withProviderThread(
   const controller = new AbortController()
   const scope = await Effect.runPromise(Scope.make())
   const syncResults: unknown[] = []
+  const traceDiagnostics = { reportAcks: 0, batondBatchAttempts: 0, batondTraceBatchAttempts: 0 }
   let daemon: Promise<unknown> | undefined
   let threadId: string | undefined
   const tracedRuntime = trace
@@ -352,6 +354,14 @@ async function withProviderThread(
             const connection = await connectWebSocket(`ws://127.0.0.1:${running.port}/v1/node`, options)
             return {
               ...connection,
+              tryTelemetry: (frame) => {
+                const encoded = JSON.stringify(frame)
+                if (encoded.includes('"stringValue":"batond"')) {
+                  traceDiagnostics.batondBatchAttempts++
+                  if (trace && encoded.includes(trace)) traceDiagnostics.batondTraceBatchAttempts++
+                }
+                connection.tryTelemetry?.(frame)
+              },
               frames: {
                 async *[Symbol.asyncIterator]() {
                   for await (const frame of connection.frames) {
@@ -364,6 +374,15 @@ async function withProviderThread(
                       const body = frame.envelope.body
                       if (body && typeof body === 'object' && 'type' in body && body.type === 'node.sync_result')
                         syncResults.push(body)
+                      if (
+                        body &&
+                        typeof body === 'object' &&
+                        'type' in body &&
+                        body.type === 'thread.report_result' &&
+                        'ok' in body &&
+                        body.ok === true
+                      )
+                        traceDiagnostics.reportAcks++
                     }
                     yield frame
                   }
@@ -379,6 +398,8 @@ async function withProviderThread(
             ...telemetryEnvironment(relay),
             BATON_TELEMETRY_NODE_ID: identity.node_id,
             OTEL_BSP_SCHEDULE_DELAY: '30',
+            OTEL_LOGS_EXPORTER: 'none',
+            OTEL_METRICS_EXPORTER: 'none',
           }),
         ),
       ),
@@ -438,6 +459,7 @@ async function withProviderThread(
       nodeId: identity.node_id,
       employeeId: identity.employee_id,
       syncResults,
+      traceDiagnostics,
       firstMessageId,
       threadPath,
       request,
@@ -512,7 +534,7 @@ test('exports one trace from HTTP through Worker and Pi agent-host', async () =>
   try {
     await withProviderThread(
       { ...cases[1]!, trace, telemetryEnv },
-      async ({ replies, threadId, nodeId, employeeId, syncResults }) => {
+      async ({ replies, threadId, nodeId, employeeId, syncResults, traceDiagnostics }) => {
         expect(syncResults).toContainEqual({ type: 'node.sync_result', ok: true, telemetry: { forward: true } })
         expect(JSON.stringify(syncResults)).not.toContain('local-test-key')
         await expect.poll(async () => (await replies()).length, { timeout: 15000 }).toBe(1)
@@ -588,11 +610,18 @@ test('exports one trace from HTTP through Worker and Pi agent-host', async () =>
             { timeout: 10000 },
           )
           .toBe(true)
-        await expect
-          .poll(() => spans.filter((span) => span.traceId === trace).map(({ service, name }) => ({ service, name })), {
-            timeout: 10000,
-          })
-          .toContainEqual({ service: 'batond', name: 'baton.report' })
+        try {
+          await expect
+            .poll(
+              () => spans.filter((span) => span.traceId === trace).map(({ service, name }) => ({ service, name })),
+              {
+                timeout: 10000,
+              },
+            )
+            .toContainEqual({ service: 'batond', name: 'baton.report' })
+        } catch (error) {
+          throw new Error(`Report trace diagnostics: ${JSON.stringify(traceDiagnostics)}`, { cause: error })
+        }
         const http = spans.find(
           (span) => span.service === 'baton-server' && span.name === 'baton.http.request' && span.traceId === trace,
         )!

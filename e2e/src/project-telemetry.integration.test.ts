@@ -145,6 +145,8 @@ test('exports the center placement and real Project Runtime model call in one tr
             ...telemetryEnvironment(relay),
             BATON_TELEMETRY_NODE_ID: identity.node_id,
             OTEL_BSP_SCHEDULE_DELAY: '30',
+            OTEL_LOGS_EXPORTER: 'none',
+            OTEL_METRICS_EXPORTER: 'none',
           }),
         ),
       ),
