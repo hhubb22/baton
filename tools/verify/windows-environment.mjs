@@ -10,11 +10,19 @@ const home = await mkdtemp(join(tmpdir(), 'baton-windows-diagnostic-'))
 const executable = join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
 const query = `$p = Get-CimInstance Win32_Process -Filter 'ProcessId = ${process.pid}'; if ($null -ne $p) { $p.CreationDate.ToUniversalTime().Ticks.ToString([Globalization.CultureInfo]::InvariantCulture) }`
 
-async function probe(profile, explicit = false) {
+async function probe(profile, explicit = false, systemPath = false, startupOnly = false, inherited = false) {
   const start = performance.now()
-  const source = `$ErrorActionPreference = 'Stop'; ${explicit ? "Import-Module (Join-Path $PSHOME 'Modules/CimCmdlets/CimCmdlets.psd1'); " : ''}${query}`
+  const source = `$ErrorActionPreference = 'Stop'; [Console]::Out.WriteLine('STARTED'); ${explicit ? "Import-Module (Join-Path $PSHOME 'Modules/CimCmdlets/CimCmdlets.psd1'); [Console]::Out.WriteLine('IMPORTED'); " : ''}${startupOnly ? '' : query}`
   const args = ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(source, 'utf16le').toString('base64')]
-  const child = spawn(executable, args, { env: { ...isolatedEnv(profile), LC_ALL: 'C', TZ: 'UTC' }, windowsHide: true })
+  const child = spawn(executable, args, {
+    env: {
+      ...(inherited ? process.env : isolatedEnv(profile)),
+      ...(systemPath ? { PATH: join(process.env.SystemRoot, 'System32') } : {}),
+      LC_ALL: 'C',
+      TZ: 'UTC',
+    },
+    windowsHide: true,
+  })
   let stdout = ''
   let stderr = ''
   child.stdout.on('data', (chunk) => {
@@ -39,7 +47,8 @@ async function probe(profile, explicit = false) {
     return {
       ...result,
       elapsedMs: Math.round(performance.now() - start),
-      identityValid: /^\d+$/.test(stdout.trim()),
+      identityValid: /^\d+$/m.test(stdout),
+      stages: ['STARTED', 'IMPORTED'].filter((stage) => stdout.includes(stage)),
       stderrCategories,
       stderr: stderr.replaceAll(home, '<temporary-home>').slice(0, 2000),
     }
@@ -49,13 +58,24 @@ async function probe(profile, explicit = false) {
 }
 
 try {
-  const profiles = ['auto', 'explicit', 'concurrent'].map((name) => join(home, name))
+  const profiles = ['auto', 'explicit', 'concurrent', 'startup', 'systempath'].map((name) => join(home, name))
   await Promise.all(profiles.map((profile) => mkdir(profile)))
   const cold = await probe(profiles[0])
   const warm = await probe(profiles[0])
   const explicit = await probe(profiles[1], true)
   const concurrent = await Promise.all(Array.from({ length: 4 }, () => probe(profiles[2])))
-  console.log(JSON.stringify({ emptyPath: true, temporaryHome: true, cold, warm, explicit, concurrent }, null, 2))
+  const [startup, systemPath] = await Promise.all([
+    probe(profiles[3], false, false, true),
+    probe(profiles[4], false, true),
+  ])
+  const inherited = await probe(home, false, false, false, true)
+  console.log(
+    JSON.stringify(
+      { emptyPath: true, temporaryHome: true, cold, warm, explicit, concurrent, startup, systemPath, inherited },
+      null,
+      2,
+    ),
+  )
   if ([cold, warm, explicit, ...concurrent].some((result) => result.exitCode !== 0 || !result.identityValid))
     process.exitCode = 1
 } finally {
