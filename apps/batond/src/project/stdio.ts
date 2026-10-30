@@ -13,6 +13,7 @@ export async function serveRuntime(
   output: Writable,
   request: (value: (typeof Frame.Type)['request']) => Promise<ProjectRuntimeResult>,
   signal: AbortSignal,
+  responded?: (value: (typeof Frame.Type)['request'], result: ProjectRuntimeResult) => void,
 ) {
   let pending = Buffer.alloc(0)
   const active = new Map<number, Promise<void>>()
@@ -39,6 +40,7 @@ export async function serveRuntime(
               const line = JSON.stringify({ id: frame.id, result })
               if (Buffer.byteLength(line) > MAX_FRAME) throw new Error('Runtime 响应超限')
               if (!output.write(line + '\n')) await once(output, 'drain', { signal })
+              responded?.(frame.request, result)
             })
             return writer
           })

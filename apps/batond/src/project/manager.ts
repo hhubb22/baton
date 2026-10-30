@@ -445,6 +445,14 @@ class Manager implements ProjectManager {
               return this.runtimeRequest(run, value)
             },
             run.cancel.signal,
+            (request, result) => {
+              if (result.ok && (request.operation === 'finish' || request.operation === 'report_failure')) {
+                // Allow the Runtime to close its telemetry exporter before reclaiming a stalled process.
+                const timer = setTimeout(() => this.stop(run), 5000)
+                timer.unref()
+                void run.owned?.exited.finally(() => clearTimeout(timer))
+              }
+            },
           )
           void stdio.then(
             () => this.stop(run),
@@ -594,12 +602,7 @@ class Manager implements ProjectManager {
           },
         })
       }
-      if (
-        result.code === 'lease_lost' ||
-        result.code === 'claim_lost' ||
-        result.code === 'node_idle_expired' ||
-        (result.ok && ['finish', 'report_failure'].includes(request.operation))
-      ) {
+      if (result.code === 'lease_lost' || result.code === 'claim_lost' || result.code === 'node_idle_expired') {
         const timer = setTimeout(() => this.stop(run), 100)
         timer.unref()
       }

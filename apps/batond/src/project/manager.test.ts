@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { rm, readFile } from 'node:fs/promises'
+import { rm, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
@@ -143,6 +143,52 @@ describe('Project Runtime host', () => {
     }),
   )
   describe('process ownership and cleanup', () => {
+    it.live(
+      'lets a finished Runtime receive its response and flush before exiting',
+      () =>
+        Effect.gen(function* () {
+          const { manager, dataDir, launchLog } = yield* open({}, 'finish-flush')
+          const c = command()
+          const requests: ProjectRuntimeRequest[] = []
+          manager.setTransport(transport(requests))
+          yield* Effect.promise(() => manager.command(c))
+          yield* until(() =>
+            readFile(`${launchLog}.response`).then(
+              () => true,
+              () => false,
+            ),
+          )
+          yield* Effect.sleep(300)
+          expect(row(dataDir, c.run_id)?.cleanup_complete).not.toBe(1)
+          yield* Effect.promise(() => writeFile(`${launchLog}.release`, 'release'))
+          yield* until(() => row(dataDir, c.run_id)?.cleanup_acked === 1)
+          expect(yield* Effect.promise(() => readFile(`${launchLog}.flushed`, 'utf8'))).toBe('complete')
+          expect(requests.filter((request) => request.operation === 'finish')).toHaveLength(1)
+        }),
+      30000,
+    )
+
+    it.live(
+      'reclaims a Runtime that remains alive after its finish response',
+      () =>
+        Effect.gen(function* () {
+          const { manager, dataDir, launchLog } = yield* open({}, 'finish-stalled')
+          const c = command()
+          const requests: ProjectRuntimeRequest[] = []
+          manager.setTransport(transport(requests))
+          yield* Effect.promise(() => manager.command(c))
+          yield* until(() =>
+            readFile(`${launchLog}.response`).then(
+              () => true,
+              () => false,
+            ),
+          )
+          yield* until(() => row(dataDir, c.run_id)?.cleanup_acked === 1, PROCESS_WAIT_MS + 5000)
+          expect(requests.filter((request) => request.operation === 'finish')).toHaveLength(1)
+        }),
+      30000,
+    )
+
     it.live('keeps one process across duplicate start and reconnect, then persists and retries cleanup receipts', () =>
       Effect.gen(function* () {
         const { manager, dataDir, launchLog, close } = yield* open()

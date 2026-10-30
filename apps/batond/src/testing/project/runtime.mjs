@@ -1,6 +1,6 @@
 import { createInterface } from 'node:readline'
 import { spawn } from 'node:child_process'
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, existsSync, writeFileSync } from 'node:fs'
 
 const [mode, command] = process.argv.slice(2)
 if (command === 'probe') {
@@ -45,7 +45,18 @@ if (command === 'probe') {
         pending.set(++id, resolve)
         process.stdout.write(JSON.stringify({ id, request }) + '\n')
       })
-    if (mode === 'exercise') {
+    if (mode === 'finish-flush' || mode === 'finish-stalled') {
+      await call({ operation: 'bootstrap', payload: { pid: process.pid, branch: branch.pid } })
+      await call({ operation: 'finish' })
+      writeFileSync(`${process.env.FIXTURE_LAUNCH_LOG}.response`, 'received')
+      if (mode === 'finish-flush') {
+        while (!existsSync(`${process.env.FIXTURE_LAUNCH_LOG}.release`))
+          await new Promise((resolve) => setTimeout(resolve, 10))
+        writeFileSync(`${process.env.FIXTURE_LAUNCH_LOG}.flushed`, 'complete')
+        process.exit()
+      }
+      setInterval(() => {}, 1000)
+    } else if (mode === 'exercise') {
       const denied = await call({ operation: 'renew' })
       const boot = await call({
         operation: 'bootstrap',
