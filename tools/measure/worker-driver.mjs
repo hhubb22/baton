@@ -335,7 +335,7 @@ async function main() {
         cleanup:
           process.platform === 'win32'
             ? {
-                mode: 'CIM identity check, taskkill /T /F, wait for exit and stale lock',
+                mode: 'process identity check, taskkill /T /F, wait for exit and stale lock',
                 watchdog: 'not provided by Windows Worker',
                 graceful: false,
               }

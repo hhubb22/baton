@@ -13,8 +13,7 @@ export function isolatedEnv(home) {
     if (process.env[key]) env[key] = process.env[key]
   }
   if (process.platform === 'win32') {
-    // 真实会话都有系统目录变量；缺少它们和可写的 AppData 时，PowerShell 每次启动都重建模块缓存，
-    // CIM 查询会超过 15 秒。AppData 指向临时 HOME，仍不读取个人配置。
+    // 保留系统目录变量，AppData 指向临时 HOME，不读取个人配置。
     for (const key of ['SystemDrive', 'ProgramFiles', 'ProgramFiles(x86)', 'ProgramW6432', 'ProgramData']) {
       if (process.env[key]) env[key] = process.env[key]
     }
