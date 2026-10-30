@@ -151,6 +151,7 @@ node apps/batond/dist/batond.cjs project-runtime connection-key <连接 ID> < ke
 | `BATON_DB_SCHEMA` | 中心 | 数据库 schema，默认 `public`；自定义 schema 须先创建，名称以小写字母开头，只含小写字母、数字、下划线，最长 63 字符 |
 | `BATON_HTTP_ADDR` | 中心 | HTTP/WebSocket 监听地址，默认 `127.0.0.1:8080` |
 | `BATON_ALLOWED_ORIGINS` | 中心 | 逗号分隔的允许 HTTPS Origin，`serve` 必填 |
+| `BATON_TRUSTED_PROXY_CIDRS` | 中心 | 可信反向代理的 CIDR 列表，以逗号分隔；默认不信任转发地址 |
 | `BATON_NODE_SIGNING_KEY` | 中心 | Ed25519 私钥路径，默认工作目录下的 `node-signing.key` |
 | `BATON_TLS_CERT_FILE` / `BATON_TLS_KEY_FILE` | 中心 | 直接提供 HTTPS/WSS 时的证书与私钥 |
 | `BATON_WEB_DIR` | 中心 | 网页目录，默认 bundle 旁的 `web/` |

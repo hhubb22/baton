@@ -10,6 +10,7 @@ import { withTraceSpan } from '@baton/telemetry'
 import * as threads from './index.ts'
 import { digest, sessionCSRF } from '../auth.ts'
 import { httpApplication } from '../http/index.ts'
+import { LoginProtection } from '../http/login-protection.ts'
 import { CredentialSigner } from '../nodes.ts'
 
 type Run = TestDatabase['run']
@@ -247,6 +248,8 @@ it('returns persisted stop codes over HTTP and clears them after resume', () =>
     try {
       const application = await runtime.runPromise(
         httpApplication({
+          loginProtection: new LoginProtection(),
+          trustedProxies: [],
           allowedOrigins: ['https://baton.local'],
           signer: CredentialSigner.generate(),
           gateway: () => {

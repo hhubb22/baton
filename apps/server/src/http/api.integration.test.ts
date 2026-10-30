@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, it } from 'vite-plus/test'
+import { afterAll, beforeAll, beforeEach, expect, it } from 'vite-plus/test'
 import { Cause, Effect, Exit, Scope, Schema } from 'effect'
 import * as ServerRequest from 'effect/http/HttpServerRequest'
 import * as P from '@baton/protocol'
@@ -13,6 +13,7 @@ import { gzipSync } from 'node:zlib'
 import { DownloadsResponse } from '@baton/protocol/http-api'
 import { downloadArchive, writeChecksum } from '../testing/downloads.ts'
 import { httpApplication, httpRouteTemplate } from './index.ts'
+import { LoginProtection } from './login-protection.ts'
 import * as Auth from '../auth.ts'
 import * as Nodes from '../nodes.ts'
 import { openTestDatabase, type TestDatabase } from '../testing/database.ts'
@@ -29,6 +30,7 @@ let nodeId = ''
 const notifications: Array<{ employeeId: string; event: P.BrowserEvent }> = []
 const forwarded: Array<{ signal: string; employeeId: string; payload: unknown }> = []
 let application: Effect.Success<ReturnType<typeof httpApplication>>
+let loginProtection = new LoginProtection()
 let heldStarted: (() => void) | undefined
 const origin = 'https://baton.local'
 const password = 'http-initial-password-123'
@@ -143,6 +145,10 @@ beforeAll(async () => {
   }
   application = await database.runtime.runPromise(
     httpApplication({
+      get loginProtection() {
+        return loginProtection
+      },
+      trustedProxies: [],
       allowedOrigins: [origin],
       signer,
       gateway: () => gateway,
@@ -154,6 +160,10 @@ beforeAll(async () => {
   const context = await database.runtime.runPromise(Effect.context<SqlClient.SqlClient>())
   handle = HttpEffect.toWebHandler(application.pipe(Effect.provideContext(context)))
 }, 30000)
+
+beforeEach(() => {
+  loginProtection = new LoginProtection()
+})
 
 afterAll(async () => {
   if (scope) await Effect.runPromise(Scope.close(scope, Exit.void))

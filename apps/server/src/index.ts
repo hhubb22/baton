@@ -24,7 +24,7 @@ const usage = `Baton Coordinator（TypeScript 开发入口）
   admin employee reset-password --username <用户名>
 
 配置：BATON_DATABASE_URL、BATON_DB_SCHEMA、BATON_HTTP_ADDR、BATON_ALLOWED_ORIGINS、
-BATON_NODE_SIGNING_KEY、BATON_TLS_CERT_FILE、BATON_TLS_KEY_FILE。
+BATON_NODE_SIGNING_KEY、BATON_TLS_CERT_FILE、BATON_TLS_KEY_FILE、BATON_TRUSTED_PROXY_CIDRS。
 网页目录由 BATON_WEB_DIR 指定，默认使用 bundle 旁的 web 目录。
 安装包：BATON_DOWNLOADS_DIR、BATON_PUBLIC_CA_FILE、BATON_DOWNLOADS_CACHE。
 控制预算：BATON_CONTROL_<操作>_QUEUE_TIMEOUT、BATON_CONTROL_<操作>_EXECUTION_TIMEOUT。
@@ -126,6 +126,7 @@ async function main() {
           host: address.hostname.replace(/^\[|\]$/g, ''),
           port: Number(address.port || 80),
           allowedOrigins: origins,
+          trustedProxyCidrs: process.env.BATON_TRUSTED_PROXY_CIDRS ?? '',
           signer,
           heartbeatMs,
           offlineMs,

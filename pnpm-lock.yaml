@@ -433,6 +433,9 @@ importers:
       micromark-extension-gfm:
         specifier: 3.0.0
         version: 3.0.0
+      rate-limiter-flexible:
+        specifier: 11.2.3
+        version: 11.2.3
       ws:
         specifier: 8.22.0
         version: 8.22.0
@@ -4597,6 +4600,9 @@ packages:
   quick-lru@5.1.1:
     resolution: {integrity: sha512-WuyALRjWPDGtt/wzJiadO5AXY+8hZ80hVpe6MyivgraREW751X3SbhRvG3eLKOYN+8VEvqLcf3wdnt44Z4S4SA==}
     engines: {node: '>=10'}
+
+  rate-limiter-flexible@11.2.3:
+    resolution: {integrity: sha512-w4HX4toAsEbu1VksOauZwI9d6URb6/4WqJJ5Hg1bESihMt2KJfQ2iTwvDkhIg+y2HetLh65DGu/8xIkUz/xNPA==}
 
   react-dom@19.3.1:
     resolution: {integrity: sha512-Y0bARz53lhEC1NMCASs0/j+faB/zqt3R8hpvg1e8+61ZVJ4UL0UdC4cBbXfZMcIuhrfgeILTLe+ZeBCavQPtKQ==}
@@ -9332,6 +9338,8 @@ snapshots:
   pvutils@1.2.0: {}
 
   quick-lru@5.1.1: {}
+
+  rate-limiter-flexible@11.2.3: {}
 
   react-dom@19.3.1(react@19.3.1):
     dependencies:

@@ -1,4 +1,4 @@
-import { Effect, Layer } from 'effect'
+import { Cause, Effect, Exit, Layer } from 'effect'
 import { HttpApiBuilder, HttpApiSchema } from 'effect/http-api'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
@@ -58,7 +58,18 @@ export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
         .handle('login', ({ payload }) =>
           httpBusiness(
             Effect.gen(function* () {
-              const result = yield* Auth.login(payload.username, payload.password, options.sessionTTLSeconds)
+              const services = yield* Effect.context<SqlClient.SqlClient>()
+              const result = yield* Effect.tryPromise({
+                try: () =>
+                  options.loginProtection.run(async () => {
+                    const exit = await Effect.runPromiseExitWith(services)(
+                      Auth.login(payload.username, payload.password, options.sessionTTLSeconds),
+                    )
+                    if (Exit.isSuccess(exit)) return exit.value
+                    throw Cause.squash(exit.cause)
+                  }),
+                catch: (error) => (error instanceof AppError ? error : new AppError(503, 'unavailable')),
+              })
               return HttpApiSchema.withHeaders({
                 body: { employee: result.employee, csrf_token: result.csrf_token, expires_at: result.expires_at },
                 headers: { 'set-cookie': Auth.sessionCookie(result.token, result.expires_at) },

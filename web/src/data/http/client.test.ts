@@ -503,6 +503,14 @@ describe('HTTP account and devices', () => {
     expect(fetch).toHaveBeenCalledTimes(1)
   })
 
+  it('does not retry a login even when the server rejects CSRF', async () => {
+    const fetch = fetcher().mockResolvedValue(response({ code: 'csrf_rejected' }, 403))
+    await expect(createHttpClient({ fetch, WebSocket: null }).signIn('alice', 'password')).rejects.toBeInstanceOf(
+      HttpError,
+    )
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps initial-password sessions out of device requests', async () => {
     const fetch = fetcher().mockResolvedValueOnce(
       response({ employee: { ...employee, must_change_password: true }, csrf_token: 'initial' }),

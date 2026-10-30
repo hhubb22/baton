@@ -423,6 +423,7 @@ export function useSignIn() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ username, password }: { username: string; password: string }) => client.signIn(username, password),
+    retry: false,
     onSuccess: (session) => {
       queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== 'session' })
       queryClient.setQueryData(keys.session, session)

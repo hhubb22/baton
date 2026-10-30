@@ -85,7 +85,7 @@ export function createTransport(options: TransportOptions = {}) {
     const payload = response.status === 204 ? null : ((await response.json().catch(() => null)) as ErrorPayload | null)
     if (!response.ok) {
       recordFailure(path, response.headers.get('traceresponse'), payload?.code)
-      if (response.status === 403 && payload?.code === 'csrf_rejected' && retry) {
+      if (response.status === 403 && payload?.code === 'csrf_rejected' && retry && path !== '/login') {
         csrf = null
         await request('/me')
         return request<T>(path, init, false)

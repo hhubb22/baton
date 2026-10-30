@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { AuthShell } from '../app/AuthShell'
 import type { LoginNotice } from '../app/router'
 import { ClientError } from '../data/client'
+import { HttpError } from '../data/http/transport'
 import { useSession, useSignIn } from '../data/queries'
 import { text } from '../theme/text'
 import { colors, space } from '../theme/tokens.stylex'
@@ -30,7 +31,7 @@ const styles = stylex.create({
   note: { alignSelf: 'stretch' },
 })
 
-type Notice = LoginNotice | 'unavailable'
+type Notice = LoginNotice | 'unavailable' | 'rateLimited' | 'loginBusy'
 
 const notices: Record<Notice, { title: string; detail: string }> = {
   signedOut: { title: '已退出登录', detail: '' },
@@ -38,6 +39,8 @@ const notices: Record<Notice, { title: string; detail: string }> = {
   passwordReset: { title: '管理员已重置密码', detail: '其他会话已退出。' },
   passwordUpdated: { title: '密码已更新', detail: '使用新密码重新登录。' },
   unavailable: { title: '无法连接 Baton', detail: '' },
+  rateLimited: { title: '登录尝试过于频繁', detail: '请稍后再试。' },
+  loginBusy: { title: '暂时无法登录', detail: '请稍后再试。' },
 }
 
 function unavailable(error: Error | null) {
@@ -65,8 +68,16 @@ export function LoginPage() {
   if (signedIn && mustChangePassword) return <Navigate to="/password" search={{ redirect: search.redirect }} replace />
   if (signedIn) return null
 
-  const unreachable = unavailable(signIn.error) || (signIn.isIdle && unavailable(session.error))
-  const notice: Notice | undefined = unreachable ? 'unavailable' : search.notice
+  const rateLimited = signIn.error instanceof HttpError && signIn.error.status === 429
+  const loginBusy = signIn.error instanceof HttpError && signIn.error.status === 503
+  const unreachable = (!loginBusy && unavailable(signIn.error)) || (signIn.isIdle && unavailable(session.error))
+  const notice: Notice | undefined = rateLimited
+    ? 'rateLimited'
+    : loginBusy
+      ? 'loginBusy'
+      : unreachable
+        ? 'unavailable'
+        : search.notice
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
@@ -77,7 +88,8 @@ export function LoginPage() {
       {
         onError: (error) => {
           // 连不上 Baton 时表单原样保留；账号或口令错误时保留用户名，清空口令重新输入。
-          if (unavailable(error)) return
+          if (unavailable(error) || (error instanceof HttpError && (error.status === 429 || error.status === 503)))
+            return
           setInvalid(true)
           setPassword('')
           passwordRef.current?.focus()
@@ -97,7 +109,10 @@ export function LoginPage() {
         <h1 {...stylex.props(text.title)}>登录 Baton</h1>
       </div>
       {notice && (
-        <div role={notice === 'unavailable' ? 'alert' : 'status'} {...stylex.props(styles.notice)}>
+        <div
+          role={notice === 'unavailable' || notice === 'rateLimited' || notice === 'loginBusy' ? 'alert' : 'status'}
+          {...stylex.props(styles.notice)}
+        >
           <span {...stylex.props(text.label)}>{notices[notice].title}</span>
           {notices[notice].detail && <span {...stylex.props(text.caption, text.muted)}>{notices[notice].detail}</span>}
         </div>

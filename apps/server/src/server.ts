@@ -2,7 +2,8 @@ import { createServer as createHTTPServer } from 'node:http'
 import { createServer as createHTTPSServer, type ServerOptions as TLSOptions } from 'node:https'
 import type { AddressInfo } from 'node:net'
 import { randomUUID } from 'node:crypto'
-import { Cause, Effect, Exit, Semaphore, Schema, Tracer } from 'effect'
+import { Cause, Effect, Exit, Metric, Semaphore, Schema, Tracer } from 'effect'
+import * as Request from 'effect/http/HttpServerRequest'
 import type * as Scope from 'effect/Scope'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { NodeHttpServer } from '@effect/platform-node'
@@ -25,6 +26,8 @@ import {
 import type { DownloadsOptions } from './downloads.ts'
 import { createRevocationCompensator } from './control-maintenance.ts'
 import { cookieToken, httpApplication } from './http/index.ts'
+import { isLoginRequest, LoginProtection } from './http/login-protection.ts'
+import { parseTrustedProxies } from './http/login-ip.ts'
 import { notifyThreadChanged } from './notifications.ts'
 import { claimNotificationBroadcasts } from './desktop-notifications.ts'
 import { makeMemoryWaitObserver, makeProjectWaitObserver, serverMetricsLoop } from './telemetry.ts'
@@ -36,6 +39,7 @@ export interface ServerOptions {
   readonly host?: string
   readonly port?: number
   readonly allowedOrigins: ReadonlyArray<string>
+  readonly trustedProxyCidrs?: string
   readonly signer: Nodes.CredentialSigner
   readonly sessionTTLSeconds?: number
   readonly enrollmentTTLSeconds?: number
@@ -61,6 +65,21 @@ export const startServer = (
 ): Effect.Effect<RunningServer, unknown, SqlClient.SqlClient | Scope.Scope> =>
   Effect.gen(function* () {
     const services = yield* Effect.context<SqlClient.SqlClient>()
+    const metrics = yield* Metric.MetricRegistry
+    const loginActive = Metric.gauge('baton.login.active')
+    const loginRejected = {
+      global: Metric.counter('baton.login.rejected.global'),
+      ip: Metric.counter('baton.login.rejected.ip'),
+      account: Metric.counter('baton.login.rejected.account'),
+      busy: Metric.counter('baton.login.rejected.busy'),
+    }
+    const loginProtection = new LoginProtection((event, value) => {
+      Effect.runSync(
+        (event === 'active' ? Metric.update(loginActive, value) : Metric.update(loginRejected[event], value)).pipe(
+          Effect.provideService(Metric.MetricRegistry, metrics),
+        ),
+      )
+    })
     const scope = yield* Effect.scope
     const tracer = yield* Tracer.Tracer
     const telemetryEnv = options.telemetryEnv ?? process.env
@@ -297,6 +316,8 @@ export const startServer = (
     )
     const application = yield* httpApplication({
       ...options,
+      loginProtection,
+      trustedProxies: parseTrustedProxies(options.trustedProxyCidrs ?? ''),
       gateway: () => gateway,
       forwardTelemetry: (signal, input, employeeId) => {
         if (!forwardTelemetry.available()) return
@@ -309,7 +330,10 @@ export const startServer = (
       },
     })
     const handler = yield* NodeHttpServer.makeHandler(
-      application.pipe((self) => httpGate.withPermit(self)),
+      Effect.gen(function* () {
+        const request = yield* Request.HttpServerRequest
+        return yield* isLoginRequest(request.method, request.url) ? application : httpGate.withPermit(application)
+      }),
       { scope },
     )
     http.on('request', handler)

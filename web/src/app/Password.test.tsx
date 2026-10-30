@@ -19,7 +19,7 @@ function setup(path = '/threads', authenticated = false, options: { mustChange?:
   let signedIn = authenticated
   let mustChange = options.mustChange ?? true
   let password = 'initial-password'
-  let failure: 'offline' | 'wrongPassword' | null = null
+  let failure: 'offline' | 'wrongPassword' | 'rateLimited' | 'loginBusy' | null = null
   const requests: { path: string; method: string; body: Record<string, string> }[] = []
   const fetcher = vi.fn<typeof fetch>(async (input, init) => {
     const path = requestURL(input).replace('/api/v1', '')
@@ -37,6 +37,8 @@ function setup(path = '/threads', authenticated = false, options: { mustChange?:
       return new Response(null, { status: 204 })
     }
     if (path === '/login') {
+      if (failure === 'rateLimited') return Response.json({ code: 'login_rate_limited' }, { status: 429 })
+      if (failure === 'loginBusy') return Response.json({ code: 'login_busy' }, { status: 503 })
       if (body.password !== password) return Response.json({ code: 'invalid_credentials' }, { status: 401 })
       signedIn = true
       return Response.json({})
@@ -80,6 +82,21 @@ async function fillPassword(user: ReturnType<typeof userEvent.setup>, password: 
 }
 
 beforeEach(() => localStorage.clear())
+
+it.each([
+  ['rateLimited', '登录尝试过于频繁'],
+  ['loginBusy', '暂时无法登录'],
+] as const)('shows %s without retrying or clearing the password', async (failure, title) => {
+  const user = userEvent.setup()
+  const { fail, requests } = setup('/login')
+  fail(failure)
+  await user.type(await screen.findByLabelText('用户名'), 'kaken')
+  await user.type(screen.getByLabelText('密码'), 'initial-password')
+  await user.click(screen.getByRole('button', { name: '登录' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent(title)
+  expect(screen.getByLabelText('密码')).toHaveValue('initial-password')
+  expect(requests.filter((request) => request.path === '/login')).toHaveLength(1)
+})
 
 describe('password change', () => {
   it('requires an initial HTTP login to change password, sign in again, and return to the original URL', async () => {

@@ -1,6 +1,6 @@
 import { readFile, realpath } from 'node:fs/promises'
 import { resolve, relative, extname, isAbsolute, sep } from 'node:path'
-import { Cause, Effect, Exit, Layer, Stream } from 'effect'
+import { Cause, Effect, Exit, Layer, Option, Stream } from 'effect'
 import { NodeHttpPlatform } from '@effect/platform-node'
 import { HttpRouter, HttpServer } from 'effect/http'
 import * as Incoming from 'effect/http/HttpIncomingMessage'
@@ -23,6 +23,9 @@ import { httpHandlers } from './handlers.ts'
 import { authorizeBrowser, checkOrigin, HttpRequestId, httpFailure, httpSecurity, newRequestId } from './security.ts'
 import { telemetryForwardEnabled } from '../telemetry-forward-client.ts'
 import { decodeReplayProtobuf } from '@baton/telemetry/protobuf'
+import { isLoginRequest, LoginRateError } from './login-protection.ts'
+import { loginClientIp } from './login-ip.ts'
+import { LoginInput } from '@baton/protocol'
 export { cookieToken } from './security.ts'
 
 const json = (value: unknown, status = 200) =>
@@ -171,6 +174,34 @@ export const httpApplication = (options: HTTPOptions) =>
       const path = new URL(request.url, 'http://localhost').pathname
       const requestId = newRequestId()
       const operation = Effect.gen(function* () {
+        if (isLoginRequest(request.method, request.url)) {
+          const ip =
+            loginClientIp(
+              Option.getOrUndefined(request.peerAddress),
+              request.headers['x-forwarded-for'],
+              options.trustedProxies,
+            ) ?? 'unknown'
+          yield* Effect.tryPromise({ try: () => options.loginProtection.checkIP(ip), catch: (error) => error })
+          yield* checkOrigin(options)
+          if (!/^application\/json(?:;|$)/i.test(request.headers['content-type'] ?? ''))
+            return yield* Effect.fail(new AppError(415, 'json_required'))
+          const text = yield* request.text.pipe(
+            Effect.provideService(Incoming.MaxBodySize, ByteSize.kibibytes(8)),
+            Effect.mapError(() => new AppError(413, 'payload_too_large')),
+          )
+          if (Buffer.byteLength(text, 'utf8') > 8192) return yield* Effect.fail(new AppError(413, 'payload_too_large'))
+          const body = yield* Effect.try({
+            try: () => JSON.parse(text) as unknown,
+            catch: () => new AppError(400, 'invalid_json'),
+          })
+          const payload = yield* Schema.decodeUnknownEffect(LoginInput)(body).pipe(
+            Effect.mapError(() => new AppError(400, 'invalid_request', '请求格式无效')),
+          )
+          yield* Effect.tryPromise({
+            try: () => options.loginProtection.checkAccount(payload.username),
+            catch: (error) => error,
+          })
+        }
         if (path.startsWith('/downloads/')) {
           if (request.method !== 'GET' || !downloads) return yield* notFound()
           const asset = yield* Effect.tryPromise({
@@ -294,8 +325,14 @@ export const httpApplication = (options: HTTPOptions) =>
       ).pipe(
         Effect.catchCause((cause) => {
           if (Cause.hasInterrupts(cause)) return Effect.failCause(cause)
-          const { status, ...body } = httpFailure(Cause.squash(cause), requestId)
-          return Effect.succeed(json(body, status))
+          const error = Cause.squash(cause)
+          const { status, ...body } = httpFailure(error, requestId)
+          const response = json(body, status)
+          return Effect.succeed(
+            error instanceof LoginRateError
+              ? Response.setHeader(response, 'retry-after', String(error.retryAfter))
+              : response,
+          )
         }),
         Effect.map((response) =>
           responseTrace ? Response.setHeader(response, 'traceresponse', responseTrace) : response,
