@@ -1,4 +1,5 @@
 import { Schema } from 'effect'
+import { RuntimeMode } from '@t3tools/contracts'
 import { ReleaseMetadata } from './release.ts'
 import { TraceContext } from './trace.ts'
 import { ThinkingSelection } from './device.ts'
@@ -73,6 +74,7 @@ export const WorkerOpenConfig = Schema.Struct({
   node_id: UUID,
   storage_generation: StorageGeneration,
   agent_type: AgentType,
+  runtime_mode: RuntimeMode,
   model: Schema.optionalKey(summary(512)),
   working_directory: boundedText(4096).check(Schema.isMinLength(1)),
   execution_timeout_seconds: ExecutionTimeoutSeconds,
@@ -129,6 +131,7 @@ export const WorkerIPCMessage = Schema.Struct({
   thread_id: Schema.optionalKey(UUID),
   storage_generation: Schema.optionalKey(StorageGeneration),
   worker_ready: Schema.optionalKey(Schema.Boolean),
+  runtime_mode: Schema.optionalKey(RuntimeMode),
   agent_ready: Schema.optionalKey(Schema.Boolean),
   receipt: Schema.optionalKey(WorkerCommandReceipt),
   command_status: Schema.optionalKey(WorkerCommandStatus),

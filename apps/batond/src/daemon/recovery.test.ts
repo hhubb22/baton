@@ -37,6 +37,7 @@ async function fixture() {
     node_id: randomUUID(),
     storage_generation: randomUUID(),
     agent_type: 'cursor',
+    runtime_mode: 'full-access',
     working_directory: path,
     execution_timeout_seconds: 60,
     adapter_config: {},
@@ -93,6 +94,30 @@ const unreachableHost = () =>
       throw new Error('IPC unavailable')
     }),
   }) satisfies DaemonWorkerHost
+
+it('reports runtime mode conflicts without marking the Worker history lost', async () => {
+  const f = await fixture()
+  await withLedger(f.path, async (ledger) => {
+    await run(ledger.prepare(f.prepared))
+    await workerLedger(f.paths.ledger, { ...f.saved.config, runtime_mode: 'approval-required' })
+    const host: DaemonWorkerHost = {
+      ensureWorker: vi.fn(async () => {}),
+      request: vi.fn(async (): Promise<WorkerIPCMessage> => ({
+        type: 'result',
+        ok: true,
+        worker_ready: true,
+        session_id: f.saved.threadId,
+        storage_generation: f.saved.config.storage_generation,
+        runtime_mode: 'approval-required',
+      })),
+    }
+    const live = makeWorkerRecovery({ dataDirectory: f.path, ledger, host })
+    expect(await live.ensure(f.saved.threadId)).toBe('runtime_mode_conflict')
+    const offline = makeWorkerRecovery({ dataDirectory: f.path, ledger, host: unreachableHost() })
+    expect(await offline.ensure(f.saved.threadId)).toBe('runtime_mode_conflict')
+    expect((await run(ledger.worker(f.saved.threadId)))?.history_unavailable).not.toBe(true)
+  })
+})
 
 it('restarts an acknowledged Worker from its existing SQLite ledger and obtains the interrupted Turn end without opening a new native session', async () => {
   const f = await fixture(),
@@ -494,6 +519,7 @@ it('accepts authenticated Worker status before consulting an unavailable ledger'
           worker_ready: true,
           session_id: f.saved.threadId,
           storage_generation: f.saved.config.storage_generation,
+          runtime_mode: f.saved.config.runtime_mode,
         }
       },
     }
@@ -565,6 +591,7 @@ it('retries a failed restart with an intact ledger and reconnects to a surviving
           worker_ready: true,
           session_id: f.saved.threadId,
           storage_generation: f.saved.config.storage_generation,
+          runtime_mode: f.saved.config.runtime_mode,
         }
       }),
     } satisfies DaemonWorkerHost

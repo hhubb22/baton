@@ -32,15 +32,6 @@ const settingsFor = () =>
     homePath: process.env.CODEX_HOME?.trim() || '',
   })
 
-const runtimePolicy = (cwd: string): ProviderAdapter.ProviderAdapterV2RuntimePolicy => ({
-  // The mode selects the user reviewer. Approval and sandbox are explicit.
-  runtimeMode: 'approval-required',
-  interactionMode: 'default',
-  cwd,
-  approvalPolicy: 'never',
-  sandboxPolicy: { type: 'workspaceWrite', networkAccess: false, writableRoots: [] },
-})
-
 const modelSelection = (config: WorkerOpenConfig): ModelSelection =>
   Schema.decodeSync(ModelSelectionSchema)({
     instanceId: CODEX_DEFAULT_INSTANCE_ID,
@@ -143,9 +134,7 @@ export const codexHostDriver = (input: {
         adapter,
         steer: true,
         snapshotMessages,
-        runtimeMode: 'approval-required',
         interactionMode: 'default',
-        runtimePolicy,
         model: modelSelection,
         probe,
         ...(input.sessionTitle ? { sessionTitle: input.sessionTitle } : {}),

@@ -2,7 +2,17 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Cause, Effect, Schema } from 'effect'
-import { DEFAULT_MODEL } from '@t3tools/contracts'
+import {
+  DEFAULT_MODEL,
+  DEFAULT_RUNTIME_MODE,
+  ModelSelection,
+  ProviderInstanceId,
+  RuntimeMode,
+  ThreadId,
+} from '@t3tools/contracts'
+import { makeCursorAgentOptions } from '@t3tools/provider-cursor/server'
+import { buildInitialPiProviderSnapshot } from '@t3tools/provider-pi/server/status'
+import { PiSettings } from '@t3tools/provider-pi/settings'
 import type { RuntimeAgent } from '@baton/protocol'
 import type { ProbeResult } from '../agent-host/protocol.ts'
 import { connectAgentHost, type AgentHostProcessOptions } from '../agent-host/transport.ts'
@@ -42,17 +52,41 @@ function hostedAgentReport(agentType: HostedAgentType, result: ProbeResult): Run
     const thinking = result.model_thinking?.find((entry) => entry.model === id)?.thinking
     return { id, name: id, ...(thinking ? { thinking } : {}) }
   })
+  const modes =
+    result.supported_runtime_modes ??
+    (agentType === 'pi'
+      ? (Effect.runSync(buildInitialPiProviderSnapshot(Schema.decodeUnknownSync(PiSettings)({ enabled: true })))
+          .supportedRuntimeModes ?? [])
+      : RuntimeMode.literals)
+  const runtime_modes = modes.map((id) => {
+    const needsSandbox =
+      agentType === 'cursor' &&
+      makeCursorAgentOptions({
+        modelSelection: Schema.decodeUnknownSync(ModelSelection)({
+          instanceId: ProviderInstanceId.make('cursor'),
+          model: 'default',
+        }),
+        runtimePolicy: { runtimeMode: id, interactionMode: 'default', cwd: null },
+        threadId: ThreadId.make('probe'),
+        mcpSession: undefined,
+        platform: probeInternals.platform(),
+      }).local?.sandboxOptions?.enabled === true
+    const available = !needsSandbox || result.details.sandboxHelper !== false
+    return { id, available, ...(!available ? { reason: 'Cursor 原生 sandbox 不可用' } : {}) }
+  })
   const base: RuntimeAgent = {
     agent_type: agentType,
     version,
     status: 'unverified',
     models,
     default_model: '',
+    runtime_modes,
+    default_runtime_mode: DEFAULT_RUNTIME_MODE,
     capabilities: narrowed,
   }
   if (result.details.installed === false || result.authenticated === 'missing')
     return { ...base, status: 'unavailable', reason: result.reason ?? missingReason }
-  if (agentType === 'cursor' && (result.details.integrity === false || result.details.sandboxHelper === false))
+  if (agentType === 'cursor' && result.details.integrity === false)
     return { ...base, status: 'unavailable', reason: result.reason ?? 'Cursor SDK 安装或本机 sandbox 不可用' }
   const reason = [
     result.reason,
@@ -190,7 +224,10 @@ const probeAgent = Effect.fn('Agents.probeAgent')(function* (agentType: HostedAg
     try {
       const installed = probeInternals.inspectCursorSdk()
       version = installed.version
-      if (installed.missingAssets.length || installed.version !== installed.platformVersion)
+      if (
+        installed.missingAssets.some((path) => path !== installed.sandboxHelper) ||
+        installed.version !== installed.platformVersion
+      )
         return hostedAgentReport(agentType, {
           authenticated: 'unknown',
           models: [],

@@ -122,7 +122,7 @@ it('reissues once after lost responses and keeps the original device, default an
   await run(Nodes.setDefaultDevice(employee.id, identity.node_id))
   await run(
     query(
-      "INSERT INTO threads(id,employee_id,node_id,client_thread_id,request_hash,agent_type,working_directory,created_by) VALUES($1::uuid,$2,$3,$1::text,$4,'cursor','/work','employee')",
+      "INSERT INTO threads(id,employee_id,node_id,client_thread_id,request_hash,agent_type,runtime_mode,working_directory,created_by) VALUES($1::uuid,$2,$3,$1::text,$4,'cursor','full-access','/work','employee')",
       [threadId, employee.id, identity.node_id, Buffer.alloc(32)],
     ),
   )

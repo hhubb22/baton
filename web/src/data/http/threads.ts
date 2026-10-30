@@ -30,6 +30,7 @@ type ThreadDTO = {
   origin_conversation_id?: string
   origin_tool_call_id?: string
   model: string
+  runtime_mode?: import('@baton/protocol').RuntimeMode
   execution_timeout_seconds: number
   next_model?: string
   next_thinking?: import('@baton/protocol').ThinkingSelection | null
@@ -245,6 +246,7 @@ function mapThread(t: ThreadDTO, events: EventDTO[]): Thread {
     agent: t.agent_type === 'shell' ? null : t.agent_type,
     model: t.next_model || t.model,
     thinking: t.next_thinking ?? null,
+    runtimeMode: t.runtime_mode,
     executionTimeoutSeconds: t.execution_timeout_seconds,
     projectId: t.project_id || null,
     status: statuses[t.status] ?? 'unknown',
@@ -693,6 +695,7 @@ export function createThreadAPI(
           node_id: input.deviceId,
           agent_type: input.agent,
           model: input.model,
+          runtime_mode: input.runtimeMode,
           execution_timeout_seconds: input.executionTimeoutSeconds,
           working_directory: input.folder,
           message: {

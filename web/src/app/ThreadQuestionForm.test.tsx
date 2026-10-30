@@ -5,6 +5,27 @@ import type { ThreadQuestion } from '../data/types'
 import { ThreadQuestionForm } from './ThreadQuestionForm'
 import { ThreadQuestionAnswerStatus } from './ThreadQuestionAnswerStatus'
 
+it('shows approval choices and submits the selected provider decision', async () => {
+  const user = userEvent.setup()
+  const answer = vi.fn().mockResolvedValue(undefined)
+  render(
+    <ThreadQuestionForm
+      question={{
+        request_id: 'approval-1',
+        kind: 'approval',
+        questions: [],
+        reason: '运行命令需要批准',
+        options: [{ decision: 'acceptForSession', label: '本次会话允许', warning: '适用于后续操作' }],
+      }}
+      onAnswer={answer}
+    />,
+  )
+  expect(screen.getByText('运行命令需要批准')).toBeInTheDocument()
+  expect(screen.getByText('适用于后续操作')).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: '本次会话允许' }))
+  expect(answer).toHaveBeenCalledWith({ request_id: 'approval-1', decision: 'acceptForSession' })
+})
+
 const question: ThreadQuestion = {
   request_id: 'targets',
   kind: 'user_input',

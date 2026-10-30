@@ -150,6 +150,7 @@ it('syncing 补报持久结果后重发 completed，收到完成回执才落盘�
     node_id: id.node_id,
     storage_generation: randomUUID(),
     agent_type: 'cursor',
+    runtime_mode: 'full-access',
     working_directory: path,
     execution_timeout_seconds: 60,
     adapter_config: {},

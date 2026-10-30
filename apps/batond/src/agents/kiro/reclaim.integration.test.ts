@@ -98,6 +98,7 @@ describe.skipIf(process.platform === 'win32')('Kiro ACP local process reclamatio
         node_id: randomUUID(),
         storage_generation: randomUUID(),
         agent_type: 'kiro',
+        runtime_mode: 'full-access',
         working_directory: directory,
         execution_timeout_seconds: 30,
         adapter_config: { state_path: join(directory, 'native.json') },

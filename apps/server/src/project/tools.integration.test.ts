@@ -129,6 +129,7 @@ it('executes Project tools, bounds read results, rejects unknown arguments and p
     const created = await call('threads.create', {
       node_id: nodeId,
       agent_type: 'cursor',
+      runtime_mode: 'approval-required',
       working_directory: '/work/repo',
       message: 'Do work',
       execution_timeout_seconds: 42,
@@ -138,6 +139,7 @@ it('executes Project tools, bounds read results, rejects unknown arguments and p
     expect(unpack(await call('threads.get', { thread_id: id }))).toMatchObject({
       project_id: c.projectId,
       created_by: 'project_agent',
+      runtime_mode: 'approval-required',
       execution_timeout_seconds: 42,
       pending_messages: [{ sender: 'project_agent' }],
     })

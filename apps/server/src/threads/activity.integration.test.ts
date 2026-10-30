@@ -34,6 +34,8 @@ async function fixture(run: Run) {
           version: 'offline',
           models: [],
           default_model: '',
+          runtime_modes: [{ id: 'full-access', available: true }],
+          default_runtime_mode: 'full-access',
           capabilities: { create: true, queue: true, steer: false, stop: true, resume: true, switch_model: false },
         },
       ],

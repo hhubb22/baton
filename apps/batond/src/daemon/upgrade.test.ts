@@ -207,6 +207,7 @@ it('authenticates upgrade commands, blocks readiness on living or unconfirmed pr
     thread_id: threadId,
     action: 'open',
     agent_type: 'cursor',
+    runtime_mode: 'full-access',
     working_directory: path,
   })
   await vi.waitFor(() =>

@@ -13,7 +13,6 @@ import type { WorkerOpenConfig } from '@baton/protocol'
 import * as CursorAgentSdk from '@t3tools/provider-cursor/server/CursorAgentSdk'
 import { makeCursorAdapterV2 } from '@t3tools/provider-cursor/server'
 import { CursorSettings } from '@t3tools/provider-cursor/settings'
-import * as ProviderAdapter from '@t3tools/provider-core/server/ProviderAdapter'
 import { makeProviderHostDriver } from '../../agent-host/driver.ts'
 import type { AgentHostEnvironment } from '../../agent-host/host-layer.ts'
 import { AgentHostDriver, AgentHostError } from '../../agent-host/protocol.ts'
@@ -35,14 +34,6 @@ const sdkError = (operation: string, cause: unknown) => {
   return new AgentHostError({ message: `Cursor ${operation} failed (${tags.join(' > ') || 'unknown'})` })
 }
 
-const runtimePolicy = (cwd: string): ProviderAdapter.ProviderAdapterV2RuntimePolicy => ({
-  // Approval policy "never" keeps auto-review off while the native sandbox stays on.
-  runtimeMode: 'approval-required',
-  interactionMode: 'default',
-  cwd,
-  approvalPolicy: 'never',
-})
-
 const modelSelection = (config: WorkerOpenConfig): ModelSelection =>
   Schema.decodeSync(ModelSelectionSchema)({
     instanceId,
@@ -62,11 +53,13 @@ const cursorProbe = Effect.gen(function* () {
     ...fields,
     details,
   })
-  if (inspected._tag === 'None' || inspected.value.missingAssets.length > 0)
+  if (inspected._tag === 'None')
+    return result({ authenticated: 'unknown', models: [], reason: 'Cursor SDK 安装不完整' })
+  const sdk = inspected.value
+  if (sdk.missingAssets.some((path) => path !== sdk.sandboxHelper))
     return result({ authenticated: 'unknown', models: [], reason: 'Cursor SDK 安装不完整' })
   const helpers = yield* Effect.tryPromise({
     try: async () => {
-      await promisify(execFile)(inspected.value.sandboxHelper, ['--help'], { timeout: 5000, maxBuffer: 1024 * 1024 })
       await promisify(execFile)(inspected.value.rg, ['--version'], { timeout: 5000, maxBuffer: 1024 * 1024 })
     },
     catch: () => undefined,
@@ -81,6 +74,7 @@ const cursorProbe = Effect.gen(function* () {
   }).pipe(Effect.match({ onFailure: () => false, onSuccess: () => true }))
   const sandbox = yield* Effect.tryPromise({
     try: async () => {
+      await promisify(execFile)(inspected.value.sandboxHelper, ['--help'], { timeout: 5000, maxBuffer: 1024 * 1024 })
       try {
         const policy: unknown = JSON.parse(await readFile(join(homedir(), '.cursor', 'sandbox.json'), 'utf8'))
         if (policy && typeof policy === 'object' && 'type' in policy && policy.type === 'insecure_none') return false
@@ -154,9 +148,7 @@ export const cursorHostDriver = (input: {
         instanceId,
         adapter,
         steer: false,
-        runtimeMode: 'approval-required',
         interactionMode: 'default',
-        runtimePolicy,
         model: modelSelection,
         probe: cursorProbe,
       }).pipe(

@@ -43,6 +43,8 @@ export interface DeviceAgent {
   models: string[]
   modelThinking?: Record<string, import('@baton/protocol').ThinkingCapability>
   defaultModel: string | null
+  runtimeModes?: { id: import('@baton/protocol').RuntimeMode; available: boolean; reason?: string }[]
+  defaultRuntimeMode?: import('@baton/protocol').RuntimeMode
   abilities: AgentAbilities
   // 登录 Agent 使用的订阅，例如 Codex 用 ChatGPT；不需要登录的 Agent 为 null。
   account: string | null
@@ -154,6 +156,7 @@ export interface Thread {
   folder: string
   agent: AgentKind | null
   model: string
+  runtimeMode?: import('@baton/protocol').RuntimeMode
   thinking?: import('@baton/protocol').ThinkingSelection | null
   executionTimeoutSeconds?: number
   projectId: ID | null

@@ -21,7 +21,10 @@ import { makeWorkerRecovery } from './recovery.ts'
 import type { DaemonWorkerHost } from './host.ts'
 
 class AdmissionRejected extends Error {
-  constructor(readonly code: string) {
+  constructor(
+    readonly code: string,
+    readonly reason?: string,
+  ) {
     super(code)
   }
 }
@@ -95,6 +98,7 @@ export function makeThreadService(options: {
     if (performance.now() >= deadline) throw new CommandDeliveryUncertain()
     const readiness = await recovery.ensure(req.thread_id!)
     if (readiness === 'lost') throw new WorkerHistoryUnavailable()
+    if (readiness === 'runtime_mode_conflict') throw new AdmissionRejected('runtime_mode_conflict')
     if (readiness === 'retry') {
       if (!(await upgradePaused(options.dataDirectory))) throw new CommandDeliveryUncertain()
       // 排空期间仅启动受门禁限制的 Worker，接收队列和停止/撤回，不恢复原生会话。
@@ -127,6 +131,34 @@ export function makeThreadService(options: {
         throw new CommandDeliveryUncertain()
     }
     if (!reply) {
+      if ((req.type === 'thread_open' || req.type === 'thread_resume') && config.agent_type !== 'shell') {
+        const reported = options.capability()
+        const agents: readonly RuntimeAgent[] = Array.isArray(reported) ? reported : [reported as RuntimeAgent]
+        const agent = agents.find((value) => value.agent_type === config.agent_type)
+        const mode = agent?.runtime_modes?.find((value) => value.id === config.runtime_mode)
+        const code =
+          !agent ||
+          agent.status !== 'available' ||
+          !agent.capabilities[req.type === 'thread_open' ? 'create' : 'resume']
+            ? 'agent_unavailable'
+            : !mode
+              ? 'runtime_mode_unsupported'
+              : !mode.available
+                ? 'runtime_mode_unavailable'
+                : undefined
+        if (code) {
+          const result: ThreadCommandResult = {
+            type: 'thread.command_result',
+            thread_id: req.thread_id!,
+            ok: false,
+            code,
+            ...(code === 'runtime_mode_unavailable' && mode?.reason ? { reason: mode.reason } : {}),
+            storage_generation: config.storage_generation,
+          }
+          await io(ledger.received(saved.id, result))
+          return result
+        }
+      }
       if (req.type === 'thread_open') await io(ledger.markWorkerOpenAttempt(config.thread_id))
       reply = await request(req)
     }
@@ -192,7 +224,7 @@ export function makeThreadService(options: {
         const agentType = cmd.agent_type
         if (agentType === undefined) throw new AdmissionRejected('agent_unavailable')
         const reported = options.capability()
-        const capabilities = Array.isArray(reported) ? reported : [reported]
+        const capabilities: readonly RuntimeAgent[] = Array.isArray(reported) ? reported : [reported as RuntimeAgent]
         const capability = capabilities.find((agent) => agent.agent_type === agentType)
         if (previous) throw new AdmissionRejected('thread_already_exists')
         const shell = agentType === 'shell'
@@ -201,6 +233,12 @@ export function makeThreadService(options: {
             throw new AdmissionRejected('project_required')
         } else if (!capability || capability.status !== 'available' || !capability.capabilities.create)
           throw new AdmissionRejected('agent_unavailable')
+        if (!cmd.runtime_mode) throw new AdmissionRejected('runtime_mode_unsupported')
+        if (!shell) {
+          const mode = capability?.runtime_modes?.find((entry) => entry.id === cmd.runtime_mode)
+          if (!mode) throw new AdmissionRejected('runtime_mode_unsupported')
+          if (!mode.available) throw new AdmissionRejected('runtime_mode_unavailable', mode.reason)
+        }
         if (!cmd.working_directory) throw new AdmissionRejected('invalid_working_directory')
         let cwd: string
         try {
@@ -222,6 +260,7 @@ export function makeThreadService(options: {
             node_id: options.identity.node_id,
             storage_generation: generation,
             agent_type: agentType,
+            runtime_mode: cmd.runtime_mode,
             ...(cmd.project_id ? { project_id: cmd.project_id } : {}),
             ...(cmd.origin_conversation_id ? { origin_conversation_id: cmd.origin_conversation_id } : {}),
             ...(cmd.origin_tool_call_id ? { origin_tool_call_id: cmd.origin_tool_call_id } : {}),
@@ -236,6 +275,18 @@ export function makeThreadService(options: {
         }
       } else {
         if (!previous) throw new AdmissionRejected('thread_not_found')
+        if (cmd.action === 'resume' && cmd.runtime_mode !== previous.config.runtime_mode)
+          throw new AdmissionRejected('runtime_mode_conflict')
+        if (cmd.action === 'resume' && previous.config.agent_type !== 'shell') {
+          const reported = options.capability()
+          const capabilities: readonly RuntimeAgent[] = Array.isArray(reported) ? reported : [reported as RuntimeAgent]
+          const agent = capabilities.find((entry) => entry.agent_type === previous.config.agent_type)
+          if (!agent || agent.status !== 'available' || !agent.capabilities.resume)
+            throw new AdmissionRejected('agent_unavailable')
+          const mode = agent.runtime_modes?.find((entry) => entry.id === previous.config.runtime_mode)
+          if (!mode) throw new AdmissionRejected('runtime_mode_unsupported')
+          if (!mode.available) throw new AdmissionRejected('runtime_mode_unavailable', mode.reason)
+        }
         if (cmd.storage_generation && cmd.storage_generation !== previous.config.storage_generation)
           throw new AdmissionRejected('storage_generation_mismatch')
         request = decodeRequest({
@@ -290,6 +341,7 @@ export function makeThreadService(options: {
             thread_id: cmd.thread_id,
             ok: false,
             code: error.code,
+            ...(error.reason ? { reason: error.reason } : {}),
           }
         })
         .finally(() => inFlight.delete(id))

@@ -570,6 +570,7 @@ CREATE TABLE threads (
     origin_tool_call_id text,
     node_id uuid NOT NULL,
     agent_type text NOT NULL,
+    runtime_mode text NOT NULL,
     working_directory text NOT NULL,
     execution_timeout_seconds integer DEFAULT 7200 NOT NULL,
     status text DEFAULT 'waiting_device'::text NOT NULL,

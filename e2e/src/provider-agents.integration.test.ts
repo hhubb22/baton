@@ -168,13 +168,11 @@ async function withProviderThread(
       firstContent = (await prepareTranscripts(directory)) ?? firstContent
     } else if (agentType === 'cursor') {
       const transcript = Cursor.withRuntimeInstructions(
-        Cursor.sandboxed(
-          await Cursor.readTranscript(
-            fileURLToPath(
-              new URL(
-                '../../upstream/t3code/packages/provider-cursor/src/testing/fixtures/provider_thread_resume.ndjson',
-                import.meta.url,
-              ),
+        await Cursor.readTranscript(
+          fileURLToPath(
+            new URL(
+              '../../upstream/t3code/packages/provider-cursor/src/testing/fixtures/provider_thread_resume.ndjson',
+              import.meta.url,
             ),
           ),
         ),
@@ -212,6 +210,10 @@ async function withProviderThread(
       await Kiro.writeKiroTranscript(join(directory, 'kiro-resumed.ndjson'), Kiro.resumedOnly(transcript))
     } else {
       const transcript = await Codex.readCodexTranscript(Codex.codexFixturePath('provider_thread_resume'))
+      const firstTurn = transcript.entries.find(
+        (entry) => entry.type === 'expect_outbound' && entry.label === 'turn/start',
+      )
+      expect(firstTurn).toMatchObject({ frame: { params: { sandboxPolicy: { type: 'dangerFullAccess' } } } })
       await Codex.writeCodexTranscript(join(directory, 'codex-first.ndjson'), Codex.firstTurnOnly(transcript))
       await Codex.writeCodexTranscript(join(directory, 'codex-resumed.ndjson'), Codex.resumedOnly(transcript))
     }
@@ -330,6 +332,8 @@ async function withProviderThread(
         },
       ],
       default_model: model,
+      runtime_modes: [{ id: 'full-access', available: true }],
+      default_runtime_mode: 'full-access',
       capabilities: {
         create: true,
         queue: true,
@@ -433,6 +437,7 @@ async function withProviderThread(
       },
     } satisfies P.CreateBrowserThreadInput)
     expect(created.status, JSON.stringify(created.body)).toBe(201)
+    expect(created.body).toMatchObject({ runtime_mode: 'full-access' })
     threadId = Schema.decodeUnknownSync(P.Thread)(created.body).id
     const threadPath = `/threads/${threadId}`
     const view = async () => Schema.decodeUnknownSync(P.ThreadView)((await request(threadPath)).body)
@@ -768,10 +773,7 @@ test.each(traceCases)(
                 )
                 if (start?.type !== 'expect_outbound') throw new Error('Cursor recording has no run.start')
                 const prompt = Schema.decodeUnknownSync(Schema.Struct({ message: Schema.String }))(start.frame).message
-                const { entries, ...header } = Cursor.withRuntimeInstructions(
-                  Cursor.sandboxed(original),
-                  provider.model,
-                )
+                const { entries, ...header } = Cursor.withRuntimeInstructions(original, provider.model)
                 await writeFile(
                   join(directory, 'cursor-first.ndjson'),
                   [
@@ -796,7 +798,21 @@ test.each(traceCases)(
                   const transcript = await Codex.readCodexTranscript(
                     Codex.codexFixturePath('tool_call_workspace_never'),
                   )
-                  await Codex.writeCodexTranscript(join(directory, 'codex-first.ndjson'), transcript)
+                  const fullAccess = {
+                    ...transcript,
+                    entries: transcript.entries.map((entry) => {
+                      if (entry.type !== 'expect_outbound' || entry.label !== 'turn/start') return entry
+                      const frame = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Unknown))(entry.frame)
+                      const params = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Unknown))(
+                        frame.params,
+                      )
+                      return {
+                        ...entry,
+                        frame: { ...frame, params: { ...params, sandboxPolicy: { type: 'dangerFullAccess' } } },
+                      }
+                    }),
+                  }
+                  await Codex.writeCodexTranscript(join(directory, 'codex-first.ndjson'), fullAccess)
                   const start = transcript.entries.find(
                     (entry) => entry.type === 'expect_outbound' && entry.label === 'turn/start',
                   )

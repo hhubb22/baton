@@ -53,7 +53,7 @@ Worker 按 Turn 和原始项 ID 去重。原始 ID 独立保存在 outbox，ACK 
 
 shell 独立保留最多 192 KiB 的首尾输出作为 command_execution 项，回复沿用首尾合计 32 KiB 的摘要。完成记录同时保存两份有界输出和命令，先发 item 再发 reply；Worker 将项 ID 固定为 `shell:<worker_turn_seq>`。停止和完成记录恢复沿用同一顺序及去重身份。Worker 继续按整项 192 KiB 预算裁剪过程项，全文引用沿用 shell 已保存的 stdout/stderr 原始字节；文本以 UTF-8 保存，二进制输出用 base64 表示。shell 在读取输出时累计完整 JSON 编码字节数，`original_bytes` 包含未裁剪输出在 data 中的编码大小，`metadata.shell_output_bytes` 另记原始输出的真实字节数。
 
-`driver.ts` 的 `makeProviderHostDriver` 统一处理会话映射、事件归属、迟到事件过滤和发送确认；各 Agent 只构造 adapter、配置策略和只读探测。`runtime_request.updated` 中的 `command`、`file-read`、`file-change`、`permission` 当次 `accept`；`user_input`、`mcp-elicitation` 与 `turn_item.updated` 里的问题按请求 ID 关联，通过 host 事件、Worker 账本和中心送到网页等待回答。网页回答经持久 `answer` 命令和 host RPC 返回原请求；Codex MCP 请求保留上游的确认语义，普通问题传入用户答案。停止或关闭后的 pending 请求取消，其他请求取消，不写永久授权。
+`driver.ts` 的 `makeProviderHostDriver` 统一处理会话映射、执行权限、事件归属、迟到事件过滤和发送确认；各 Agent 构造 adapter 和只读探测。上游待审批请求和问题按请求 ID 关联，通过 host 事件、Worker 账本和中心送到网页等待回答。网页回答经持久 `answer` 命令和 host RPC 返回原请求；审批决策限于上游提供的选项，Codex MCP 请求保留上游的确认语义，普通问题传入用户答案。停止或关闭后的 pending 请求取消。
 
 Kiro 的版本命令使用 host 的 Node Effect spawner 和 process registrar，4 秒超时，stdout/stderr 各最多收集 4096 字节，由 Scope 与进程回收路径清理。探测只返回版本号，诊断不外传。公共探测对程序已安装且认证为 valid 或 unknown 的组合报告 `available` 并开放 create/resume，版本与系统不设白名单。认证 `unknown` 保留首次执行由原生程序检查的 reason，明确 `missing` 或缺程序时报告 `unavailable`；整次 host 探测失败且安装状态未确认时报告 `unverified`。
 

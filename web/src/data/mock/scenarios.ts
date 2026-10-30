@@ -65,6 +65,12 @@ const ubuntuRepo = '/home/kaken/work/baton'
 const account: Account = { id: 'emp-kaken', name: 'Kaken He', username: 'kaken' }
 
 const allAbilities = { create: true, queue: true, steer: true, stop: true, resume: true, switchModel: true }
+const runtimeModes = [
+  { id: 'approval-required', available: true },
+  { id: 'auto-accept-edits', available: true },
+  { id: 'auto', available: true },
+  { id: 'full-access', available: true },
+] satisfies NonNullable<DeviceAgent['runtimeModes']>
 
 const codex: DeviceAgent = {
   kind: 'codex',
@@ -86,6 +92,8 @@ const codex: DeviceAgent = {
     ]),
   ),
   defaultModel: 'gpt-6.1-sol',
+  runtimeModes,
+  defaultRuntimeMode: 'full-access',
   abilities: allAbilities,
   account: 'ChatGPT',
   problem: null,
@@ -98,6 +106,8 @@ const kiro: DeviceAgent = {
   version: '1.4.2',
   models: ['claude-sonnet-5-5', 'claude-haiku-5-5'],
   defaultModel: 'claude-sonnet-5-5',
+  runtimeModes,
+  defaultRuntimeMode: 'full-access',
   abilities: { ...allAbilities, steer: false, resume: false },
   account: 'Kiro',
   problem: null,
@@ -121,6 +131,8 @@ const pi: DeviceAgent = {
     },
   },
   defaultModel: 'gpt-6.1-sol',
+  runtimeModes: runtimeModes.filter((mode) => mode.id !== 'auto'),
+  defaultRuntimeMode: 'full-access',
   abilities: { ...allAbilities, switchModel: false },
   account: null,
   problem: null,

@@ -27,6 +27,7 @@ async function fixture() {
     node_id: randomUUID(),
     storage_generation: randomUUID(),
     agent_type: 'cursor',
+    runtime_mode: 'full-access',
     working_directory: root,
     execution_timeout_seconds: 60,
     adapter_config: {},

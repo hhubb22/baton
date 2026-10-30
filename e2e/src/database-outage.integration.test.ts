@@ -104,10 +104,10 @@ test('database outage rejects HTTP writes and retries daemon authentication unti
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         yield* sql`INSERT INTO threads
-        (id, employee_id, client_thread_id, request_hash, node_id, agent_type, working_directory,
+        (id, employee_id, client_thread_id, request_hash, node_id, agent_type, runtime_mode, working_directory,
          status, created_by, storage_generation, opened_at)
         VALUES (${threadId}::uuid, ${identity.employee_id}::uuid, ${randomUUID()}, ${Buffer.alloc(32)},
-          ${identity.node_id}::uuid, 'cursor', ${directory!}, 'idle', 'employee', ${randomUUID()}, clock_timestamp())`
+          ${identity.node_id}::uuid, 'cursor', 'full-access', ${directory!}, 'idle', 'employee', ${randomUUID()}, clock_timestamp())`
       }),
     )
     proxy = await postgresProxy(database.url)
@@ -154,6 +154,8 @@ test('database outage rejects HTTP writes and retries daemon authentication unti
       status: 'available',
       models: [{ id: 'default', name: 'Default' }],
       default_model: 'default',
+      runtime_modes: [{ id: 'full-access', available: true }],
+      default_runtime_mode: 'full-access',
       capabilities: { create: true, queue: true, steer: false, stop: true, resume: true, switch_model: false },
     }
     let capabilityVersion = capability.version

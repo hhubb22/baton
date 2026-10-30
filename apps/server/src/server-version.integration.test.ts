@@ -25,8 +25,8 @@ it('admits supported versions and rejects incompatible authenticated nodes befor
     await run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
-        yield* sql`INSERT INTO threads(id,employee_id,node_id,client_thread_id,request_hash,agent_type,working_directory,created_by)
-        VALUES(${threadId},${node.employeeId},${node.nodeId},${threadId},${Buffer.alloc(32)},'cursor','/work','employee')`
+        yield* sql`INSERT INTO threads(id,employee_id,node_id,client_thread_id,request_hash,agent_type,runtime_mode,working_directory,created_by)
+        VALUES(${threadId},${node.employeeId},${node.nodeId},${threadId},${Buffer.alloc(32)},'cursor','full-access','/work','employee')`
         yield* sql`INSERT INTO thread_outbox(employee_id,thread_id,node_id,message_id,action,next_attempt_at)
         VALUES(${node.employeeId},${threadId},${node.nodeId},${randomUUID()},'stop',clock_timestamp()+interval '1 hour')`
       }),

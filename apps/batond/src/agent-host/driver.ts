@@ -12,7 +12,6 @@ import type {
   ProviderInteractionMode,
   ProviderTurnId,
   RunId,
-  RuntimeMode,
 } from '@t3tools/contracts'
 import {
   MessageId as MessageIdSchema,
@@ -20,13 +19,13 @@ import {
   ProjectId,
   ThreadId,
 } from '@t3tools/contracts'
-import { ThreadQuestion, type WorkerOpenConfig } from '@baton/protocol'
+import { isThreadAnswerAllowed, ThreadQuestion, type WorkerOpenConfig } from '@baton/protocol'
 import * as IdAllocator from '@t3tools/provider-core/server/IdAllocator'
 import * as ProviderAdapter from '@t3tools/provider-core/server/ProviderAdapter'
 import { makeOutputMailbox } from '../worker/output.ts'
 import { ensurePrivateDirectory, readPrivateFile } from '../platform/private.ts'
 import { findSent, validatePreparation, type SnapshotMessage } from './evidence.ts'
-import { loadMapping, mappingFor, mappingThread, persistMapping, statePath } from './mapping.ts'
+import { loadMapping, mappingFor, mappingThread, persistMapping, RuntimeModeConflict, statePath } from './mapping.ts'
 import type { NativeMapping } from './mapping.ts'
 import {
   AgentHostError,
@@ -53,9 +52,7 @@ export interface ProviderHostDriverOptions {
   readonly snapshotMessages?: (
     snapshot: ProviderAdapter.ProviderAdapterV2ThreadSnapshot,
   ) => ReadonlyArray<SnapshotMessage>
-  readonly runtimeMode: RuntimeMode
   readonly interactionMode: ProviderInteractionMode
-  readonly runtimePolicy: (cwd: string) => ProviderAdapter.ProviderAdapterV2RuntimePolicy
   readonly model: (config: WorkerOpenConfig) => ModelSelection
   /** Dependencies are provided by the caller, so this effect's requirements are empty. */
   readonly probe: Effect.Effect<ProbeResult, AgentHostError>
@@ -110,6 +107,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
     const replied = new Set<string>()
     const answered = new Set<string>()
     const requests = new Map<string, OrchestrationV2RuntimeRequest>()
+    const requestTurns = new Map<string, ActiveTurn>()
     const questions = new Map<string, ThreadQuestion>()
     const questionTurns = new Map<string, ActiveTurn>()
     const published = new Set<string>()
@@ -123,6 +121,10 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
       })
     const fail = (operation: string, cause: unknown) =>
       cause instanceof AgentHostError ? cause : operationError(label, operation, cause)
+    const mappingError = (cause: unknown) =>
+      cause instanceof RuntimeModeConflict
+        ? new AgentHostError({ message: 'runtime_mode_conflict' })
+        : error(`${label} native mapping identity, working directory or profile mismatch`, cause)
     const emit = (event: ExecutionEvent) =>
       Effect.gen(function* () {
         if (event.type === 'delta') {
@@ -145,6 +147,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
           !question ||
           !active ||
           questionTurns.get(id) !== active ||
+          requestTurns.get(id) !== active ||
           active.ended ||
           stopped ||
           closed ||
@@ -161,10 +164,18 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
           if (published.has(request.id) && owner && owner === active && !owner.ended)
             yield* emit({ ...identity(owner), type: 'question.resolved', requestId: request.id })
           requests.delete(request.id)
+          requestTurns.delete(request.id)
           questions.delete(request.id)
           return
         }
-        if (request.kind === 'user_input' || request.kind === 'mcp-elicitation') requests.set(request.id, request)
+        if (
+          active &&
+          !active.ended &&
+          (!request.providerTurnId || !active.providerTurnId || request.providerTurnId === active.providerTurnId)
+        ) {
+          requests.set(request.id, request)
+          requestTurns.set(request.id, active)
+        }
         const decision = runtimeRequestDecision(request, stopped || closed || !active || active.ended)
         if (decision === undefined) {
           yield* publishQuestion(request.id)
@@ -236,16 +247,25 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
                 yield* emitItem(active, item)
               else active.items.set(item.id, item)
             }
-            if (
-              item.type !== 'user_input_request' &&
-              !(item.type === 'approval_request' && item.requestKind === 'mcp-elicitation')
-            )
-              return
+            if (item.type !== 'user_input_request' && item.type !== 'approval_request') return
             const question = yield* Schema.decodeUnknownEffect(ThreadQuestion)({
               request_id: item.requestId,
-              kind: item.type === 'user_input_request' ? 'user_input' : 'mcp-elicitation',
+              kind:
+                item.type === 'user_input_request'
+                  ? 'user_input'
+                  : item.requestKind === 'mcp-elicitation'
+                    ? 'mcp-elicitation'
+                    : 'approval',
               questions: item.type === 'user_input_request' ? item.questions : [],
               ...(item.type === 'approval_request' ? { prompt: item.prompt ?? item.reason ?? 'Continue?' } : {}),
+              ...(item.type === 'approval_request' && item.requestKind !== 'mcp-elicitation'
+                ? {
+                    request_kind: item.requestKind,
+                    ...(item.reason === undefined ? {} : { reason: item.reason }),
+                    ...(item.options === undefined ? {} : { options: item.options }),
+                    ...(item.fullAccessOverride === undefined ? {} : { full_access_override: item.fullAccessOverride }),
+                  }
+                : {}),
             }).pipe(Effect.mapError(() => error(`${label} question exceeds the supported format`)))
             questions.set(item.requestId, question)
             questionTurns.set(item.requestId, active)
@@ -333,7 +353,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
           threadId: ThreadId.make(input.thread_id),
           providerSessionId: idAllocator.derive.providerSession({ providerInstanceId: options.instanceId }),
           selection: options.model(input),
-          policy: options.runtimePolicy(cwd),
+          policy: { cwd, runtimeMode: input.runtime_mode, interactionMode: options.interactionMode },
           cwd,
         }
       })
@@ -347,7 +367,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
         title: options.sessionTitle ?? `Baton ${input.thread_id}`,
         providerInstanceId: options.instanceId,
         modelSelection: selection,
-        runtimeMode: options.runtimeMode,
+        runtimeMode: input.runtime_mode,
         interactionMode: options.interactionMode,
         branch: null,
         worktreePath: null,
@@ -435,7 +455,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
             return yield* error(`${label} host cannot open another session`)
           const stored = yield* Effect.tryPromise({
             try: () => loadMapping(input, nativeSessionId, label),
-            catch: (cause) => error(`${label} native mapping identity, working directory or profile mismatch`, cause),
+            catch: mappingError,
           })
           const authorized = yield* authorize(input)
           const runtime = yield* options.adapter
@@ -473,10 +493,14 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
             active.ended ||
             !request ||
             questionTurns.get(input.request_id) !== active ||
+            requestTurns.get(input.request_id) !== active ||
             !published.has(input.request_id) ||
             answered.has(input.request_id)
           )
             return yield* error(`${label} question is no longer pending`)
+          const question = questions.get(input.request_id)
+          if (!question || !isThreadAnswerAllowed(question, input))
+            return yield* error(`${label} question decision is not offered`)
           answered.add(input.request_id)
           yield* session
             .respondToRuntimeRequest({
@@ -515,7 +539,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
                 ],
               }
             : selectedModel
-          const policy = options.runtimePolicy((yield* authorize(config)).cwd)
+          const policy = (yield* authorize(config)).policy
           if (message.mode === 'steer') {
             if (!options.steer) return yield* error(`${label} does not support steer`)
             const turn = active
@@ -601,7 +625,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
         Effect.gen(function* () {
           const stored = yield* Effect.tryPromise({
             try: () => loadMapping(input, preparation.nativeSessionId, label),
-            catch: (cause) => error(`${label} native mapping identity, working directory or profile mismatch`, cause),
+            catch: mappingError,
           })
           const authorized = yield* authorize(input)
           const snapshot = yield* Effect.scoped(

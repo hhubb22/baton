@@ -3,6 +3,8 @@ import { resolve, relative, extname, isAbsolute, sep } from 'node:path'
 import { Cause, Effect, Exit, Layer, Stream } from 'effect'
 import { NodeHttpPlatform } from '@effect/platform-node'
 import { HttpRouter, HttpServer } from 'effect/http'
+import * as Incoming from 'effect/http/HttpIncomingMessage'
+import * as ByteSize from 'effect/ByteSize'
 import * as Request from 'effect/http/HttpServerRequest'
 import * as Response from 'effect/http/HttpServerResponse'
 import * as SqlClient from 'effect/sql/SqlClient'
@@ -10,7 +12,7 @@ import { HttpApiBuilder } from 'effect/http-api'
 import { BatonHttpApi, httpOpenApi } from '@baton/protocol/http-api'
 import { Schema } from 'effect'
 import { captureTrace, traceFromHeaders, withTraceSpan } from '@baton/telemetry'
-import { UUID } from '@baton/protocol'
+import { RuntimeMode, UUID } from '@baton/protocol'
 import { createDownloads } from '../downloads.ts'
 import * as Nodes from '../nodes.ts'
 import * as Threads from '../threads/index.ts'
@@ -237,6 +239,27 @@ export const httpApplication = (options: HTTPOptions) =>
           return json(httpOpenApi())
         }
         if (request.method === 'HEAD' || path.endsWith('/') || path.includes('//')) return yield* missingRoute
+        const createThread = request.method === 'POST' && path === '/api/v1/threads'
+        const changeThread =
+          /\x2fapi\x2fv1\x2fthreads\x2f[^/]+\x2f(messages|settings|resume)$/.test(path) &&
+          (request.method === 'POST' || request.method === 'PATCH')
+        if (
+          (createThread || changeThread) &&
+          /^application\x2fjson(?:;|$)/i.test(request.headers['content-type'] ?? '')
+        ) {
+          yield* authorizeBrowser(false)
+          const body = yield* request.json.pipe(
+            Effect.provideService(Incoming.MaxBodySize, ByteSize.kibibytes(512)),
+            Effect.mapError(() => new AppError(400, 'invalid_json')),
+          )
+          if (
+            body &&
+            typeof body === 'object' &&
+            'runtime_mode' in body &&
+            (changeThread || !Schema.is(RuntimeMode)(body.runtime_mode))
+          )
+            return yield* Effect.fail(new AppError(422, 'invalid', '执行模式无效或不可修改'))
+        }
         return yield* router.pipe(
           Effect.catchTag('HttpServerError', (error) =>
             error.reason._tag === 'RouteNotFound' ? missingRoute : Effect.fail(new AppError(503, 'unavailable')),

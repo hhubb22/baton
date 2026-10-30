@@ -212,15 +212,26 @@ it.each(['codex', 'pi'] as const)('reports %s thinking choices with their model'
 })
 
 describe('Cursor installation', () => {
-  it.each([{ integrity: false }, { sandboxHelper: false }])('reports dependency failures: %j', async (details) => {
+  it('reports public dependency failures', async () => {
     expect(
       await probe('cursor', {
         authenticated: 'unknown',
         models: [],
-        details: { installed: true, ...details },
+        details: { installed: true, integrity: false },
         reason: '本机依赖不可用',
       }),
     ).toMatchObject({ status: 'unavailable', reason: '本机依赖不可用', capabilities: { create: false } })
+  })
+
+  it('limits only modes requiring a failed sandbox', async () => {
+    const report = await probe('cursor', {
+      authenticated: 'valid',
+      models: [],
+      details: { installed: true, integrity: true, sandboxHelper: false },
+    })
+    expect(report.status).toBe('available')
+    expect(report.runtime_modes?.find((mode) => mode.id === 'full-access')?.available).toBe(true)
+    expect(report.runtime_modes?.find((mode) => mode.id === 'approval-required')?.available).toBe(false)
   })
 
   it.each(['missing', 'assets', 'version'])('rejects an incomplete SDK (%s) before host startup', async (failure) => {

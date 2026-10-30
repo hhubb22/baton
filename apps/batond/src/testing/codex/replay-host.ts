@@ -3,7 +3,7 @@ import { parseArgs } from 'node:util'
 import { Effect, Layer } from 'effect'
 import * as CodexReplay from 'effect-codex-app-server/replay'
 import { layerCodexReplayClientFactory } from '@t3tools/provider-codex/testing'
-import { materialized, readCodexTranscript, sandboxed } from './transcripts.ts'
+import { materialized, readCodexTranscript } from './transcripts.ts'
 export { readCodexTranscript } from './transcripts.ts'
 import { runAgentHost, type AgentHostModule } from '../../agent-host/host.ts'
 import { codexHostDriver } from '../../agents/codex/host-driver.ts'
@@ -18,7 +18,7 @@ export const codexReplayModule = (transcript: CodexReplay.CodexAppServerReplayTr
         return codexHostDriver({ agentType, paths }).pipe(
           Layer.provide(
             layerCodexReplayClientFactory({
-              transcript: materialized(sandboxed(transcript), cwd),
+              transcript: materialized(transcript, cwd),
             }),
           ),
         )

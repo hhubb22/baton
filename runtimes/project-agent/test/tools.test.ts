@@ -42,6 +42,7 @@ test('固定工具顺序与 Thread 契约一致', () => {
     ['threads.create', create],
     ['threads.create', { ...create, execution_timeout_seconds: 1 }],
     ['threads.create', { ...create, model: 'model-a' }],
+    ['threads.create', { ...create, runtime_mode: 'approval-required' }],
     ['threads.send', { thread_id: 'thread-1', message: '继续', model: 'model-b' }],
     ['threads.send', { thread_id: 'thread-1', message: '继续' }],
     ['threads.send', { thread_id: 'thread-1', message: '继续', mode: 'queue' }],

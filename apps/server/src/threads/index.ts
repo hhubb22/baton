@@ -45,6 +45,7 @@ export const create = (
         node_id: valid.node_id || '',
         agent_type: valid.agent_type,
         model: valid.model || '',
+        runtime_mode: valid.runtime_mode ?? 'upstream-default',
         working_directory: valid.working_directory,
         execution_timeout_seconds: executionTimeoutSeconds,
         message,
@@ -83,6 +84,7 @@ export const create = (
           yield* sql`SELECT c.id FROM conversations c JOIN project_agents a ON a.id=c.agent_id AND a.employee_id=c.employee_id WHERE a.employee_id=${employeeID} AND a.id=${source.agentId} AND a.project_id=${source.projectId} AND c.id=${source.conversationId}`
         if (!binding.length) return yield* Effect.fail(failure('not_found', 404))
       }
+      const runtimeMode = valid.runtime_mode ?? P.DEFAULT_RUNTIME_MODE
       const model = yield* admission(
         employeeID,
         node,
@@ -90,9 +92,10 @@ export const create = (
         valid.working_directory,
         valid.model || '',
         'create',
+        runtimeMode,
       )
       const id = uuid()
-      yield* sql`INSERT INTO threads(id,employee_id,client_thread_id,request_hash,node_id,agent_type,model,working_directory,created_by,project_id,origin_conversation_id,origin_tool_call_id,execution_timeout_seconds,exec_wait_until) VALUES(${id},${employeeID},${valid.client_thread_id},${hash},${node},${valid.agent_type},${model},${valid.working_directory},${source ? 'project_agent' : 'employee'},${source?.projectId ?? null},${source?.conversationId ?? null},${source?.toolCallId ?? null},${executionTimeoutSeconds},CASE WHEN ${source?.shellExec ?? false} THEN clock_timestamp()+${source?.waitSeconds ?? 30}*interval '1 second' ELSE NULL END)`
+      yield* sql`INSERT INTO threads(id,employee_id,client_thread_id,request_hash,node_id,agent_type,runtime_mode,model,working_directory,created_by,project_id,origin_conversation_id,origin_tool_call_id,execution_timeout_seconds,exec_wait_until) VALUES(${id},${employeeID},${valid.client_thread_id},${hash},${node},${valid.agent_type},${runtimeMode},${model},${valid.working_directory},${source ? 'project_agent' : 'employee'},${source?.projectId ?? null},${source?.conversationId ?? null},${source?.toolCallId ?? null},${executionTimeoutSeconds},CASE WHEN ${source?.shellExec ?? false} THEN clock_timestamp()+${source?.waitSeconds ?? 30}*interval '1 second' ELSE NULL END)`
       const thread = yield* readThread(employeeID, id)
       yield* audit(
         thread,
@@ -101,7 +104,11 @@ export const create = (
         source ? 'project_agent' : 'employee',
         source?.agentId ?? employeeID,
       )
-      yield* enqueue(thread, 'open', { model, execution_timeout_seconds: executionTimeoutSeconds })
+      yield* enqueue(thread, 'open', {
+        model,
+        runtime_mode: runtimeMode,
+        execution_timeout_seconds: executionTimeoutSeconds,
+      })
       yield* insertMessage(thread, message, source)
       return { thread: yield* readThread(employeeID, id), created: true }
     }),
@@ -203,9 +210,22 @@ export const resume = (employeeID: string, threadID: string, source?: ProjectThr
         yield* sql`SELECT id FROM thread_outbox WHERE employee_id=${employeeID} AND thread_id=${threadID} AND (action='resume' OR (action='open' AND payload->>'retry_open'='true')) AND completed_at IS NULL AND next_attempt_at<>'infinity'`
       if (pending.length) return t
       if (yield* canRetryOpen(t)) {
-        const model = yield* admission(employeeID, t.node_id, t.agent_type, t.working_directory, t.model, 'create')
+        const model = yield* admission(
+          employeeID,
+          t.node_id,
+          t.agent_type,
+          t.working_directory,
+          t.model,
+          'create',
+          t.runtime_mode,
+        )
         yield* sql`UPDATE threads SET status='waiting_device',status_reason='',stop_code=NULL,stop_requested_at=NULL,stop_confirmed_at=NULL WHERE id=${t.id}`
-        yield* enqueue(t, 'open', { model, execution_timeout_seconds: t.execution_timeout_seconds, retry_open: true })
+        yield* enqueue(t, 'open', {
+          model,
+          runtime_mode: t.runtime_mode,
+          execution_timeout_seconds: t.execution_timeout_seconds,
+          retry_open: true,
+        })
         yield* audit(t, 'open.retry_requested', {}, actor, actorID)
         yield* touch(t.id)
         return yield* readThread(employeeID, threadID)
@@ -214,8 +234,8 @@ export const resume = (employeeID: string, threadID: string, source?: ProjectThr
       if (!t.opened_at || !t.storage_generation) return yield* Effect.fail(failure('thread_not_opened', 422))
       if (!['idle', 'stopped', 'unknown'].includes(t.status)) return yield* Effect.fail(failure())
       if (t.stop_requested_at && !t.stop_confirmed_at) return yield* Effect.fail(failure('stop_pending'))
-      yield* admission(employeeID, t.node_id, t.agent_type, t.working_directory, '', 'resume')
-      yield* enqueue(t, 'resume')
+      yield* admission(employeeID, t.node_id, t.agent_type, t.working_directory, '', 'resume', t.runtime_mode)
+      yield* enqueue(t, 'resume', { runtime_mode: t.runtime_mode })
       yield* audit(t, 'resume.requested', {}, actor, actorID)
       yield* touch(threadID)
       return yield* readThread(employeeID, threadID)
@@ -249,7 +269,8 @@ export const setModel = (employeeID: string, threadID: string, input: P.SetThrea
         supported: boolean
       }>`SELECT COALESCE((SELECT (a->'capabilities'->>'switch_model')::boolean FROM node_runtime_reports r CROSS JOIN LATERAL jsonb_array_elements(r.report->'agents') a WHERE r.node_id=${t.node_id} AND r.employee_id=${employeeID} AND a->>'agent_type'=${t.agent_type}),false) AS supported`
       if (!rows[0]!.supported) return yield* Effect.fail(failure('model_switch_unsupported', 422))
-      if (valid.model) yield* admission(employeeID, t.node_id, t.agent_type, t.working_directory, valid.model, 'queue')
+      if (valid.model)
+        yield* admission(employeeID, t.node_id, t.agent_type, t.working_directory, valid.model, 'queue', t.runtime_mode)
       yield* sql`UPDATE threads SET next_model=${valid.model} WHERE id=${t.id}`
       yield* audit(t, 'model.updated', { model: valid.model })
       yield* touch(t.id)

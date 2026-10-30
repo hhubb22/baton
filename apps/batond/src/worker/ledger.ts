@@ -120,7 +120,7 @@ export class WorkerFailure extends Error {
   }
 }
 
-export type WorkerLedgerInspection = 'valid' | 'missing' | 'empty' | 'corrupt' | 'retry'
+export type WorkerLedgerInspection = 'valid' | 'missing' | 'empty' | 'corrupt' | 'retry' | 'runtime_mode_conflict'
 export interface OpenWorkerLedger {
   readonly initial: State
   readonly save: (next: State) => Effect.Effect<void, WorkerFailure | SqlError>
@@ -298,7 +298,16 @@ export async function inspectWorkerLedger(dbPath: string, expected: WorkerOpenCo
   try {
     checkStorageFormat(dbPath, 'thread', storageBaseline)
     db = new DatabaseSync(dbPath, { readOnly: true, allowExtension: false, timeout: 0 })
-    result = decodeLedger((sql) => db!.prepare(sql).all(), expected).condition
+    const decoded = decodeLedger((sql) => db!.prepare(sql).all())
+    const config = decoded.initial.config
+    if (config && JSON.stringify(canonical(config)) !== JSON.stringify(canonical(expected))) {
+      result =
+        config.runtime_mode !== expected.runtime_mode &&
+        JSON.stringify(canonical({ ...config, runtime_mode: expected.runtime_mode })) ===
+          JSON.stringify(canonical(expected))
+          ? 'runtime_mode_conflict'
+          : 'corrupt'
+    } else result = decoded.condition
   } catch (error) {
     result = isCorruption(error) ? 'corrupt' : 'retry'
   }

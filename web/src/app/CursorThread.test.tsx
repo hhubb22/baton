@@ -68,6 +68,7 @@ function mount(
       node_id: deviceId,
       agent_type: 'cursor',
       model: '',
+      runtime_mode: 'full-access',
       working_directory: '/work',
       title: 'Remote Cursor thread',
       status: options.status ?? 'waiting_device',
@@ -113,6 +114,8 @@ function mount(
                   reason: state.reason,
                   models: [],
                   default_model: '',
+                  runtime_modes: [{ id: 'full-access', available: true }],
+                  default_runtime_mode: 'full-access',
                   capabilities: {
                     create: options.create !== false,
                     queue: true,

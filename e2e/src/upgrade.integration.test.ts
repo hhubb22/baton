@@ -138,6 +138,8 @@ test('candidate upgrade preserves Project, memory, Thread identity and queued in
               status: 'available',
               models: [{ id: 'default', name: 'Default' }],
               default_model: 'default',
+              runtime_modes: [{ id: 'full-access', available: true }],
+              default_runtime_mode: 'full-access',
               capabilities: { create: true, queue: true, steer: false, stop: true, resume: true, switch_model: false },
             }),
             transport: (_url, options) => connectWebSocket(`ws://127.0.0.1:${server.port}/v1/node`, options),

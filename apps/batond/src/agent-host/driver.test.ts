@@ -83,9 +83,7 @@ it.each([false, true])(
             instanceId,
             adapter: { openSession: () => Effect.succeed(runtime) } as unknown as ProviderAdapterV2['Service'],
             steer: true,
-            runtimeMode: 'full-access',
             interactionMode: 'default',
-            runtimePolicy: (cwd) => ({ cwd, runtimeMode: 'full-access', interactionMode: 'default' }),
             model: () => ({ instanceId, model: 'default', options: [{ id: 'serviceTier', value: 'fast' }] }),
             probe: Effect.succeed({ authenticated: 'valid', models: [], details: {} }),
           }).pipe(
@@ -100,11 +98,20 @@ it.each([false, true])(
             node_id: randomUUID(),
             storage_generation: randomUUID(),
             agent_type: 'pi',
+            runtime_mode: 'full-access',
             working_directory: root,
             execution_timeout_seconds: 60,
             adapter_config: { state_path: join(root, 'native.json') },
           }
           yield* driver.open({ config, generation: 'generation' })
+          const conflict = yield* Effect.flip(
+            driver.sent({
+              config: { ...config, runtime_mode: 'approval-required' },
+              message: { id: 'message', text: 'run', epoch: 0, operationId: 'operation', mode: 'queue' },
+              preparation: { nativeSessionId: 'native', preparationId: 'prepared', confirmedSends: 0 },
+            }),
+          )
+          expect(conflict.message).toBe('runtime_mode_conflict')
           const received: ExecutionEvent[] = []
           const collector = yield* driver.events.pipe(
             Stream.takeUntil((event) => event.type === 'end'),
@@ -131,6 +138,8 @@ it.each([false, true])(
             { id: 'thinking', value: 'high' },
           ])
           expect(input.appThread.modelSelection.options).toEqual(input.modelSelection.options)
+          expect(input.runtimePolicy).toEqual({ cwd: root, runtimeMode: 'full-access', interactionMode: 'default' })
+          expect(input.appThread.runtimeMode).toBe('full-access')
           const item = (
             id: string,
             status: string,

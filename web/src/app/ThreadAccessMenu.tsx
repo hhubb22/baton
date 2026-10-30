@@ -1,53 +1,60 @@
-import { agentNames } from '../data/derive'
-import type { AgentKind } from '../data/types'
+import type { RuntimeMode } from '@baton/protocol'
+import type { DeviceAgent } from '../data/types'
 import { Chip } from '../ui/Chip'
 import { Menu, MenuOption } from '../ui/Menu'
 
-interface ThreadAccess {
-  label: string
-  detail: string
+const modes: Record<RuntimeMode, { label: string; detail: string }> = {
+  'approval-required': { label: 'Supervised', detail: '需要时等待批准操作。' },
+  'auto-accept-edits': { label: 'Auto-accept edits', detail: '自动接受编辑，其他操作可能需要批准。' },
+  auto: { label: 'Auto', detail: '支持的助手自动审查常规操作，其他助手可能仍需要批准。' },
+  'full-access': {
+    label: 'Full access',
+    detail: '可以按设备用户权限访问目录外文件和网络，实际能力受原生程序和操作系统限制。',
+  },
 }
 
-// 每个 Agent 目前只有一种执行权限，跟随设备上的 driver：Codex 在 workspaceWrite 沙箱里且不能联网，
-// Cursor 用 SDK 自带沙箱，Pi 和 Kiro 不带沙箱，以设备用户身份运行。
-export function threadAccess(agent: AgentKind, user: string): ThreadAccess {
-  switch (agent) {
-    case 'codex':
-      return { label: '沙箱', detail: '可以修改此文件夹内的文件，不能联网。' }
-    case 'cursor':
-      return { label: '沙箱', detail: '在 Cursor 沙箱中运行命令。' }
-    case 'pi':
-    case 'kiro':
-      return {
-        label: '无沙箱',
-        detail: `${agentNames[agent]} 以${user ? ` ${user} ` : '当前用户'}身份运行命令，可以访问此文件夹以外的文件。`,
-      }
-  }
-}
-
-// 权限选择片：新建时和 Thread 输入区都显示当前模式，菜单只列这个 Agent 支持的模式。
 export function ThreadAccessMenu({
+  mode,
   agent,
-  user,
+  onSelect,
   side = 'bottom',
 }: {
-  agent: AgentKind
-  user: string
+  mode: RuntimeMode
+  agent?: DeviceAgent
+  onSelect?: (mode: RuntimeMode) => void
   side?: 'top' | 'bottom'
 }) {
-  const access = threadAccess(agent, user)
+  const reported = agent?.runtimeModes ?? []
+  const options = onSelect
+    ? reported.some((option) => option.id === mode)
+      ? reported
+      : [{ id: mode, available: false, reason: '设备未报告此模式。' }, ...reported]
+    : [{ id: mode, available: true }]
+  const noSandbox = agent && (agent.kind === 'pi' || agent.kind === 'kiro')
   return (
     <Menu
       side={side}
       trigger={
         <Chip icon="shield" composer>
-          {access.label}
+          {modes[mode].label}
         </Chip>
       }
     >
-      <MenuOption selected detail={access.detail}>
-        {access.label}
-      </MenuOption>
+      {options.length === 0 && <MenuOption detail="设备尚未报告执行权限。">执行权限不可用</MenuOption>}
+      {options.map((option) => (
+        <MenuOption
+          key={option.id}
+          selected={mode === option.id}
+          detail={
+            option.available
+              ? `${modes[option.id].detail}${noSandbox && option.id !== 'full-access' ? ' 此助手不提供系统沙箱。' : ''}`
+              : (option.reason ?? '此模式不可用。')
+          }
+          onSelect={onSelect && option.available ? () => onSelect(option.id) : undefined}
+        >
+          {modes[option.id].label}
+        </MenuOption>
+      ))}
     </Menu>
   )
 }

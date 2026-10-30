@@ -449,6 +449,7 @@ export function useCreateThread() {
       folder: string
       agent: AgentKind
       model: string
+      runtimeMode?: import('@baton/protocol').RuntimeMode
       thinking?: import('@baton/protocol').ThinkingSelection
       executionTimeoutSeconds?: number
       body: string

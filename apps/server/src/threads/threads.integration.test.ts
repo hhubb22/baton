@@ -14,7 +14,7 @@ import { CredentialSigner } from '../nodes.ts'
 import { activitySnapshot } from '../desktop-notifications.ts'
 
 type Run = TestDatabase['run']
-async function fixture(run: Run, thinking = false) {
+async function fixture(run: Run, thinking = false, runtimeMode?: P.RuntimeMode) {
   const report: P.RuntimeReport = {
     exec: { enabled: false, shell: '/bin/sh' },
     roots: [{ root_id: 'home', path: '/workspace' }],
@@ -54,6 +54,8 @@ async function fixture(run: Run, thinking = false) {
             : []),
         ],
         default_model: 'default',
+        runtime_modes: P.RuntimeMode.literals.map((id) => ({ id, available: true })),
+        default_runtime_mode: P.DEFAULT_RUNTIME_MODE,
         capabilities: { create: true, queue: true, steer: false, stop: true, resume: true, switch_model: thinking },
       },
     ],
@@ -73,6 +75,7 @@ async function fixture(run: Run, thinking = false) {
     node_id: node,
     agent_type: thinking ? 'codex' : 'cursor',
     working_directory: '/workspace/project',
+    ...(runtimeMode ? { runtime_mode: runtimeMode } : {}),
     message: {
       client_message_id: randomUUID(),
       content: 'hello',
@@ -126,6 +129,68 @@ async function open(run: Run, f: Awaited<ReturnType<typeof fixture>>) {
   )
   return thread
 }
+
+it('retains the device reason when a saved mode becomes unavailable before opening', () =>
+  withTestDatabase(async ({ run }) => {
+    const f = await fixture(run)
+    const { thread } = await f.create()
+    const command = (await run(threads.claimCommands())).find((item) => item.body.thread_id === thread.id)!
+    await run(
+      threads.processReceipt(f.source, command.message_id, {
+        type: 'thread.command_result',
+        thread_id: thread.id,
+        ok: false,
+        code: 'runtime_mode_unavailable',
+        reason: 'Sandbox unavailable',
+      }),
+    )
+    expect(await run(threads.view({ employeeId: f.employee }, thread.id))).toMatchObject({
+      status: 'stopped',
+      status_reason: 'Sandbox unavailable',
+    })
+  }))
+
+it('persists runtime mode across retries and dispatch, and refuses changed or unavailable selections', () =>
+  withTestDatabase(async ({ run, restart }) => {
+    const f = await fixture(run)
+    const first = await f.create()
+    expect(first.thread.runtime_mode).toBe(P.DEFAULT_RUNTIME_MODE)
+    const [command] = await run(threads.claimCommands())
+    expect(command?.body.runtime_mode).toBe(P.DEFAULT_RUNTIME_MODE)
+    const recovered = await restart()
+    await recovered(
+      query(
+        `UPDATE node_runtime_reports SET report=jsonb_set(report,'{agents,0,runtime_modes}', $1::jsonb) WHERE node_id=$2`,
+        JSON.stringify([
+          { id: 'approval-required', available: true },
+          { id: 'full-access', available: false, reason: 'Mode failed' },
+        ]),
+        f.node,
+      ),
+    )
+    expect((await recovered(threads.create(f.employee, f.input))).thread.runtime_mode).toBe(P.DEFAULT_RUNTIME_MODE)
+    await expect(
+      recovered(threads.create(f.employee, { ...f.input, runtime_mode: 'approval-required' })),
+    ).rejects.toMatchObject({ status: 409 })
+    await expect(
+      recovered(threads.create(f.employee, { ...f.input, client_thread_id: randomUUID() })),
+    ).rejects.toMatchObject({ code: 'runtime_mode_unavailable', status: 422 })
+    await expect(
+      recovered(threads.create(f.employee, { ...f.input, client_thread_id: randomUUID(), runtime_mode: 'auto' })),
+    ).rejects.toMatchObject({ code: 'runtime_mode_unsupported', status: 422 })
+    const supervised = await recovered(
+      threads.create(f.employee, {
+        ...f.input,
+        client_thread_id: randomUUID(),
+        runtime_mode: 'approval-required',
+      }),
+    )
+    expect(supervised.thread.runtime_mode).toBe('approval-required')
+    expect(
+      (await recovered(threads.claimCommands())).find((item) => item.body.thread_id === supervised.thread.id)?.body
+        .runtime_mode,
+    ).toBe('approval-required')
+  }))
 
 it('persists model thinking per message, rejects conflicting retries and dispatches the selection', () =>
   withTestDatabase(async ({ run }) => {
@@ -701,7 +766,7 @@ it.each(['worker-accepted', 'identity-conflict', 'message-dispatched'])(
 
 it('accepts completion before ACK, rejects conflicting source/generation and keeps resume pending until completion', () =>
   withTestDatabase(async ({ run, restart }) => {
-    const f = await fixture(run)
+    const f = await fixture(run, false, 'approval-required')
     const t = await open(run, f)
     await run(threads.processReport(f.source, report(t.id, 3, 'thread.stopped', { reason: 'exited' })))
     await run(threads.resume(f.employee, t.id))
@@ -716,6 +781,7 @@ it('accepts completion before ACK, rejects conflicting source/generation and kee
     )
     const [resume] = await run(threads.claimCommands())
     expect(resume!.body.action).toBe('resume')
+    expect(resume!.body.runtime_mode).toBe('approval-required')
     await run(
       threads.processReceipt(f.source, resume!.message_id, {
         type: 'thread.command_result',
@@ -729,6 +795,7 @@ it('accepts completion before ACK, rejects conflicting source/generation and kee
       (await run(query<{ n: string }>("SELECT count(*)::text AS n FROM thread_outbox WHERE action='resume'")))[0]!.n,
     ).toBe('1')
     const resumed = await restart()
+    expect((await resumed(threads.view({ employeeId: f.employee }, t.id))).runtime_mode).toBe('approval-required')
     expect((await resumed(threads.view({ employeeId: f.employee }, t.id))).resume_pending).toBe(true)
     await resumed(threads.processReport(f.source, report(t.id, 4, 'thread.resumed')))
     await resumed(

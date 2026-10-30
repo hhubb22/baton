@@ -94,6 +94,7 @@ const workspace = async () => {
     node_id: '22222222-2222-4222-8222-222222222222',
     storage_generation: '33333333-3333-4333-8333-333333333333',
     agent_type: 'pi',
+    runtime_mode: 'full-access',
     working_directory: directory,
     execution_timeout_seconds: 30,
     model: 'openrouter/deepseek/deepseek-v4-flash',

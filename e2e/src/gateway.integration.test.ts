@@ -53,6 +53,7 @@ it('drains more than 128 durable reports through Gateway limits while accepting 
               node_id: id.node_id,
               storage_generation: generation,
               agent_type: 'cursor',
+              runtime_mode: 'full-access',
               working_directory: path,
               execution_timeout_seconds: 60,
               adapter_config: {},

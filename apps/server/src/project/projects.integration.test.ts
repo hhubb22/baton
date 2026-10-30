@@ -21,6 +21,8 @@ const projectRuntimeReport: P.RuntimeReport = {
       status: 'available',
       models: [{ id: 'default', name: 'Default' }],
       default_model: 'default',
+      runtime_modes: [{ id: 'full-access', available: true }],
+      default_runtime_mode: 'full-access',
       capabilities: { create: true, queue: true, steer: false, stop: true, resume: true, switch_model: false },
     },
   ],
@@ -780,6 +782,8 @@ describe('failure recovery and suspension', () => {
                 status: 'available',
                 models: [{ id: 'default', name: 'Default' }],
                 default_model: 'default',
+                runtime_modes: [{ id: 'full-access', available: true }],
+                default_runtime_mode: 'full-access',
                 capabilities: {
                   create: true,
                   queue: true,

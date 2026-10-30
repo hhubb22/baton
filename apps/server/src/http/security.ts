@@ -97,7 +97,7 @@ const checkJson = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest
   if (!/^application\/json(?:;|$)/i.test(request.headers['content-type'] ?? ''))
     return yield* Effect.fail(new AppError(415, 'json_required'))
-  yield* request.json.pipe(
+  return yield* request.json.pipe(
     Effect.provideService(Incoming.MaxBodySize, ByteSize.kibibytes(512)),
     Effect.mapError(() => new AppError(400, 'invalid_json')),
   )

@@ -1,4 +1,5 @@
 import { Schema } from 'effect'
+import { RuntimeMode } from '@t3tools/contracts'
 import {
   AgentStatus,
   Reason,
@@ -293,6 +294,12 @@ export const RuntimeAgent = Schema.Struct({
   status: AgentStatus,
   models: Schema.NullOr(Schema.Array(RuntimeModel)).check(uniqueBy((value) => value.id)),
   default_model: summary(512),
+  runtime_modes: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({ id: RuntimeMode, available: Schema.Boolean, reason: Schema.optionalKey(Reason) }),
+    ).check(uniqueBy((value) => value.id)),
+  ),
+  default_runtime_mode: Schema.optionalKey(RuntimeMode),
   capabilities: ThreadCapabilities,
   reason: Schema.optionalKey(Reason),
 })

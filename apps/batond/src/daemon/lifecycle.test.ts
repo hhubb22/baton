@@ -52,6 +52,7 @@ function open(directory: string): WorkerOpen {
       node_id: randomUUID(),
       storage_generation: generation,
       agent_type: 'cursor',
+      runtime_mode: 'full-access',
       working_directory: directory,
       execution_timeout_seconds: 60,
       adapter_config: {},

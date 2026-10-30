@@ -16,7 +16,6 @@ import {
   firstTurnOnly,
   readTranscript,
   resumedOnly,
-  sandboxed,
   sentOnly,
   withRuntimeInstructions,
 } from '../../testing/cursor/transcripts.ts'
@@ -97,6 +96,7 @@ const workspace = async () => {
     node_id: '22222222-2222-4222-8222-222222222222',
     storage_generation: '33333333-3333-4333-8333-333333333333',
     agent_type: 'cursor',
+    runtime_mode: 'full-access',
     working_directory: directory,
     execution_timeout_seconds: 30,
     model: 'composer-2.5',
@@ -144,7 +144,7 @@ const message = (id: string, text: string) => ({
 describe('Cursor Agent host', () => {
   it('opens, sends, streams text and reports the completed turn', async () => {
     const transcript = withRuntimeInstructions(
-      sandboxed(await readTranscript(fileURLToPath(CURSOR_REPLAY_FIXTURES.simple))),
+      await readTranscript(fileURLToPath(CURSOR_REPLAY_FIXTURES.simple)),
       'composer-2.5',
     )
     const { file } = await writeTranscript('simple', transcript)
@@ -172,7 +172,7 @@ describe('Cursor Agent host', () => {
   })
 
   it('keeps a second turn in its own execution and drops late events', async () => {
-    const original = sandboxed(await readTranscript(fileURLToPath(CURSOR_REPLAY_FIXTURES.multiTurn)))
+    const original = await readTranscript(fileURLToPath(CURSOR_REPLAY_FIXTURES.multiTurn))
     const transcript = {
       ...original,
       metadata: { ...original.metadata, derivedFrom: original.scenario, purpose: 'per-turn model selection' },
@@ -213,11 +213,11 @@ describe('Cursor Agent host', () => {
 
   it('interrupts an active turn and ends it as cancelled', async () => {
     const transcript = withRuntimeInstructions(
-      sandboxed(await readTranscript(fileURLToPath(CURSOR_REPLAY_FIXTURES.turnInterruptMidTool))),
+      await readTranscript(fileURLToPath(CURSOR_REPLAY_FIXTURES.turnInterruptMidTool)),
       'composer-2.5',
     )
     const { file } = await writeTranscript('interrupt', transcript)
-    const config = await workspace()
+    const config = { ...(await workspace()), runtime_mode: 'auto-accept-edits' as const }
     const agent = start(config, file)
     agents.push(agent)
     const collected = collect(agent)
@@ -236,7 +236,7 @@ describe('Cursor Agent host', () => {
 
   it('resumes the native session and sends the next turn', async () => {
     const transcript = withRuntimeInstructions(
-      sandboxed(await readTranscript(fileURLToPath(CURSOR_REPLAY_FIXTURES.providerThreadResume))),
+      await readTranscript(fileURLToPath(CURSOR_REPLAY_FIXTURES.providerThreadResume)),
       'composer-2.5',
     )
     const first = await writeTranscript('resume-first', firstTurnOnly(transcript))
@@ -270,7 +270,7 @@ describe('Cursor Agent host', () => {
 
   it('confirms an input only when the native snapshot has the next matching user message', async () => {
     const simple = withRuntimeInstructions(
-      sandboxed(await readTranscript(fileURLToPath(CURSOR_REPLAY_FIXTURES.simple))),
+      await readTranscript(fileURLToPath(CURSOR_REPLAY_FIXTURES.simple)),
       'composer-2.5',
     )
     const opened = await writeTranscript('sent-open', simple)

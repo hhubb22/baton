@@ -45,9 +45,10 @@ export const readCodexTranscript = async (path: string): Promise<Transcript> => 
   })
 }
 
-/** Recorded full-access turns use Baton's workspace sandbox when replayed. */
-export const sandboxed = (transcript: Transcript): Transcript => ({
+/** Derive turn policy from the recorded transcript for the selected replay mode. */
+export const withReplayMode = (transcript: Transcript, mode: 'full-access' | 'approval-required'): Transcript => ({
   ...transcript,
+  metadata: { ...transcript.metadata, derivedPolicy: mode },
   entries: transcript.entries.map((entry) => {
     if (entry.type !== 'expect_outbound' || !Predicate.isObject(entry.frame)) return entry
     const frame = entry.frame
@@ -58,8 +59,8 @@ export const sandboxed = (transcript: Transcript): Transcript => ({
         ...frame,
         params: {
           ...frame.params,
-          approvalPolicy: 'never',
-          sandboxPolicy: { type: 'workspaceWrite', networkAccess: false, writableRoots: [] },
+          approvalPolicy: mode === 'full-access' ? 'never' : 'untrusted',
+          sandboxPolicy: { type: mode === 'full-access' ? 'dangerFullAccess' : 'readOnly' },
         },
       },
     }

@@ -6,6 +6,7 @@ import { useLocalDirectoryPicker } from '../app/LocalDirectoryPicker'
 import { Page } from '../app/Page'
 import type { ThreadsSearch } from '../app/router'
 import { ThreadAccessMenu } from '../app/ThreadAccessMenu'
+import { DEFAULT_RUNTIME_MODE, type RuntimeMode } from '@baton/protocol'
 import { ThreadDetail, type RecoverAction } from '../app/ThreadDetail'
 import { ThreadModelMenu, type ThreadModelChoice } from '../app/ThreadModelMenu'
 import { modelThinking, ThinkingMenu } from '../app/ThinkingMenu'
@@ -396,6 +397,7 @@ export function ThreadsPage() {
   const [error, setError] = useState<string | null>(null)
   const [location, setLocation] = useState<Location | null>(null)
   const [agentChoice, setAgentChoice] = useState<AgentChoice | null>(null)
+  const [runtimeChoice, setRuntimeChoice] = useState<RuntimeMode | null>(null)
   const [thinkingChoice, setThinkingChoice] = useState<{
     key: string
     value: import('@baton/protocol').ThinkingSelection | null
@@ -409,6 +411,8 @@ export function ThreadsPage() {
   const device = allDevices.find((item) => item.id === current?.deviceId)
   const choice = resolveAgent(device, agentChoice)
   const chosenAgent = device?.agents.find((agent) => agent.kind === choice?.agent)
+  const runtimeMode = runtimeChoice ?? chosenAgent?.defaultRuntimeMode ?? DEFAULT_RUNTIME_MODE
+  const runtimeAvailability = chosenAgent?.runtimeModes?.find((item) => item.id === runtimeMode)
   const model = choice?.model || chosenAgent?.defaultModel || ''
   const thinking = modelThinking(chosenAgent, model)
   const thinkingKey = JSON.stringify([device?.id, choice?.agent, model])
@@ -472,6 +476,10 @@ export function ThreadsPage() {
       setError(`${device.name} 上没有可用的助手。请在设备上设置，或选择其他文件夹。`)
       return
     }
+    if (!runtimeAvailability?.available) {
+      setError(runtimeAvailability?.reason ?? '设备尚未报告此执行权限可用。')
+      return
+    }
     setError(null)
     create.mutate(
       {
@@ -479,6 +487,7 @@ export function ThreadsPage() {
         folder: current.folder,
         agent: choice.agent,
         model: choice.model,
+        runtimeMode,
         ...(validThinking ? { thinking: validThinking } : {}),
         body,
         clientId: newClientId(),
@@ -664,7 +673,16 @@ export function ThreadsPage() {
                           selection={validThinking}
                           onSelect={(value) => setThinkingChoice({ key: thinkingKey, value })}
                         />
-                        {choice && device && <ThreadAccessMenu agent={choice.agent} user={device.commandAccess.user} />}
+                        {chosenAgent && (
+                          <ThreadAccessMenu
+                            agent={chosenAgent}
+                            mode={runtimeMode}
+                            onSelect={(mode) => {
+                              setError(null)
+                              setRuntimeChoice(mode)
+                            }}
+                          />
+                        )}
                       </>
                     }
                   />

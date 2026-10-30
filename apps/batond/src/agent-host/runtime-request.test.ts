@@ -18,11 +18,11 @@ const request = (kind: OrchestrationV2RuntimeRequest['kind'], status: 'pending' 
     resolvedAt: null,
   })
 
-it('allows a permission once and waits for an explicit question answer', () => {
-  expect(runtimeRequestDecision(request('permission'), false)).toBe('accept')
-  expect(runtimeRequestDecision(request('command'), false)).toBe('accept')
-  expect(runtimeRequestDecision(request('file-read'), false)).toBe('accept')
-  expect(runtimeRequestDecision(request('file-change'), false)).toBe('accept')
+it('waits for an explicit permission or question answer', () => {
+  expect(runtimeRequestDecision(request('permission'), false)).toBeUndefined()
+  expect(runtimeRequestDecision(request('command'), false)).toBeUndefined()
+  expect(runtimeRequestDecision(request('file-read'), false)).toBeUndefined()
+  expect(runtimeRequestDecision(request('file-change'), false)).toBeUndefined()
   expect(runtimeRequestDecision(request('user_input'), false)).toBeUndefined()
   expect(runtimeRequestDecision(request('mcp-elicitation'), false)).toBeUndefined()
 })

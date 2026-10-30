@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { upgradePaused, readUpgradeState, upgradeOffline } from '../daemon/upgrade.ts'
 import {
   WorkerRequest,
+  isThreadAnswerAllowed,
   boundedText,
   type ThreadReport,
   type WorkerCommandReceipt,
@@ -1690,6 +1691,8 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
             question.executionId !== active.executionId
           )
             return reject('invalid_state', 'Question is no longer pending')
+          if (!isThreadAnswerAllowed(question.question, answer))
+            return reject('invalid_request', 'Decision is not offered for this question')
           question.answer = answer
           question.commandId = request.command_id
           question.state = 'queued'
@@ -1726,7 +1729,11 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
           worker_ready: true,
           agent_ready: !recovering && (state.phase === 'idle' || state.phase === 'busy'),
           ...(state.config
-            ? { session_id: state.config.thread_id, storage_generation: state.config.storage_generation }
+            ? {
+                session_id: state.config.thread_id,
+                storage_generation: state.config.storage_generation,
+                runtime_mode: state.config.runtime_mode,
+              }
             : {}),
         }
       }

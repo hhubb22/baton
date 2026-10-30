@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, it } from 'vite-plus/test'
-import type * as P from '@baton/protocol'
+import * as P from '@baton/protocol'
 import { seedNode, withTestDatabase, type TestDatabase } from '../testing/database.ts'
 import * as threads from './index.ts'
 import { activitySnapshot, replayNotifications } from '../desktop-notifications.ts'
@@ -27,6 +27,8 @@ async function fixture(run: Run) {
           status: 'available',
           version: 'test',
           default_model: 'default',
+          runtime_modes: P.RuntimeMode.literals.map((id) => ({ id, available: true })),
+          default_runtime_mode: P.DEFAULT_RUNTIME_MODE,
           models: [],
           capabilities: { create: true, queue: true, steer: true, resume: true, stop: true, switch_model: true },
         },
@@ -105,6 +107,46 @@ async function fixture(run: Run) {
   }
   return { ...node, thread, question, report }
 }
+
+it('preserves native approval scopes, rejects unsupported decisions and deduplicates answers', () =>
+  withTestDatabase(async ({ run, restart }) => {
+    const f = await fixture(run)
+    const question: P.ThreadQuestion = {
+      request_id: randomUUID(),
+      kind: 'approval',
+      questions: [],
+      request_kind: 'command',
+      reason: 'Run the command?',
+      full_access_override: 'provider_check',
+      options: [
+        { decision: 'acceptForSession', label: 'Allow for this session' },
+        { decision: 'decline', label: 'Deny' },
+      ],
+    }
+    await run(threads.processReport(f.source, f.report('question.pending', { question, worker_turn_seq: 1 })))
+    const recovered = await restart()
+    await expect(
+      recovered(
+        threads.answer(f.employeeId, f.thread.id, { request_id: question.request_id, decision: 'acceptAlways' }),
+      ),
+    ).rejects.toMatchObject({ code: 'approval_decision_unsupported' })
+    const answer: P.ThreadAnswerInput = { request_id: question.request_id, decision: 'acceptForSession' }
+    await recovered(threads.answer(f.employeeId, f.thread.id, answer))
+    await recovered(threads.answer(f.employeeId, f.thread.id, answer))
+    const commands = await recovered(threads.claimCommands())
+    expect(commands.filter((item) => item.body.action === 'answer')).toHaveLength(1)
+    expect(commands.find((item) => item.body.action === 'answer')?.body.answer).toEqual(answer)
+    const next = { ...question, request_id: randomUUID() }
+    await recovered(
+      threads.processReport(f.source, f.report('question.pending', { question: next, worker_turn_seq: 1 })),
+    )
+    await recovered(threads.stop(f.employeeId, f.thread.id))
+    await expect(
+      recovered(
+        threads.answer(f.employeeId, f.thread.id, { request_id: next.request_id, decision: 'acceptForSession' }),
+      ),
+    ).rejects.toMatchObject({ code: 'question_closed' })
+  }))
 
 it('persists questions and offline answers across restart, enforces ownership and deduplicates delivery', () =>
   withTestDatabase(async ({ run, restart }) => {

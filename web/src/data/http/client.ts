@@ -16,6 +16,8 @@ interface RuntimeReport {
     status: string
     reason?: string
     default_model: string
+    runtime_modes?: Device['agents'][number]['runtimeModes']
+    default_runtime_mode?: Device['agents'][number]['defaultRuntimeMode']
     models: { id: string; thinking?: import('@baton/protocol').ThinkingCapability }[]
     capabilities: {
       create?: boolean
@@ -127,6 +129,8 @@ export function mapDevice(node: NodeDTO): Device {
           (agent.models ?? []).flatMap((model) => (model.thinking ? [[model.id, model.thinking]] : [])),
         ),
         defaultModel: agent.default_model || null,
+        runtimeModes: agent.runtime_modes,
+        defaultRuntimeMode: agent.default_runtime_mode,
         abilities: {
           create: agent.capabilities?.create === true,
           queue: !!agent.capabilities.queue,

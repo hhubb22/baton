@@ -47,6 +47,7 @@ async function fixture(ledger = true) {
     node_id: identity.node_id,
     storage_generation: randomUUID(),
     agent_type: 'pi',
+    runtime_mode: 'full-access',
     working_directory: cwd,
     execution_timeout_seconds: 7200,
     adapter_config: {},

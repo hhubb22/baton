@@ -50,6 +50,8 @@ it('RL-A08 preserves restored history and memory, requires new authorization and
               version: 'offline',
               models: [],
               default_model: '',
+              runtime_modes: [{ id: 'full-access', available: true }],
+              default_runtime_mode: 'full-access',
               capabilities: { create: true, queue: true, steer: false, stop: true, resume: true, switch_model: false },
             },
           ],

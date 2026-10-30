@@ -1119,8 +1119,8 @@ export function ThreadDetail({
                       lockedReason={running && mode === 'now' ? '插话沿用当前回复的思考强度' : undefined}
                       onSelect={(value) => setThinkingChoice({ key: thinkingKey, value })}
                     />
-                    {thread.agent && (
-                      <ThreadAccessMenu side="top" agent={thread.agent} user={device?.commandAccess.user ?? ''} />
+                    {thread.agent && thread.runtimeMode && (
+                      <ThreadAccessMenu side="top" mode={thread.runtimeMode} agent={agent} />
                     )}
                   </>
                 }

@@ -20,6 +20,8 @@ const capability: RuntimeAgent = {
   status: 'available',
   models: [],
   default_model: 'default',
+  default_runtime_mode: 'full-access',
+  runtime_modes: [{ id: 'full-access', available: true }],
   capabilities: { create: true, queue: true, steer: false, stop: true, resume: true, switch_model: false },
 }
 const accepted = (request: WorkerRequest): WorkerCommandResult => ({
@@ -59,6 +61,7 @@ async function withService(
       thread_id: randomUUID(),
       action: 'open',
       agent_type: 'cursor',
+      runtime_mode: 'full-access',
       working_directory: path,
     }
     let ready = false
@@ -74,7 +77,9 @@ async function withService(
             type: 'result',
             ok: true,
             worker_ready: ready,
-            ...(generation ? { storage_generation: generation } : {}),
+            ...(generation
+              ? { storage_generation: generation, session_id: id, runtime_mode: 'full-access' as const }
+              : {}),
           }
         if (req.type === 'thread_open') generation = req.storage_generation
         return handler(id, req, options)
@@ -231,6 +236,39 @@ it('queries a prepared command and resends the identical request only when the W
   )
 })
 
+it('rejects an undelivered open when its mode becomes unavailable before retry', async () => {
+  await withService(({ commandId, command, host, path, setHandler }) =>
+    Effect.gen(function* () {
+      const ledger = yield* makeNodeLedger(join(path, 'node.db'))
+      const delivered: WorkerRequest[] = []
+      let available = true
+      setHandler(async (_id, request) => {
+        if (request.type === 'thread_command_status') return { type: 'result', ok: false, code: 'command_not_found' }
+        delivered.push(request)
+        throw new IPCError('closed', 'Disconnected before command acceptance')
+      })
+      const service = makeThreadService({
+        dataDirectory: path,
+        identity: { node_id: randomUUID() } as NodeIdentity,
+        ledger,
+        host,
+        capability: () => ({
+          ...capability,
+          runtime_modes: [{ id: 'full-access', available, reason: 'Sandbox unavailable' }],
+        }),
+      })
+      yield* Effect.promise(async () => {
+        await expect(service.command(commandId, command)).rejects.toBeInstanceOf(CommandDeliveryUncertain)
+      })
+      available = false
+      const result = yield* Effect.promise(() => service.command(commandId, command))
+      expect(result).toMatchObject({ ok: false, code: 'runtime_mode_unavailable', reason: 'Sandbox unavailable' })
+      expect(delivered).toHaveLength(1)
+      expect(yield* ledger.pendingCommands()).toEqual([])
+    }),
+  )
+})
+
 it('retains the original trace across daemon ledger restart and accepts a retry with a new trace', async () => {
   await withService(({ commandId, command, host, path, setHandler }) =>
     Effect.gen(function* () {
@@ -248,7 +286,14 @@ it('retains the original trace across daemon ledger restart and accepts a retry 
         ensureWorker: (id) => host.ensureWorker(id),
         request: (id, request, options) =>
           request.type === 'status' && generation
-            ? Promise.resolve({ type: 'result', ok: true, worker_ready: true, storage_generation: generation })
+            ? Promise.resolve({
+                type: 'result',
+                ok: true,
+                worker_ready: true,
+                session_id: id,
+                runtime_mode: 'full-access',
+                storage_generation: generation,
+              })
             : host.request(id, request, options),
       }
       setHandler(async (_id, request) => {
@@ -361,6 +406,7 @@ it('delivers settings, stop and withdraw after roots are revoked and the working
               thread_id: command.thread_id,
               action,
               storage_generation: opened.storage_generation!,
+              ...(action === 'resume' ? { runtime_mode: 'full-access' as const } : {}),
               ...(action === 'message' ? { client_message_id: randomUUID(), content: 'next' } : {}),
             }),
           ).rejects.toBeInstanceOf(CommandDeliveryUncertain)

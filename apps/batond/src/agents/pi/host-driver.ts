@@ -56,6 +56,7 @@ const piProbe = (launchArgs = '') =>
     const result: ProbeResult = {
       authenticated,
       models,
+      ...(status.supportedRuntimeModes === undefined ? {} : { supported_runtime_modes: status.supportedRuntimeModes }),
       model_thinking: status.models.flatMap((model) => {
         const thinking = thinkingCapability(model.capabilities)
         return thinking ? [{ model: model.slug, thinking }] : []
@@ -96,13 +97,7 @@ export const piHostDriver = (input: {
         adapter,
         steer: true,
         bindSnapshot: true,
-        runtimeMode: 'approval-required',
         interactionMode: 'default',
-        runtimePolicy: (cwd) => ({
-          runtimeMode: 'approval-required',
-          interactionMode: 'default',
-          cwd,
-        }),
         model: modelSelection,
         probe,
         ...(input.sessionTitle ? { sessionTitle: input.sessionTitle } : {}),

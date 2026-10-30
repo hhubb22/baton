@@ -214,7 +214,14 @@ it('reconnects with the same incarnation, retains reports before Worker ACK, and
       }
       if (req.type === 'status') {
         statusCount++
-        return { type: 'result', ok: true, worker_ready: true, storage_generation: generation }
+        return {
+          type: 'result',
+          ok: true,
+          worker_ready: true,
+          ...(generation
+            ? { session_id: threadId, runtime_mode: 'full-access' as const, storage_generation: generation }
+            : {}),
+        }
       }
       if (req.type === 'thread_pending')
         return {
@@ -264,6 +271,7 @@ it('reconnects with the same incarnation, retains reports before Worker ACK, and
     action: 'open',
     thread_id: threadId,
     agent_type: 'cursor',
+    runtime_mode: 'full-access',
     working_directory: path,
   }
   wss.on('connection', (socket) => {
@@ -481,7 +489,13 @@ it.each(['dropped_reply', 'worker_unavailable'])(
           type: 'result',
           ok: true,
           worker_ready: true,
-          ...(receipt ? { storage_generation: receipt.storage_generation } : {}),
+          ...(receipt
+            ? {
+                storage_generation: receipt.storage_generation,
+                session_id: threadId,
+                runtime_mode: 'full-access' as const,
+              }
+            : {}),
         }
       },
     }
@@ -513,6 +527,7 @@ it.each(['dropped_reply', 'worker_unavailable'])(
                 thread_id: threadId,
                 action: 'open',
                 agent_type: 'cursor',
+                runtime_mode: 'full-access',
                 working_directory: path,
               },
               undefined,
@@ -608,7 +623,9 @@ it('reports lost Worker history while keeping control connected and withholding 
           type: 'result',
           ok: true,
           worker_ready: true,
-          ...(generation ? { storage_generation: generation } : {}),
+          ...(generation
+            ? { storage_generation: generation, session_id: threadId, runtime_mode: 'full-access' as const }
+            : {}),
         }
       if (request.type === 'thread_open') {
         delivered.push(request.type)
@@ -653,6 +670,7 @@ it('reports lost Worker history while keeping control connected and withholding 
               thread_id: threadId,
               action: 'open',
               agent_type: 'cursor',
+              runtime_mode: 'full-access',
               working_directory: path,
             },
             undefined,
@@ -750,6 +768,7 @@ describe('daemon admission and ownership', () => {
         thread_id: randomUUID(),
         action: 'open',
         agent_type: 'cursor',
+        runtime_mode: 'full-access',
         working_directory: path,
       },
       undefined,
@@ -822,6 +841,7 @@ describe('daemon admission and ownership', () => {
             thread_id: randomUUID(),
             action: 'open',
             agent_type: 'cursor',
+            runtime_mode: 'full-access',
             working_directory: path,
           })
         }

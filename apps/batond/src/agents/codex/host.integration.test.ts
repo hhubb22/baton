@@ -18,6 +18,7 @@ import {
   resumedOnly,
   sentOnly,
   withRuntimeQuestions,
+  withReplayMode,
   type Transcript,
 } from '../../testing/codex/transcripts.ts'
 
@@ -77,6 +78,7 @@ const workspace = async (): Promise<WorkerOpenConfig> => {
     node_id: '22222222-2222-4222-8222-222222222222',
     storage_generation: '33333333-3333-4333-8333-333333333333',
     agent_type: 'codex',
+    runtime_mode: 'full-access',
     working_directory: directory,
     execution_timeout_seconds: 30,
     model: 'gpt-6-luna',
@@ -149,7 +151,10 @@ describe('Codex Agent host', () => {
   it('opens and completes the upstream workspace-write tool turn', async () => {
     const config = await workspace()
     const transcript = await readCodexTranscript(fixture('tool_call_workspace_never'))
-    const { agent, events } = start(config, fixture('tool_call_workspace_never'))
+    const { agent, events } = start(
+      config,
+      await writeTranscript(config, 'full-access-tool', withReplayMode(transcript, 'full-access')),
+    )
     const opened = await effect(agent.open(config))
     expect(opened.nativeSessionId).not.toBe('')
     expect(replayProcessRecords(config.working_directory).list()).toEqual([
@@ -245,7 +250,10 @@ describe('Codex Agent host', () => {
   it('interrupts the recorded running tool and reaps the host', async () => {
     const config = await workspace()
     const transcript = await readCodexTranscript(fixture('turn_interrupt_mid_tool'))
-    const { agent, events } = start(config, fixture('turn_interrupt_mid_tool'))
+    const { agent, events } = start(
+      config,
+      await writeTranscript(config, 'full-access-interrupt', withReplayMode(transcript, 'full-access')),
+    )
     await effect(agent.open(config))
     await submit(agent, messages(transcript)[0])
     await effect(agent.abort())
@@ -283,17 +291,32 @@ describe('Codex Agent host', () => {
     { kind: 'user input', accept: false },
     { kind: 'user input', accept: true },
   ])('waits for the explicit $kind answer (accept: $accept) through the adapter', async ({ kind, accept }) => {
-    const config = { ...(await workspace()), model: 'gpt-6-sol' }
-    const transcript = withRuntimeQuestions(
-      await readCodexTranscript(fixture('tool_call_read_only_on_request')),
-      kind === 'user input' ? await readCodexTranscript(fixture('plan_questions')) : undefined,
-      accept,
+    const config = { ...(await workspace()), model: 'gpt-6-sol', runtime_mode: 'approval-required' as const }
+    const transcript = withReplayMode(
+      withRuntimeQuestions(
+        await readCodexTranscript(fixture('tool_call_read_only_on_request')),
+        kind === 'user input' ? await readCodexTranscript(fixture('plan_questions')) : undefined,
+        accept,
+      ),
+      'approval-required',
     )
     const { agent, events } = start(config, await writeTranscript(config, 'runtime-requests', transcript))
     await effect(agent.open(config))
     await submit(agent, messages(transcript)[0])
-    await expect.poll(() => events.some((event) => event.type === 'question'), { timeout: 10_000 }).toBe(true)
-    const question = events.find((event) => event.type === 'question')
+    await expect
+      .poll(() => events.some((event) => event.type === 'question' && event.question.kind === 'approval'), {
+        timeout: 10_000,
+      })
+      .toBe(true)
+    const approval = events.find((event) => event.type === 'question' && event.question.kind === 'approval')
+    if (!approval || approval.type !== 'question' || !agent.answer) throw new Error('Expected an approval')
+    await effect(agent.answer({ request_id: approval.question.request_id, decision: 'accept' }))
+    await expect
+      .poll(() => events.some((event) => event.type === 'question' && event.question.kind !== 'approval'), {
+        timeout: 10_000,
+      })
+      .toBe(true)
+    const question = events.find((event) => event.type === 'question' && event.question.kind !== 'approval')
     if (!question || question.type !== 'question' || !agent.answer) throw new Error('Expected an answerable question')
     expect(events.some((event) => event.type === 'end')).toBe(false)
     expect(question.question.kind).toBe(kind === 'user input' ? 'user_input' : 'mcp-elicitation')

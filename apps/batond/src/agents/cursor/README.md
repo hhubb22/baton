@@ -14,7 +14,7 @@
 
 认证只用设备上显式设置的 `CURSOR_API_KEY`。它经 host 环境传给 adapter 的 `environment`，不写入配置、映射、报告或日志；`ProviderHost.credentials` 是只读空实现，不接 keyring 或浏览器登录。
 
-`agents/probe.ts` 在独立 host 中调用 driver 的探测：`sdk-inspection.ts` 读取磁盘 SDK 的实际版本、平台包版本、Node 要求和资产路径；宿主再执行 sandbox helper 与 `rg`，调用 `Cursor.me`，用临时空目录和关闭 ambient settings 的 SDK prewarm 检查 sandbox，最后查询模型目录。认证查询失败时仍检查 sandbox。`details` 记录 `installed`、`version`、`platform`、`integrity` 和 `sandboxHelper`。SDK 安装完整且认证为 valid 或 unknown 时，公共探测报告 available 并开放新建与恢复；缺 SDK、平台资产不完整、辅助程序不可执行、sandbox 检查明确失败或缺少显式 API key 时报告 unavailable。系统和版本不设白名单，未知认证、版本与模型目录问题保留在 reason 中。已确认 SDK 安装完整后，只读 host 探测失败或超时仍允许新建，并报告探测问题。
+`agents/probe.ts` 在独立 host 中调用 driver 的探测：`sdk-inspection.ts` 读取磁盘 SDK 的实际版本、平台包版本、Node 要求和资产路径；宿主再执行 sandbox helper 与 `rg`，调用 `Cursor.me`，用临时空目录和关闭 ambient settings 的 SDK prewarm 检查 sandbox，最后查询模型目录。认证查询失败时仍检查 sandbox。`details` 记录 `installed`、`version`、`platform`、`integrity` 和 `sandboxHelper`。公共依赖与认证决定 Agent 可用性，sandbox 检查失败影响依赖沙箱的执行模式。系统和版本不设白名单，未知认证、版本与模型目录问题保留在 reason 中。已确认 SDK 安装完整后，只读 host 探测失败或超时仍允许新建，并报告探测问题。
 
 ## 会话与映射
 

@@ -42,27 +42,6 @@ export const withRuntimeInstructions = (transcript: Transcript, model: string): 
   }
 }
 
-/**
- * The recording used t3's full-access policy. Baton keeps approval policy
- * "never" with the native sandbox on, which differs only in this flag.
- */
-export const sandboxed = (transcript: Transcript): Transcript => ({
-  ...transcript,
-  entries: transcript.entries.map((entry) => {
-    if (entry.type !== 'expect_outbound') return entry
-    const frame = entry.frame as Record<string, unknown> | null
-    if (!frame || frame.type !== 'agent.open') return entry
-    const options = frame.options
-    if (!options || typeof options !== 'object') return entry
-    const local = (options as Record<string, unknown>).local
-    if (!local || typeof local !== 'object') return entry
-    return {
-      ...entry,
-      frame: { ...frame, options: { ...options, local: { ...local, sandboxEnabled: true } } },
-    }
-  }),
-})
-
 /** A replay host that only proves one input reached the native session. */
 export const sentOnly = (
   transcript: Transcript,

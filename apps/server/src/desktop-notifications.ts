@@ -159,7 +159,7 @@ export const recordThreadNotification = Effect.fnUntraced(function* (
 ) {
   let notificationKind: P.BrowserNotification['kind'] | undefined
   if (kind === 'question.pending' && Schema.is(P.ThreadReport)(payload))
-    notificationKind = payload.question?.kind === 'mcp-elicitation' ? 'approval' : 'question'
+    notificationKind = payload.question?.kind === 'user_input' ? 'question' : 'approval'
   else if (kind === 'turn.ended' && Schema.is(P.ThreadReport)(payload) && !payload.history_unavailable) {
     notificationKind =
       payload.reason === 'completed'

@@ -8,8 +8,16 @@ import { parseArgs } from 'node:util'
 import { isSea } from 'node:sea'
 import { Effect, Schema } from 'effect'
 import { telemetryLayer } from '@baton/telemetry'
-import { ExecutionTimeoutSeconds, WorkerOpen, type RuntimeAgent, type WorkerRequest } from '@baton/protocol'
+import {
+  DEFAULT_RUNTIME_MODE,
+  RuntimeMode,
+  ExecutionTimeoutSeconds,
+  WorkerOpen,
+  type RuntimeAgent,
+  type WorkerRequest,
+} from '@baton/protocol'
 import { LocalWorkerHost, initializeWorkerDirectory } from './daemon/host.ts'
+import { workerPaths } from './daemon/paths.ts'
 import { IPCError } from './daemon/ipc.ts'
 import { desktopDirectory, DesktopDirectoryError } from './daemon/desktop-directory.ts'
 import { ServiceError } from './daemon/service.ts'
@@ -55,13 +63,13 @@ up/run 支持 --control-timeout-seconds <秒>，认证与同步各默认等待 3
 
 本地 Thread：
 
-  open --cwd <目录> [--thread-id <UUID>] [--agent <cursor|pi|codex|kiro>] [--model <模型>] [--execution-timeout-seconds <秒>]
+  open --cwd <目录> [--thread-id <UUID>] [--agent <cursor|pi|codex|kiro>] [--model <模型>] [--runtime-mode <approval-required|auto-accept-edits|auto|full-access>] [--execution-timeout-seconds <秒>]
   message --thread-id <UUID> --text <正文> [--message-id <ID>] [--mode <queue|steer>] [--model <模型>]
   status | stop | resume | reports --thread-id <UUID>
   command --thread-id <UUID> --command-id <UUID>
   withdraw --thread-id <UUID> --message-id <ID>
   ack --thread-id <UUID> --event-id <UUID> --worker-seq <序号>
-  probe
+  probe [--agent <cursor|pi|codex|kiro>]
 
 设备与 Thread 命令支持 --data-dir <私有目录>，默认 ~/.baton-ts。
 订阅凭据目录使用 BATON_PROJECT_RUNTIME_DATA_DIR，默认 ~/.baton/project-runtime。
@@ -340,6 +348,7 @@ export async function runLocalCLI(
       'after-worker-seq': { type: 'string' },
       cwd: { type: 'string' },
       model: { type: 'string' },
+      'runtime-mode': { type: 'string' },
       agent: { type: 'string' },
       mode: { type: 'string' },
       'execution-timeout-seconds': { type: 'string' },
@@ -359,8 +368,9 @@ export async function runLocalCLI(
   }
   if (action === 'probe') {
     const { probeAgents } = await import('./agents/probe.ts')
-    const [cursor] = await probeAgents({ dataDirectory, agentTypes: ['cursor'] })
-    console.log(JSON.stringify(cursor, null, 2))
+    const agent = Schema.decodeUnknownSync(Schema.Literals(['cursor', 'pi', 'codex', 'kiro']))(values.agent ?? 'cursor')
+    const [report] = await probeAgents({ dataDirectory, agentTypes: [agent] })
+    console.log(JSON.stringify(report, null, 2))
     return
   }
   const timeout =
@@ -391,12 +401,22 @@ export async function runLocalCLI(
         ))
     if (capability.status !== 'available' || !capability.capabilities.create)
       throw new Error(capability.reason ?? `${agent} 尚不可用`)
+    const runtimeMode = Schema.decodeUnknownSync(RuntimeMode)(
+      values['runtime-mode'] ?? saved?.open_config.runtime_mode ?? DEFAULT_RUNTIME_MODE,
+    )
+    const reportedMode = capability.runtime_modes?.find((entry) => entry.id === runtimeMode)
+    if (!reportedMode)
+      throw new Error(
+        `不支持执行模式 ${runtimeMode}；设备报告：${capability.runtime_modes?.map((entry) => entry.id).join('、') || '无'}`,
+      )
+    if (!reportedMode.available) throw new Error(reportedMode.reason ?? `执行模式 ${runtimeMode} 不可用`)
     const cwd = values.cwd ? await realpath(values.cwd) : saved?.open_config.working_directory
     if (!cwd) throw new Error('新建 Thread 需要 --cwd')
     if (
       saved &&
       (saved.open_config.working_directory !== cwd ||
         saved.open_config.agent_type !== agent ||
+        saved.open_config.runtime_mode !== runtimeMode ||
         (timeout !== undefined && saved.open_config.execution_timeout_seconds !== timeout) ||
         (values.model && saved.open_config.model !== values.model))
     )
@@ -415,6 +435,7 @@ export async function runLocalCLI(
         node_id: saved?.open_config.node_id ?? randomUUID(),
         storage_generation: storageGeneration,
         agent_type: agent,
+        runtime_mode: runtimeMode,
         working_directory: cwd,
         execution_timeout_seconds: timeout ?? saved?.open_config.execution_timeout_seconds ?? 7200,
         ...(model ? { model } : {}),
@@ -436,6 +457,26 @@ export async function runLocalCLI(
     if (!['message', 'stop', 'resume', 'withdraw', 'command'].includes(action)) throw new Error(`未知命令：${action}`)
     const status = await host.request(threadId, { type: 'status', ok: false }, { start: true })
     if (!status.storage_generation) throw new Error('Thread 尚未持久接收新建命令')
+    if (action === 'resume') {
+      const paths = workerPaths(dataDirectory, threadId)
+      const saved = Schema.decodeUnknownSync(WorkerOpen)(
+        JSON.parse((await readPrivateFile(join(paths.threadDirectory, 'local-open.json'))).toString('utf8')),
+      )
+      if (status.runtime_mode !== saved.open_config.runtime_mode) throw new Error('runtime_mode_conflict')
+      const agent = saved.open_config.agent_type
+      if (agent !== 'cursor' && agent !== 'pi' && agent !== 'codex' && agent !== 'kiro')
+        throw new Error('agent_unavailable')
+      const capability = await (dependencies.probeAgent
+        ? dependencies.probeAgent(agent)
+        : import('./agents/probe.ts').then(
+            async ({ probeAgents }) => (await probeAgents({ dataDirectory, agentTypes: [agent] }))[0]!,
+          ))
+      const reportedMode = capability.runtime_modes?.find((entry) => entry.id === saved.open_config.runtime_mode)
+      if (capability.status !== 'available' || !capability.capabilities.resume)
+        throw new Error(capability.reason ?? 'agent_unavailable')
+      if (!reportedMode) throw new Error('runtime_mode_unsupported')
+      if (!reportedMode.available) throw new Error(reportedMode.reason ?? 'runtime_mode_unavailable')
+    }
     const identity = {
       ok: false,
       thread_id: threadId,

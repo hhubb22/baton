@@ -56,6 +56,7 @@ async function fixture() {
     node_id: randomUUID(),
     storage_generation: randomUUID(),
     agent_type: 'shell',
+    runtime_mode: 'full-access',
     project_id: randomUUID(),
     origin_conversation_id: randomUUID(),
     origin_tool_call_id: 'tool:exec:1',

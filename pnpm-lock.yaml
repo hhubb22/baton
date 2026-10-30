@@ -494,6 +494,9 @@ importers:
 
   packages/protocol:
     dependencies:
+      '@t3tools/contracts':
+        specifier: workspace:*
+        version: link:../../upstream/t3code/packages/contracts
       effect:
         specifier: 'catalog:'
         version: 4.0.6

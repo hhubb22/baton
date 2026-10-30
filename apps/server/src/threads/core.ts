@@ -1,7 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import { Effect, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
-import type { RuntimeReport, Thread, ThreadCommand, ThreadMessage, ThreadMessageInput } from '@baton/protocol'
+import type {
+  RuntimeMode,
+  RuntimeReport,
+  Thread,
+  ThreadCommand,
+  ThreadMessage,
+  ThreadMessageInput,
+} from '@baton/protocol'
 import { captureTrace, withTraceSpan } from '@baton/telemetry'
 import { AppError } from '../errors.ts'
 
@@ -82,6 +89,7 @@ export const admission = (
   directory: string,
   model: string,
   operation: 'create' | 'queue' | 'steer' | 'resume',
+  runtimeMode: RuntimeMode,
 ) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -109,6 +117,19 @@ export const admission = (
               : 'agent_unavailable',
           422,
         ),
+      )
+    const mode = capability.runtime_modes?.find((item) => item.id === runtimeMode)
+    if (!mode)
+      return yield* Effect.fail(
+        new AppError(
+          422,
+          'runtime_mode_unsupported',
+          `Runtime mode ${runtimeMode} is not supported; supported modes: ${capability.runtime_modes?.map((item) => item.id).join(', ') || 'none'}`,
+        ),
+      )
+    if (!mode.available)
+      return yield* Effect.fail(
+        new AppError(422, 'runtime_mode_unavailable', mode.reason || 'runtime_mode_unavailable'),
       )
     if (operation !== 'create' && model && !capability.capabilities.switch_model)
       return yield* Effect.fail(failure('model_switch_unsupported', 422))
@@ -184,7 +205,7 @@ export const insertMessage = (t: Thread, input: ThreadMessageInput, source?: Pro
       if (!source?.shellExec || existing.length) return yield* Effect.fail(failure('shell_single_turn', 422))
     }
     const selected = m.model || t.next_model || ''
-    yield* admission(t.employee_id, t.node_id, t.agent_type, t.working_directory, selected, m.mode)
+    yield* admission(t.employee_id, t.node_id, t.agent_type, t.working_directory, selected, m.mode, t.runtime_mode)
     if (m.thinking) {
       const reports = yield* sql<{ report: RuntimeReport }>`SELECT report FROM node_runtime_reports
         WHERE employee_id=${t.employee_id} AND node_id=${t.node_id}`

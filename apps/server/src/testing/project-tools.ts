@@ -103,6 +103,11 @@ export async function projectToolFixture(db: TestDatabase, existing?: Pick<ToolR
         status: 'available',
         models: [{ id: 'model', name: 'Model' }],
         default_model: 'model',
+        runtime_modes: [
+          { id: 'full-access', available: true },
+          { id: 'approval-required', available: true },
+        ],
+        default_runtime_mode: 'full-access',
         capabilities: { create: true, queue: true, steer: false, stop: true, resume: true, switch_model: true },
       },
     ],

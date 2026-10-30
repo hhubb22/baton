@@ -70,6 +70,11 @@ it('opens each local Agent with a custom model and budget and reuses its saved c
       version: 'offline',
       status: 'available',
       default_model: 'default',
+      runtime_modes: [
+        { id: 'full-access', available: true },
+        { id: 'approval-required', available: true },
+      ],
+      default_runtime_mode: 'full-access',
       models: [],
       capabilities: {
         create: true,
@@ -102,6 +107,8 @@ it('opens each local Agent with a custom model and budget and reuses its saved c
           agent,
           '--model',
           'custom-id',
+          '--runtime-mode',
+          'approval-required',
           '--execution-timeout-seconds',
           '14400',
         ],
@@ -111,6 +118,7 @@ it('opens each local Agent with a custom model and budget and reuses its saved c
       const original = requests.at(-2)
       expect(original?.open_config).toMatchObject({
         agent_type: agent,
+        runtime_mode: 'approval-required',
         model: 'custom-id',
         execution_timeout_seconds: 14400,
         working_directory: cwd,

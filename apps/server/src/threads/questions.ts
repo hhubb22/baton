@@ -49,6 +49,8 @@ export const answer = (employeeID: string, threadID: string, input: P.ThreadAnsw
         return yield* Effect.fail(failure('question_closed'))
       const question = (yield* pendingQuestions(t)).find((item) => item.request_id === valid.request_id)
       if (!question) return yield* Effect.fail(failure('question_closed'))
+      if (!P.isThreadAnswerAllowed(question, valid))
+        return yield* Effect.fail(failure('approval_decision_unsupported', 422))
       if (valid.decision === 'accept' && question.kind === 'user_input' && valid.answers === undefined)
         return yield* Effect.fail(failure('answers_required', 422))
       if (valid.decision === 'accept') {

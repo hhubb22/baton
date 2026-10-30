@@ -1,5 +1,5 @@
 import { Schema } from 'effect'
-import { OrchestrationV2ProviderThread, OrchestrationV2ProviderThreadJson } from '@t3tools/contracts'
+import { OrchestrationV2ProviderThread, OrchestrationV2ProviderThreadJson, RuntimeMode } from '@t3tools/contracts'
 import type { WorkerOpenConfig } from '@baton/protocol'
 import { dirname, isAbsolute, resolve } from 'node:path'
 import { realpath } from 'node:fs/promises'
@@ -15,11 +15,18 @@ export const NativeMapping = Schema.Struct({
   cwd: Schema.String,
   statePath: Schema.String,
   agentType: Schema.String,
+  runtimeMode: RuntimeMode,
   profile: Schema.Record(Schema.String, Schema.String),
   /** Upstream `OrchestrationV2ProviderThread`, kept opaque here and decoded by the driver. */
   providerThread: Schema.Json,
 })
 export type NativeMapping = typeof NativeMapping.Type
+
+export class RuntimeModeConflict extends Error {
+  constructor() {
+    super('runtime_mode_conflict')
+  }
+}
 
 export function statePath(config: WorkerOpenConfig, label = 'Agent'): string {
   const path = config.adapter_config.state_path
@@ -58,6 +65,7 @@ export async function mappingFor(
     cwd: await realpath(config.working_directory),
     statePath: path,
     agentType: config.agent_type,
+    runtimeMode: config.runtime_mode,
     profile: profileFor(config.agent_type),
     providerThread: Schema.encodeSync(OrchestrationV2ProviderThreadJson)(providerThread),
   })
@@ -81,6 +89,7 @@ export async function loadMapping(
     (nativeSessionId !== undefined && mapping.nativeSessionId !== nativeSessionId)
   )
     throw new AgentError(`${label} native mapping identity, working directory or profile mismatch`)
+  if (mapping.runtimeMode !== config.runtime_mode) throw new RuntimeModeConflict()
   return mapping
 }
 

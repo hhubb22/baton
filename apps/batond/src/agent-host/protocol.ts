@@ -1,5 +1,6 @@
 import { Context, Effect, Schema, Stream } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
+import { RuntimeMode } from '@t3tools/contracts'
 import {
   ThreadAnswerInput,
   ThreadQuestion,
@@ -99,6 +100,7 @@ const ProbeDetail = Schema.Union([Schema.String, Schema.Number, Schema.Boolean])
 export const ProbeResult = Schema.Struct({
   authenticated: Schema.Literals(['valid', 'missing', 'unknown']),
   models: Schema.Array(Schema.String),
+  supported_runtime_modes: Schema.optionalKey(Schema.Array(RuntimeMode)),
   model_thinking: Schema.optionalKey(
     Schema.Array(Schema.Struct({ model: Schema.String, thinking: ThinkingCapability })),
   ),

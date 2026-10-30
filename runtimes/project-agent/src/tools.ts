@@ -116,10 +116,11 @@ export const toolDefinitions = [
   {
     name: 'threads.create',
     description:
-      '在目标设备上新建 Thread 并向执行 Agent 发出第一条消息，立即返回 Thread ID 和状态。按设备能力、用户要求和项目记忆选择 Agent 与模型；省略 model 时使用设备上该 Agent 的默认模型。工作目录必须已存在；agent_type 不能为 shell，命令通过 nodes.exec 执行。在 message 中写明工作目标和验证方式，找不到验证方式时写明原因。结果可用 threads.read 查询。',
+      '在目标设备上新建 Thread 并向执行 Agent 发出第一条消息，立即返回 Thread ID 和状态。按设备能力、用户要求和项目记忆选择 Agent 与模型；省略 model 时使用设备上该 Agent 的默认模型。runtime_mode 可选 devices.list 报告的模式，省略时使用上游默认模式。工作目录必须已存在；agent_type 不能为 shell，命令通过 nodes.exec 执行。在 message 中写明工作目标和验证方式，找不到验证方式时写明原因。结果可用 threads.read 查询。',
     parameters: obj({
       node_id: str(),
       agent_type: str(),
+      runtime_mode: opt(),
       model: opt(),
       working_directory: str(),
       message: str(),

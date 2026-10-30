@@ -79,6 +79,7 @@ it('counts live Worker locks and WAL bytes, skips failed scans and recovers', as
               node_id: randomUUID(),
               storage_generation: randomUUID(),
               agent_type: 'cursor',
+              runtime_mode: 'full-access',
               working_directory: directory,
               execution_timeout_seconds: 60,
               adapter_config: {},

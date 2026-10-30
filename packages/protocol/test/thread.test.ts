@@ -8,6 +8,7 @@ const thread = {
   client_thread_id: 'client-thread',
   node_id: '33333333-3333-4333-8333-333333333333',
   agent_type: 'pi',
+  runtime_mode: 'full-access',
   model: '',
   next_model: '',
   working_directory: '/workspace/项目',

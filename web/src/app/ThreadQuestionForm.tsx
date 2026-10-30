@@ -59,6 +59,7 @@ export function ThreadQuestionForm({
       }
       const value = Object.hasOwn(answers, item.id) ? answers[item.id] : undefined
       if (
+        question.kind !== 'approval' &&
         decision === 'accept' &&
         item.required !== false &&
         (value === undefined || value === '' || (Array.isArray(value) && value.length === 0))
@@ -86,6 +87,38 @@ export function ThreadQuestionForm({
     } finally {
       setSaving(false)
     }
+  }
+
+  if (question.kind === 'approval') {
+    const options = question.options ?? [
+      { decision: 'accept' as const, label: '允许' },
+      { decision: 'decline' as const, label: '拒绝' },
+      { decision: 'cancel' as const, label: '取消' },
+    ]
+    return (
+      <div aria-label="权限审批" {...stylex.props(styles.form)}>
+        {question.prompt && <p {...stylex.props(text.small)}>{question.prompt}</p>}
+        {question.reason && <p {...stylex.props(text.small)}>{question.reason}</p>}
+        <div {...stylex.props(styles.actions)}>
+          {options.map((option) => (
+            <Button key={option.decision} disabled={saving || saved} onClick={() => void submit(option.decision)}>
+              {option.label}
+            </Button>
+          ))}
+        </div>
+        {options.map((option) => option.warning && <p key={option.decision}>{option.warning}</p>)}
+        {error && (
+          <p role="alert" {...stylex.props(text.caption, styles.error)}>
+            {error}
+          </p>
+        )}
+        {saved && (
+          <p role="status" {...stylex.props(text.caption)}>
+            回答已保存
+          </p>
+        )}
+      </div>
+    )
   }
 
   return (

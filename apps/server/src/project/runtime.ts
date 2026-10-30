@@ -551,6 +551,7 @@ const schemas = {
     working_directory: P.nonemptyText(4096),
     message: P.MessageContent,
     model: Schema.optionalKey(P.summary(512)),
+    runtime_mode: Schema.optionalKey(P.RuntimeMode),
     execution_timeout_seconds: Schema.optionalKey(P.PositiveInteger.check(Schema.isLessThanOrEqualTo(2147483647))),
   }),
   'threads.send': Schema.Struct({
@@ -758,6 +759,7 @@ const executeBusiness = Effect.fnUntraced(function* (
           node_id: a.node_id,
           agent_type: a.agent_type,
           model: a.model ?? '',
+          ...(a.runtime_mode === undefined ? {} : { runtime_mode: a.runtime_mode }),
           working_directory: a.working_directory,
           message: { client_message_id: `pa:${c.conversationId}:${c.toolCallId}:0`, content: a.message },
         },
@@ -765,7 +767,12 @@ const executeBusiness = Effect.fnUntraced(function* (
       )
       return {
         changedThreadId: r.thread.id,
-        value: { thread_id: r.thread.id, status: r.thread.status, read_tool: 'threads.get' },
+        value: {
+          thread_id: r.thread.id,
+          status: r.thread.status,
+          runtime_mode: r.thread.runtime_mode,
+          read_tool: 'threads.get',
+        },
       }
     }
     case 'threads.send': {

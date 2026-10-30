@@ -10,6 +10,7 @@ import {
   sentenceList,
   usableAgents,
 } from '../derive'
+import { DEFAULT_RUNTIME_MODE } from '@baton/protocol'
 import type {
   AgentKind,
   Device,
@@ -477,6 +478,7 @@ export class MockStore {
       folder: string
       agent: AgentKind
       model: string
+      runtimeMode?: import('@baton/protocol').RuntimeMode
       thinking?: import('@baton/protocol').ThinkingSelection
       executionTimeoutSeconds?: number
       body: string
@@ -503,6 +505,7 @@ export class MockStore {
       folder,
       agent: kind,
       model,
+      runtimeMode: input.runtimeMode ?? DEFAULT_RUNTIME_MODE,
       thinking: input.thinking ?? null,
       executionTimeoutSeconds: input.executionTimeoutSeconds ?? 7200,
       projectId: null,

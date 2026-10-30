@@ -488,8 +488,8 @@ it('serves persisted trace pages with raw JSON and distinguishes missing Turns f
   await database.run(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      yield* sql`INSERT INTO threads(id,employee_id,node_id,client_thread_id,request_hash,agent_type,working_directory,created_by)
-      VALUES(${threadId},${employee.id},${nodeId},${threadId},${Buffer.alloc(32)},'cursor','/work','employee')`
+      yield* sql`INSERT INTO threads(id,employee_id,node_id,client_thread_id,request_hash,agent_type,runtime_mode,working_directory,created_by)
+      VALUES(${threadId},${employee.id},${nodeId},${threadId},${Buffer.alloc(32)},'cursor','full-access','/work','employee')`
       for (const seq of [1, 2]) {
         yield* sql`INSERT INTO thread_turns(id,employee_id,thread_id,worker_turn_seq,initiator,started_at,ended_at,end_reason)
         VALUES(${randomUUID()},${employee.id},${threadId},${seq},'employee',now(),now(),'completed')`
@@ -633,12 +633,35 @@ it('preserves Project and memory writes, conflict bodies and employee isolation 
   await database.run(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      yield* sql`INSERT INTO threads(id,employee_id,node_id,project_id,client_thread_id,request_hash,agent_type,working_directory,created_by,origin_conversation_id,origin_tool_call_id)
-      SELECT ${threadId},${employee.id},${nodeId},${project.id},${threadId},${Buffer.alloc(32)},'cursor','/work','project_agent',c.id,${threadId}
+      yield* sql`INSERT INTO threads(id,employee_id,node_id,project_id,client_thread_id,request_hash,agent_type,runtime_mode,working_directory,created_by,origin_conversation_id,origin_tool_call_id)
+      SELECT ${threadId},${employee.id},${nodeId},${project.id},${threadId},${Buffer.alloc(32)},'cursor','full-access','/work','project_agent',c.id,${threadId}
       FROM conversations c JOIN project_agents a ON a.id=c.agent_id WHERE a.project_id=${project.id}`
     }),
   )
   notifications.length = 0
+  for (const [path, method, body] of [
+    [
+      '/api/v1/threads',
+      'POST',
+      {
+        client_thread_id: randomUUID(),
+        node_id: nodeId,
+        agent_type: 'cursor',
+        runtime_mode: 'invalid',
+        working_directory: '/work',
+        message: { client_message_id: randomUUID(), content: 'hello' },
+      },
+    ],
+    [
+      `/api/v1/threads/${threadId}/messages`,
+      'POST',
+      { client_message_id: randomUUID(), content: 'hello', runtime_mode: 'full-access' },
+    ],
+    [`/api/v1/threads/${threadId}/settings`, 'PATCH', { execution_timeout_seconds: 60, runtime_mode: 'full-access' }],
+    [`/api/v1/threads/${threadId}/resume`, 'POST', { runtime_mode: 'full-access' }],
+  ] as const) {
+    expect((await request(path, method, body)).status).toBe(422)
+  }
   expect(
     (await request(`/api/v1/threads/${threadId}/settings`, 'PATCH', { execution_timeout_seconds: 60 })).status,
   ).toBe(200)

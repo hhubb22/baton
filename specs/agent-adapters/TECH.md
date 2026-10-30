@@ -3,7 +3,7 @@
 Status: draft
 Basis: [行为规格](PRODUCT.md)；[Baton TECH](../baton/TECH.md)；[发布设计](../release/TECH.md)；fork 固定提交与补丁见 [t3code 来源](../../third_party/t3code/README.md)。
 
-「Thread 执行权限」及相关模式准入为 R-11 的待实施设计。当前创建 DTO 与 Worker 配置尚无模式字段，Codex、Cursor 仍固定为现有沙箱策略；其余章节描述现行实现。Full access 的原生参数由上游 adapter 映射，Baton 不复制该映射。
+Thread 创建 DTO、持久记录、Worker 配置和原生映射携带执行模式，准入按设备报告的模式能力检查。Full access 的原生参数由上游 adapter 映射，Baton 不复制该映射。
 
 ## 实现边界
 
@@ -60,7 +60,7 @@ agent-host 把 `ProviderAdapterV2` 映射到 Worker 现有的 `ThreadAgent`：
 
 `agent-host/driver.ts` 的通用驱动负责上述映射、持久原生映射、迟到事件过滤和 sent 判定。映射还保存 Agent 类型与非敏感的本机 profile 目录，恢复时核对它们；目录变化直接拒绝。Pi、Codex、Kiro 使用原生 CLI 的认证，Cursor 使用显式 `CURSOR_API_KEY`。Kiro 的 profile 只记录 `homedir()`，没有专有环境变量目录映射。
 
-`prepareInput` 与 `restoreInput` 不读取原生历史，InputPreparation 只保存原生会话、准备标识和 Worker 已确认的发送数。现行运行时权限请求中的 `command`、`file-read`、`file-change`、`permission` 选择当次允许；R-11 实施后的应答按「Thread 执行权限」区分模式。`user_input` 和 `mcp-elicitation` 通过 `turn_item.updated` 的问题内容和 `runtime_request.updated` 的请求身份关联，保存到 Worker 账本并报告中心，网页提供选项、文本回答和取消。Codex 的 MCP elicitation 按上游提供的确认语义回答；ACP 表单由上游转换为结构化问题。其他请求返回取消。停止后的请求取消，执行结束或 Worker 恢复时关闭旧问题；提问期间继续计入本轮执行时限。回答命令与原请求及执行身份绑定，在调用上游前持久保存 intent；结果不确定时保留诊断并禁止自动重发。上游的 `rollbackThread`、`forkThread`、`compactThread` 与 `uploadFeedback` 不接入。
+`prepareInput` 与 `restoreInput` 不读取原生历史，InputPreparation 只保存原生会话、准备标识和 Worker 已确认的发送数。运行时权限请求、`user_input` 和 `mcp-elicitation` 通过 `turn_item.updated` 的问题内容和 `runtime_request.updated` 的请求身份关联，保存到 Worker 账本并报告中心，网页提供原生批准选项、文本回答和取消。Codex 的 MCP elicitation 按上游提供的确认语义回答；ACP 表单由上游转换为结构化问题。其他请求返回取消。停止后的请求取消，执行结束或 Worker 恢复时关闭旧问题；提问期间继续计入本轮执行时限。回答命令与原请求及执行身份绑定，在调用上游前持久保存 intent；结果不确定时保留诊断并禁止自动重发。上游的 `rollbackThread`、`forkThread`、`compactThread` 与 `uploadFeedback` 不接入。
 
 ## 运行时与进程模型（R-08、R-12）
 
@@ -209,7 +209,7 @@ Web 的 NodeDTO、DeviceAgent 和 mapDevice 保留 status、create 和 reason，
 
 探测在只读 agent-host 中调用上游 driver 的安装、认证与模型检查，版本按各 Agent 的探测路径取得，返回分开的安装/版本、认证和模型目录结果。探测不发送 prompt、不调用 authenticate/login 或打开登录浏览器，使用临时空工作目录和空 MCP 配置；Kiro 的完整探测仍调用 `checkAcpRegistryProviderStatus` 与 `probeAcpRegistryConfiguration`，由上游建立空的发现会话以读取能力与模型。其余隔离行为以上游实现为准。每个任务最多 30 秒；TS daemon 每轮探测结束后默认间隔 30 秒重新执行，失败结果不会因路径或版本未变而永久缓存，结束或失败后回收进程树。模型目录用于发现与补全，显式 ID 交给原生 Agent 判定，换模型继续受已实现能力限制。
 
-四个 Agent 在程序或 SDK 已安装、认证 valid/unknown 时报告 available，开放 create/resume；缺程序或明确 missing 时 unavailable。reason 记录版本、系统、认证未知、模型目录问题和未开放能力的原因；版本探测失败或超时不阻止创建。模型目录失败时可按默认模型创建。整次 host 探测失败且安装状态未确认时保持 unverified，避免将探测故障误报成程序缺失。Cursor 在主进程先检查 SDK 资产与平台包版本一致性，host 再检查公共辅助程序与 sandbox。当前明确失败会禁用整个 Agent；R-11 实施后按「Thread 执行权限」区分公共失败和模式失败，不能由 sandbox 失败禁用仍可运行的 Full access。已确认 SDK 安装完整后，只读 host 探测失败或超时保留诊断并允许创建。
+四个 Agent 在程序或 SDK 已安装、认证 valid/unknown 时报告 available，开放 create/resume；缺程序或明确 missing 时 unavailable。reason 记录版本、系统、认证未知、模型目录问题和未开放能力的原因；版本探测失败或超时不阻止创建。模型目录失败时可按默认模型创建。整次 host 探测失败且安装状态未确认时保持 unverified，避免将探测故障误报成程序缺失。Cursor 在主进程先检查 SDK 资产与平台包版本一致性，host 再检查公共辅助程序与 sandbox。公共依赖失败禁用整个 Agent；sandbox 失败按上游策略只禁用依赖该沙箱的模式，Full access 仍可运行。已确认 SDK 安装完整后，只读 host 探测失败或超时保留诊断并允许创建。
 
 Kiro 在上游 status 之外运行 `kiro-cli --version`。`src/agents/kiro/version.ts` 使用 host 提供的 Node Effect `ChildProcessSpawner`，经包装 spawner 交给 process registrar 管理，Scope 结束或超时后回收进程。版本命令限时 4 秒，stdout/stderr 各最多收集 4096 字节，只返回解析出的版本号；原始输出与诊断留在 host 内，不进入能力报告。命令超时、失败、输出超限或不可解析时，版本为 `unknown` 并记录原因；已安装时仍为 available。缺少程序时为 `unavailable`。
 
@@ -221,11 +221,11 @@ Kiro 的 `turnFailure` 回调处理真实回合的 provider failure：明确认�
 
 ## Thread 执行权限（R-11）
 
-本节为待实施设计，关联 A-17～21。模式与默认值直接使用固定 fork 的 `@t3tools/contracts` 导出的 `RuntimeMode`、`DEFAULT_RUNTIME_MODE`；当前默认 `full-access`。Baton 负责持久化与传输，审批、沙箱和自动审查语义由完整上游 adapter 执行。
+模式与默认值直接使用固定 fork 的 `@t3tools/contracts` 导出的 `RuntimeMode`、`DEFAULT_RUNTIME_MODE`；当前默认 `full-access`。Baton 负责持久化与传输，审批、沙箱和自动审查语义由完整上游 adapter 执行。
 
 ### 契约与能力
 
-| 入口或记录 | 待增加字段与行为 |
+| 入口或记录 | 字段与行为 |
 |---|---|
 | `packages/protocol` | 声明对 `@t3tools/contracts` 的 workspace 依赖，复用并导出原 `RuntimeMode` Schema、类型和默认常量；字段名使用 `runtime_mode`，不维护另一套枚举或默认常量 |
 | 创建与读取 DTO | `CreateThreadInput` / `CreateBrowserThreadInput` 增加可选 `runtime_mode`；`Thread`、详情、列表和 Project 工具返回实际持久模式 |
@@ -242,7 +242,7 @@ Kiro 的 `turnFailure` 回调处理真实回合的 provider failure：明确认�
 
 ### 上游策略与默认值
 
-所有已接入 hosted Agent 统一传入上游 `ProviderAdapterV2RuntimePolicy`：`runtimeMode` 为已保存值，`cwd` 为已授权真实目录，`interactionMode` 沿用原交互配置。省略 `approvalPolicy` 与 `sandboxPolicy`，由 adapter 的原有映射生成原生配置。删除 Baton 固定的 `approval-required`、`approvalPolicy: never` 和 Codex `workspaceWrite/networkAccess:false` 覆盖，不保留现行默认策略。
+所有已接入 hosted Agent 统一传入上游 `ProviderAdapterV2RuntimePolicy`：`runtimeMode` 为已保存值，`cwd` 为已授权真实目录，`interactionMode` 沿用原交互配置。省略 `approvalPolicy` 与 `sandboxPolicy`，由 adapter 的原有映射生成原生配置。
 
 复用入口分别为 Codex 的 `codexRuntimeModeTurnDefaults` / `buildCodexTurnStartParams`、Cursor 的 `cursorRuntimeAgentPolicy` / SDK options、Pi 的 `buildPiRpcLaunch` 与权限扩展、ACP 的 `clientPolicy`。Baton 不复制这些映射，也不自己计算每种 mode 的原生审批、sandbox、网络或 auto-review 参数。上游 Auto 在某些 provider 上的降级和等待审批行为原样接受，不能把它重新解释成 Baton 的统一自动执行模式。
 
@@ -250,7 +250,7 @@ Kiro 的 `turnFailure` 回调处理真实回合的 provider failure：明确认�
 
 ### 原生待审批请求
 
-当前 `agent-host/runtime-request.ts` 会按请求种类自动 accept 工具权限。该逻辑须随模式接入一起淘汰：上游已自动决定的动作不增加 Baton 审批；上游发出的 pending 权限请求交给员工，不能因 mode 是 Full access 或请求是 command 就直接允许。Full access 下的 `ask_rule`、`provider_check` 确认继续遵循上游。
+`agent-host/runtime-request.ts` 将 pending 权限请求交给员工；上游已自动决定的动作不增加 Baton 审批。Full access 下的 `ask_rule`、`provider_check` 确认继续遵循上游。
 
 `agent-host/driver.ts` 沿用现有按 request ID 关联 runtime request 与 TurnItem 的方式，将 `approval_request` 的原因、`requestKind`、`options` 和 `fullAccessOverride` 传入持久问题流程。现有 `ThreadQuestion` 增加 `kind: approval` 及相应上游字段；决策 Schema 复用 `ProviderApprovalDecision`，选项复用 `ProviderApprovalOption`，不把有作用范围的决定压缩为普通 accept/cancel。提供商未给出扩展选项时只提供其公共当次批准、拒绝或取消，不自行开放长期授权。
 
@@ -273,17 +273,17 @@ Kiro 的 `turnFailure` 回调处理真实回合的 provider failure：明确认�
 
 模式不绕过 `threads/core.ts` 的员工、节点和初始工作目录检查，不改变文件浏览 API 边界。`nodes.exec` 仍校验本机开关。前端、模型工具与 `adapter_config` 不接受任意 native policy JSON，不通过环境或返回文本覆盖持久 mode。
 
-淘汰资产包括 Baton 固定 mode/policy、按种类一律自动接受权限请求的分支，以及验证这些旧策略的专属预期。沿用上游原测试和转录，只为传递、持久恢复与审批转交补回归。首版前按最终格式调整基线；发布后的模式迁移按 [发布设计](../release/TECH.md#持久格式与迁移)保存原会话真实策略，无法确认时不自动恢复。
+沿用上游原测试和转录，只为传递、持久恢复与审批转交补回归。首版前的数据库与设备记录使用当前结构基线，旧实验记录需要重建；发布后的模式迁移按 [发布设计](../release/TECH.md#持久格式与迁移)保存原会话真实策略，无法确认时不自动恢复。
 
 ### Cursor 模式探测
 
-当前 `cursorProbe` 与 `hostedAgentReport` 会因 sandbox 检查失败禁用整个 Agent。实施时按上游 policy 的实际依赖区分公共模块/store/认证失败和模式特有故障；原生 sandbox 明确不可用只影响上游在该环境实际要求 sandbox 的模式。Full access 的准入不依赖无关的 sandbox prewarm 成功，也不额外启用 sandbox。
+`cursorProbe` 与 `hostedAgentReport` 按上游 policy 的实际依赖区分公共模块/store/认证失败和模式特有故障；原生 sandbox 明确不可用只影响上游在该环境实际要求 sandbox 的模式。Full access 的准入不依赖无关的 sandbox prewarm 成功，也不额外启用 sandbox。
 
 复用上游的 prime/prewarm 与 Windows 平台处理，不为上游允许的审批模式重新加上强制文件隔离条件。界面按实际能力说明审批和文件隔离的区别。缺少系统验证或只读探测暂时超时继续记录诊断，不扩大成无依据的模式限制；公共依赖明确缺失仍影响全部模式。安装包的公共加载检查与模式特有检查分别记录，不改写已有测量结论。
 
 ### 验证
 
-A-17～21 均为 planned。直接沿用上游 mode/default、Codex/Cursor 映射、Pi/ACP 审批 policy 的原有测试，Baton 不再复制一套原生参数矩阵。包内补少量创建幂等、默认值传递、恢复一致性、pending 审批转交与回答去重测试；一条跨 app 本地替身链路验证省略参数时 Full access 从 API 到达真实 adapter，并保留一条非默认审批模式的转录回放。替身参数验证与真实系统沙箱证据分别记录，自动化不调用在线模型。
+上游 mode/default、Codex/Cursor 映射、Pi/ACP 审批 policy 沿用原测试，Baton 不复制原生参数矩阵。中心与节点测试覆盖创建幂等、默认值传递、恢复一致性、pending 审批转交与回答去重；跨 app 本地替身链路验证省略参数时 Full access 从 API 到达真实 adapter，host 回放覆盖非默认审批模式。自动化不调用在线模型；本地替身与离线回放不证明真实系统的沙箱隔离效果。
 
 ## 安装包与代码复用
 
@@ -309,7 +309,7 @@ Kiro host 回放使用上述授权转换的夹具，验证范围包括真实 ada
 | 历史 | 网页与 `threads.read` 读取同一份中心 Thread 记录，分页与权限正确 | 中心集成与 Web 契约 |
 | 探测与 reason | 四个 Agent 已安装且认证 valid/unknown 时 available；未知版本、其他系统、版本失败或超时只记入诊断。缺程序、明确认证缺失或 Cursor 公共依赖失败时 unavailable，sandbox 故障按 R-11 区分模式；整次探测未确认安装时 unverified；未开放能力写明原因 | 包内与本地可执行替身 |
 | Kiro 回合失败 | `provider_error` 与派生认证失败经真实 host/Worker 保存失败原因，输入保持 sent，后续排队消息执行并收到回复、原生会话与进程保留；中心时间线可读原因、空队列时 idle，网页在对应回合显示失败 | 确定性回放、Worker 集成、跨 app e2e 与网页数据层 |
-| Thread 执行权限 | API、CLI、Project 创建与默认值、模式幂等、持久恢复、按模式准入；Full access 通过真实 adapter 本地替身链路 | 中心与 Worker 包内集成、host 回放及一条跨 app 验证；A-17～21，planned |
+| Thread 执行权限 | API、CLI、Project 创建与默认值、模式幂等、持久恢复、按模式准入；Full access 通过真实 adapter 本地替身链路 | 中心与 Worker 包内集成、host 离线回放及跨 app 本地替身；真实系统沙箱隔离未验证 |
 | 安装包 | 脱离源码运行 SEA，加载 t3code 依赖与附带目录 | 打包检查 |
 
 ## 上游参考

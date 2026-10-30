@@ -1,10 +1,12 @@
 import { Schema } from 'effect'
+import { RuntimeMode } from '@t3tools/contracts'
 import { TraceContext } from './trace.ts'
 import { FullOutputPage, FullOutputReference } from './full-output.ts'
 import { ThreadQuestion, ThreadAnswerInput, ThreadQuestionAnswer } from './thread-question.ts'
 import { ThinkingSelection } from './device.ts'
 import {
   AgentType,
+  Reason,
   CommandOutcome,
   MessageMode,
   ThreadStatus,
@@ -28,6 +30,7 @@ export const CreateBrowserThreadInput = Schema.Struct({
   client_thread_id: ClientMessageID,
   node_id: Schema.optionalKey(UUID),
   agent_type: AgentType,
+  runtime_mode: Schema.optionalKey(RuntimeMode),
   model: Schema.optionalKey(summary(512)),
   working_directory: boundedText(4096).check(Schema.isMinLength(1)),
   execution_timeout_seconds: Schema.optionalKey(ExecutionTimeoutSeconds),
@@ -57,6 +60,7 @@ export const CreateThreadInput = Schema.Struct({
   client_thread_id: ClientMessageID,
   node_id: Schema.optionalKey(UUID),
   agent_type: AgentType,
+  runtime_mode: Schema.optionalKey(RuntimeMode),
   model: summary(512),
   working_directory: boundedText(4096).check(Schema.isMinLength(1)),
   project_id: Schema.optionalKey(UUID),
@@ -124,6 +128,7 @@ export const Thread = Schema.Struct({
   origin_tool_call_id: Schema.optionalKey(ClientMessageID),
   node_id: UUID,
   agent_type: AgentType,
+  runtime_mode: RuntimeMode,
   model: summary(512),
   working_directory: boundedText(4096).check(Schema.isMinLength(1)),
   execution_timeout_seconds: Integer,
@@ -168,6 +173,7 @@ export const ThreadCommand = Schema.Struct({
   answer: Schema.optionalKey(ThreadAnswerInput),
   storage_generation: Schema.optionalKey(StorageGeneration),
   agent_type: Schema.optionalKey(AgentType),
+  runtime_mode: Schema.optionalKey(RuntimeMode),
   model: Schema.optionalKey(summary(512)),
   thinking: Schema.optionalKey(ThinkingSelection),
   working_directory: Schema.optionalKey(boundedText(4096).check(Schema.isMinLength(1))),
@@ -185,6 +191,7 @@ export const ThreadCommandResult = Schema.Struct({
   thread_id: UUID,
   ok: Schema.Boolean,
   code: Schema.optionalKey(Text),
+  reason: Schema.optionalKey(Reason),
   storage_generation: Schema.optionalKey(StorageGeneration),
 })
 export type ThreadCommandResult = typeof ThreadCommandResult.Type
