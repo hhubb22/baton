@@ -44,7 +44,8 @@ it('passes scoped environment to real child processes and removes stale parent v
       },
     }))
     const inherited = applyEnvironment(config, { ...process.env, PARENT_SECRET_FOR_TEST: 'private' })
-    Object.assign(process.env, inherited, { BATON_ENV_DATA_DIR: directory })
+    Object.assign(process.env, inherited)
+    delete process.env.BATON_ENV_DATA_DIR
     const run = async () => {
       let output = ''
       let ended: Promise<void> | undefined
