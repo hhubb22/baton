@@ -451,6 +451,29 @@ describe('projects', () => {
     expect(screen.queryByText('4f2c9e1 Add drive letter cases to path tests')).not.toBeInTheDocument()
   })
 
+  it('opens an unknown shell execution that is absent from the conversation list', async () => {
+    const user = userEvent.setup()
+    const { router } = renderApp('/projects/prj-compat', 'normal', (client) => {
+      const read = client.getThread.bind(client)
+      client.getThread = async (id) =>
+        id === 'shell-execution' ? { ...(await read('thr-compat')), id, agent: null } : read(id)
+      client.listProjectEntries = async () => [
+        {
+          id: 'failure',
+          projectId: 'prj-compat',
+          kind: 'threadFailure',
+          threadId: 'shell-execution',
+          cause: 'unknown',
+          createdAt: 1,
+        },
+      ]
+    })
+    const row = await screen.findByRole('button', { name: /无法确认执行结果/ })
+    expect(row).toHaveTextContent('命令可能已经产生副作用，助手不会自动重发。')
+    await user.click(row)
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ thread: 'shell-execution' }))
+  })
+
   it('streams a project preview and replaces it when the saved reply arrives before status refresh', async () => {
     let preview: { afterSeq: number; text: string; truncated: boolean } | null = {
       afterSeq: 7,
@@ -679,6 +702,49 @@ describe('projects', () => {
       expect(screen.getByRole('button', { name: 'nodes.exec' })).toHaveAttribute('aria-expanded', 'true'),
     )
     expect(screen.getByText('/work')).toBeInTheDocument()
+  })
+
+  it('opens a running command from its project tool call', async () => {
+    const user = userEvent.setup()
+    const { router } = renderApp('/projects/prj-compat', 'normal', (client) => {
+      const list = client.listThreads.bind(client)
+      client.listProjectExecutions = async () => [
+        {
+          ...(await list())[0]!,
+          id: 'shell-execution',
+          projectId: 'prj-compat',
+          agent: null,
+          status: 'running',
+          originConversationId: 'conversation',
+          originToolCallId: 'exec',
+        },
+      ]
+      client.listProjectEntries = async (projectId) => [
+        {
+          id: 'tool-entry',
+          projectId,
+          createdAt: Date.now(),
+          kind: 'assistant',
+          body: '',
+          threads: null,
+          process: [
+            {
+              kind: 'tool',
+              name: 'nodes.exec',
+              conversationId: 'conversation',
+              toolCallId: 'exec',
+              input: '{"command":"pwd"}',
+              output: null,
+              status: 'pending',
+            },
+          ],
+        },
+      ]
+    })
+    await user.click(await screen.findByRole('button', { name: '正在处理' }))
+    await user.click(screen.getByRole('button', { name: /nodes.exec.*等待结果/ }))
+    await user.click(await screen.findByRole('button', { name: /查看执行详情/ }))
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ thread: 'shell-execution' }))
   })
 
   it('keeps failed and unfinished tool calls visible in project activity', async () => {

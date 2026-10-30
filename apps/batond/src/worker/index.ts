@@ -1303,7 +1303,9 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
           (result) =>
             Effect.gen(function* () {
               if (Exit.isFailure(result)) {
-                const reason = reasonOf(Cause.pretty(result.cause))
+                // 原因会展示给用户和项目助手，只保留错误信息；调用栈写入日志。
+                const reason = reasonOf(Cause.squash(result.cause))
+                yield* Effect.logWarning('Agent open failed', result.cause)
                 yield* launch(newOperation('cleanup'), cleanupAgent(current), (cleanup) =>
                   Effect.gen(function* () {
                     const reaped = Exit.isSuccess(cleanup) && cleanup.value.processTreeStopped
@@ -1416,7 +1418,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
                   draft,
                   draft.messages[message.input.id]!,
                   'cancelled',
-                  Cause.pretty(result.cause).slice(0, 4096),
+                  reasonOf(Cause.squash(result.cause)),
                 ),
               )
               return

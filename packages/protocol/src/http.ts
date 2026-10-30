@@ -104,6 +104,7 @@ const afterID = Schema.optionalKey(UUID)
 const afterSequence = Schema.optionalKey(decimal(0, Number.MAX_SAFE_INTEGER))
 
 export const ThreadListQuery = Schema.Struct({
+  kind: Schema.optionalKey(Schema.Literals(['conversation', 'execution'])),
   project_id: Schema.optionalKey(UUID),
   node_id: Schema.optionalKey(UUID),
   status: Schema.optionalKey(ThreadStatus),

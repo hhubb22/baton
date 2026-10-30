@@ -33,6 +33,7 @@ import {
   assistantWait,
   deviceConnectionView,
   projectAgentStatus,
+  agentNames,
   relativeTime,
   runTimer,
   threadView,
@@ -43,6 +44,7 @@ import {
   useClient,
   useDevices,
   useProjectEntries,
+  useProjectExecutions,
   useProjectHistory,
   useProjectMemory,
   useRetryProject,
@@ -50,6 +52,7 @@ import {
   useSendProjectMessage,
   useSetProjectStatus,
   useStopProjectRun,
+  useThread,
   useThreads,
   useStableThreadOrder,
 } from '../data/queries'
@@ -62,6 +65,7 @@ import type {
   Project,
   ProjectEntry,
   Thread,
+  ThreadFailureCause,
 } from '../data/types'
 import { fonts } from '../theme/base.stylex'
 import { text } from '../theme/text'
@@ -226,6 +230,25 @@ const styles = stylex.create({
   threadIcon: { flexShrink: 0, color: colors.muted },
   threadMeta: { flexShrink: 0, color: colors.muted, whiteSpace: 'nowrap' },
   note: { alignSelf: 'center', color: colors.faint, textAlign: 'center' },
+  failure: {
+    display: 'grid',
+    gridTemplateColumns: '16px minmax(0, 1fr) auto',
+    columnGap: space.sm,
+    rowGap: space.xxs,
+    alignItems: 'center',
+    width: `calc(100% + ${space.lg})`,
+    marginInline: `calc(-1 * ${space.sm})`,
+    paddingBlock: space.sm,
+    paddingInline: space.sm,
+    borderRadius: radius.md,
+    backgroundColor: { default: 'transparent', ':hover': colors.hover },
+    borderWidth: 0,
+    color: colors.text,
+    textAlign: 'start',
+    cursor: { default: 'pointer', ':disabled': 'default' },
+  },
+  failureStatus: { display: 'inline-flex', alignItems: 'center', gap: space.xs, whiteSpace: 'nowrap' },
+  failureReason: { gridColumn: '2 / 4', color: colors.muted },
   activity: { display: 'inline-flex', alignItems: 'center', gap: space.sm, color: colors.agentText },
   empty: {
     display: 'flex',
@@ -376,7 +399,17 @@ const cardTitles: Record<EntryThreads['action'], (count: number) => string> = {
   replies: (count) => `来自 ${count} 个对话的回复`,
 }
 
-function ProcessItem({ step, devices }: { step: ProcessStep; devices: Device[] }) {
+function ProcessItem({
+  step,
+  devices,
+  executions,
+  onOpen,
+}: {
+  step: ProcessStep
+  devices: Device[]
+  executions: Thread[]
+  onOpen: (id: string) => void
+}) {
   const [open, setOpen] = useState(false)
   if (step.kind === 'note') {
     return (
@@ -401,6 +434,12 @@ function ProcessItem({ step, devices }: { step: ProcessStep; devices: Device[] }
         : null
   const isShell = isCommand || step.name === 'nodes.exec'
   const label = isCommand ? step.command : step.name
+  const execution =
+    !isCommand && isShell && step.toolCallId && step.conversationId
+      ? executions.find(
+          (item) => item.originToolCallId === step.toolCallId && item.originConversationId === step.conversationId,
+        )
+      : undefined
   return (
     <div {...stylex.props(styles.step)}>
       <button
@@ -416,6 +455,17 @@ function ProcessItem({ step, devices }: { step: ProcessStep; devices: Device[] }
       </button>
       {open && (
         <div {...stylex.props(styles.stepDetail)}>
+          {execution && (
+            <button type="button" onClick={() => onOpen(execution.id)}>
+              查看执行详情 ·{' '}
+              {execution.status === 'unknown'
+                ? '结果未知'
+                : threadView(
+                    execution,
+                    devices.find((item) => item.id === execution.deviceId),
+                  ).status.label}
+            </button>
+          )}
           {isCommand && (
             <span {...stylex.props(text.caption, styles.detailLabel)}>
               {devices.find((item) => item.id === step.deviceId)?.name ?? '设备已移除'} · 退出码 {step.exitCode} ·{' '}
@@ -445,7 +495,19 @@ function ProcessItem({ step, devices }: { step: ProcessStep; devices: Device[] }
   )
 }
 
-function ProcessLine({ steps, devices, children }: { steps: ProcessStep[]; devices: Device[]; children?: ReactNode }) {
+function ProcessLine({
+  steps,
+  devices,
+  executions,
+  onOpen,
+  children,
+}: {
+  steps: ProcessStep[]
+  devices: Device[]
+  executions: Thread[]
+  onOpen: (id: string) => void
+  children?: ReactNode
+}) {
   const [open, setOpen] = useState(false)
   const awaiting = steps.filter((step) => step.kind === 'tool' && step.status === 'pending').length
   return (
@@ -462,7 +524,7 @@ function ProcessLine({ steps, devices, children }: { steps: ProcessStep[]; devic
       {open && (
         <div {...stylex.props(styles.steps)}>
           {steps.map((step, index) => (
-            <ProcessItem key={index} step={step} devices={devices} />
+            <ProcessItem key={index} step={step} devices={devices} executions={executions} onOpen={onOpen} />
           ))}
           {children}
         </div>
@@ -553,9 +615,61 @@ function ThreadCard({
   )
 }
 
+const failureReasons: Record<ThreadFailureCause, (agent: string) => string> = {
+  network: (agent) => `${agent} 连不上网络。`,
+  timeout: (agent) => `${agent} 启动超时。`,
+  start: (agent) => `${agent} 无法启动。`,
+  unknown: () => '设备无法确认消息是否送达，助手不会自动重发。',
+  other: () => '打开 Thread 查看原因。',
+}
+
+// 显示消息或执行结果，并提供 Thread 详情入口。
+function ThreadFailure({
+  cause,
+  threadId,
+  thread,
+  selected,
+  onOpen,
+}: {
+  cause: ThreadFailureCause
+  threadId: string
+  thread: Thread | undefined
+  selected: boolean
+  onOpen: () => void
+}) {
+  const detail = useThread(threadId)
+  thread = detail.data ?? thread
+  const unknown = cause === 'unknown'
+  const executionUnknown = unknown && thread?.agent === null
+  const agent = thread?.agent ? agentNames[thread.agent] : '助手'
+  return (
+    <button
+      type="button"
+      aria-current={selected || undefined}
+      onClick={onOpen}
+      {...stylex.props(text.small, styles.failure, selected && styles.threadSelected, focusRing.ring)}
+    >
+      <Icon name="threads" size={16} style={styles.threadIcon} />
+      <span {...stylex.props(styles.threadTitle, text.truncate)}>{thread?.title ?? 'Thread'}</span>
+      <span {...stylex.props(text.caption, styles.failureStatus, statusTextStyle(unknown ? 'attention' : 'danger'))}>
+        {unknown ? (executionUnknown ? '无法确认执行结果' : thread ? '无法确认送达' : '无法确认结果') : '没有送达'}
+        <Icon name="chevron-right" size={14} />
+      </span>
+      <span {...stylex.props(styles.failureReason)}>
+        {executionUnknown
+          ? '命令可能已经产生副作用，助手不会自动重发。'
+          : unknown && !thread
+            ? '打开 Thread 查看原因。'
+            : failureReasons[cause](agent)}
+      </span>
+    </button>
+  )
+}
+
 const Entry = memo(function Entry({
   entry,
   threads,
+  executions,
   devices,
   openThread,
   onOpenThread,
@@ -564,6 +678,7 @@ const Entry = memo(function Entry({
 }: {
   entry: ProjectEntry
   threads: Thread[]
+  executions: Thread[]
   devices: Device[]
   openThread: string | undefined
   onOpenThread: (threadId: string) => void
@@ -587,7 +702,7 @@ const Entry = memo(function Entry({
       return (
         <article aria-label={streaming ? '项目助手正在回复' : '项目助手'} {...stylex.props(styles.assistant)}>
           {(entry.process.length > 0 || entry.threads) && (
-            <ProcessLine steps={entry.process} devices={devices}>
+            <ProcessLine steps={entry.process} devices={devices} executions={executions} onOpen={onOpenThread}>
               {entry.threads && (
                 <ThreadCard
                   threads={entry.threads}
@@ -609,6 +724,16 @@ const Entry = memo(function Entry({
       )
     case 'note':
       return <p {...stylex.props(text.caption, styles.note)}>{entry.body}</p>
+    case 'threadFailure':
+      return (
+        <ThreadFailure
+          cause={entry.cause}
+          threadId={entry.threadId}
+          thread={threads.find((item) => item.id === entry.threadId)}
+          selected={entry.threadId === openThread}
+          onOpen={() => onOpenThread(entry.threadId)}
+        />
+      )
   }
 })
 
@@ -908,6 +1033,7 @@ export function ProjectPage() {
   const projects = useProjects()
   const devices = useDevices()
   const threads = useThreads()
+  const executions = useProjectExecutions(projectId)
   const entries = useProjectEntries(projectId)
   const history = useProjectHistory(projectId)
   const memory = useProjectMemory(projectId)
@@ -1380,6 +1506,7 @@ export function ProjectPage() {
             <Entry
               entry={entry}
               threads={projectThreads}
+              executions={executions.data ?? []}
               devices={allDevices}
               openThread={search.thread}
               onOpenThread={onOpenThread}

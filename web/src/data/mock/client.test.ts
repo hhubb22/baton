@@ -508,7 +508,8 @@ describe('projects', () => {
       kind: 'assistant',
       threads: { action: 'replies', threadIds: threads.map((item) => item.id) },
     })
-    expect(entries.at(-1)!.kind === 'assistant' && entries.at(-1)!.body).toMatch(/^Both threads finished\./)
+    const last = entries.at(-1)!
+    expect(last.kind === 'assistant' && last.body).toMatch(/^Both threads finished\./)
     scheduler.advance(browserLatency.run)
     expect(await client.listProjectEntries(project.id)).toHaveLength(entries.length)
   })

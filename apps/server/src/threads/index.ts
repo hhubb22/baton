@@ -384,7 +384,7 @@ export const list = (employeeID: string, query: P.ThreadListQuery = {}): DB<P.Th
       const sql = yield* SqlClient.SqlClient
       const q = yield* decode(P.ThreadListQuery, query)
       const limit = Number(q.limit || 50)
-      const scope = JSON.stringify([employeeID, q.project_id, q.node_id, q.status])
+      const scope = JSON.stringify([employeeID, q.project_id, q.node_id, q.status, q.kind ?? 'conversation'])
       const after = yield* cursor(q.cursor, scope)
       const rows = yield* sql<{
         value: P.ThreadSummary
@@ -397,6 +397,7 @@ export const list = (employeeID: string, query: P.ThreadListQuery = {}): DB<P.Th
     'current_turn',(SELECT jsonb_strip_nulls(to_jsonb(v)-'employee_id') FROM thread_turns v WHERE thread_id=t.id AND ended_at IS NULL),
     'stop_canceled',(SELECT count(*)::integer FROM thread_events e WHERE e.thread_id=t.id AND kind='message.withdrawn' AND id>COALESCE((SELECT max(id) FROM thread_events WHERE thread_id=t.id AND kind IN ('stop.requested','archive.requested')),9223372036854775807))) AS value
     FROM (SELECT * FROM threads WHERE employee_id=${employeeID}
+    AND (agent_type='shell')=${q.kind === 'execution'}
     AND (${q.project_id ?? null}::uuid IS NULL OR project_id=${q.project_id ?? null}) AND (${q.node_id ?? null}::uuid IS NULL OR node_id=${q.node_id ?? null})
     AND (${q.status ?? null}::text IS NULL OR status=${q.status ?? null})
     AND (${after?.at ?? null}::timestamptz IS NULL OR (last_activity_at,id)<(${after?.at ?? null}::timestamptz,${after?.id ?? null}::uuid)) ORDER BY last_activity_at DESC,id DESC LIMIT ${limit + 1}) t

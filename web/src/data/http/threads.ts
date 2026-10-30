@@ -27,6 +27,8 @@ type ThreadDTO = {
   id: string
   node_id: string
   agent_type: string
+  origin_conversation_id?: string
+  origin_tool_call_id?: string
   model: string
   execution_timeout_seconds: number
   next_model?: string
@@ -109,6 +111,7 @@ type Phase = { phase: OperationPhase; detail?: string | null }
 type ThreadAPI = Pick<
   BatonClient,
   | 'listThreads'
+  | 'listProjectExecutions'
   | 'getThread'
   | 'listMessages'
   | 'createThread'
@@ -233,6 +236,9 @@ function mapThread(t: ThreadDTO, events: EventDTO[]): Thread {
     pendingQuestions: t.pending_questions ?? [],
     questionAnswers: t.question_answers ?? [],
     id: t.id,
+    executionReason: t.agent_type === 'shell' ? t.status_reason : undefined,
+    originConversationId: t.origin_conversation_id,
+    originToolCallId: t.origin_tool_call_id,
     title: t.title || first?.split('\n')[0].slice(0, 120) || t.working_directory || t.id,
     deviceId: t.node_id,
     folder: t.working_directory,
@@ -641,27 +647,33 @@ export function createThreadAPI(
         return null
     }
   }
+  async function listThreads(projectId?: string) {
+    const all: ThreadDTO[] = []
+    const cursors = new Set<string>()
+    let cursor = ''
+    do {
+      const query = new URLSearchParams({ limit: '100' })
+      if (projectId) {
+        query.set('project_id', projectId)
+        query.set('kind', 'execution')
+      }
+      if (cursor) query.set('cursor', cursor)
+      const page = await ctx.request<{ threads: ThreadDTO[]; next_cursor?: string }>(`${base}?${query}`)
+      all.push(...page.threads)
+      cursor = page.next_cursor ?? ''
+      if (cursor && cursors.has(cursor)) unavailable('对话分页未推进。')
+      cursors.add(cursor)
+    } while (cursor)
+    return all.map((t) => mapThread(t, []))
+  }
   const api: ThreadAPI = {
     async answerThreadQuestion({ threadId, answer }) {
       const updated = await ctx.request<ThreadDTO>(`${threadPath(threadId)}/answer`, post(answer))
       changed(threadId)
       return mapThread(updated, await timeline(threadId))
     },
-    async listThreads() {
-      const all: ThreadDTO[] = []
-      const cursors = new Set<string>()
-      let cursor = ''
-      do {
-        const query = new URLSearchParams({ limit: '100' })
-        if (cursor) query.set('cursor', cursor)
-        const page = await ctx.request<{ threads: ThreadDTO[]; next_cursor?: string }>(`${base}?${query}`)
-        all.push(...page.threads)
-        cursor = page.next_cursor ?? ''
-        if (cursor && cursors.has(cursor)) unavailable('对话分页未推进。')
-        cursors.add(cursor)
-      } while (cursor)
-      return all.map((t) => mapThread(t, []))
-    },
+    listThreads: () => listThreads(),
+    listProjectExecutions: (projectId) => listThreads(projectId),
     async getThread(threadId) {
       const { t, events } = await readThread(threadId)
       return mapThread(t, events)

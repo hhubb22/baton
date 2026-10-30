@@ -146,6 +146,9 @@ export interface Thread {
   pendingQuestions?: import('@baton/protocol').ThreadQuestion[]
   questionAnswers?: import('@baton/protocol').ThreadQuestionAnswer[]
   id: ID
+  executionReason?: string
+  originConversationId?: string
+  originToolCallId?: string
   title: string
   deviceId: ID
   folder: string
@@ -305,7 +308,15 @@ export type ProjectPatch = Partial<
 export type ProcessStep =
   | { kind: 'command'; deviceId: ID; command: string; exitCode: number; output: string; durationMs: number }
   | { kind: 'note'; body: string }
-  | { kind: 'tool'; name: string; input: string; output: string | null; status: 'pending' | 'completed' | 'failed' }
+  | {
+      kind: 'tool'
+      name: string
+      conversationId?: string
+      toolCallId?: string
+      input: string
+      output: string | null
+      status: 'pending' | 'completed' | 'failed'
+    }
 
 // 回复里提到的 Thread：本次新开的、发了消息的，或汇报回复的。
 export interface EntryThreads {
@@ -332,6 +343,10 @@ export type ProjectEntry =
       runId?: string
     })
   | (EntryBase & { kind: 'note'; body: string })
+  | (EntryBase & { kind: 'threadFailure'; threadId: ID; cause: ThreadFailureCause })
+
+// 项目助手发给 Thread 的消息没有送达的原因，按用户能做的事分类；完整错误在 Thread 详情里。
+export type ThreadFailureCause = 'unknown' | 'network' | 'timeout' | 'start' | 'other'
 
 export interface MemoryVersion {
   details?: {

@@ -351,11 +351,13 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
     const output = Schema.decodeUnknownSync(
       Schema.Array(Schema.Struct({ type: Schema.Literal('text'), text: Schema.String })),
     )(shellResult.message.content)
-    expect(
-      Schema.decodeUnknownSync(
-        Schema.Struct({ command_result: Schema.Struct({ exit_code: Schema.Literal(0), output: Schema.String }) }),
-      )(JSON.parse(output[0]!.text)).command_result.output,
-    ).toBe('t3-shell-output\n')
+    const shellValue = Schema.decodeUnknownSync(
+      Schema.Struct({
+        thread_id: P.UUID,
+        command_result: Schema.Struct({ exit_code: Schema.Literal(0), output: Schema.String }),
+      }),
+    )(JSON.parse(output[0]!.text))
+    expect(shellValue.command_result.output).toBe('t3-shell-output\n')
     const calls = messages
       .filter((entry) => entry.message.role === 'assistant')
       .flatMap((entry) =>
@@ -370,9 +372,13 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
     expect(JSON.stringify(saved)).toContain('已读取 Cursor 回复')
     expect(JSON.stringify(saved)).toContain('t3-shell-output')
     const threadPage = await alice<P.ThreadPage>(`/threads?project_id=${project.id}`)
-    expect(threadPage.body.threads).toHaveLength(2)
-    expect(threadPage.body.threads?.map((t) => t.agent_type).sort()).toEqual(['cursor', 'shell'])
-    const cursor = threadPage.body.threads!.find((thread) => thread.agent_type === 'cursor')!
+    const executionPage = await alice<P.ThreadPage>(`/threads?project_id=${project.id}&kind=execution`)
+    expect(threadPage.status).toBe(200)
+    expect(executionPage.status).toBe(200)
+    expect(threadPage.body.threads).toMatchObject([{ agent_type: 'cursor' }])
+    expect(executionPage.body.threads).toMatchObject([{ id: shellValue.thread_id, agent_type: 'shell' }])
+    const cursor = threadPage.body.threads![0]!
+    const shell = executionPage.body.threads![0]!
     const timeline = await alice<P.ThreadTimeline>(`/threads/${cursor.id}/timeline?limit=100`)
     const reply = timeline.body.events!.find((event) => event.kind === 'reply')!
     const attachments = Schema.decodeUnknownSync(
@@ -400,7 +406,7 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
     expect(escaped.status).toBe(403)
     expect(escaped.body.code).toBe('path_escaped')
     expect((await bob(`/nodes/${identity.node_id}/files?${query}`)).status).toBe(403)
-    for (const thread of threadPage.body.threads ?? []) expect((await bob(`/threads/${thread.id}`)).status).toBe(404)
+    for (const thread of [cursor, shell]) expect((await bob(`/threads/${thread.id}`)).status).toBe(404)
     expect(await readFile(join(workspace, 'shell-runs.txt'), 'utf8')).toBe('once\n')
     expect(
       (await readFile(join(workspace, 'submissions.jsonl'), 'utf8'))
@@ -429,7 +435,6 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
     for (const source of ['thread_reply', 'turn_ended', 'memory_updated'])
       expect(facts.some((f) => f.source_type === source && f.delivered_seq !== null)).toBe(true)
     expect(new Set(facts.map((f) => f.source_key)).size).toBe(facts.length)
-    const shell = threadPage.body.threads!.find((thread) => thread.agent_type === 'shell')!
     expect(
       facts
         .filter((fact) => fact.thread_id === shell.id)
