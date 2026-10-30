@@ -1,6 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Schema } from 'effect'
+import { readProcessIdentity } from '@baton/batond/platform/identity'
 
 export const PublicIdentity = Schema.Union([
   Schema.Struct({ registered: Schema.Literal(false) }),
@@ -35,6 +36,39 @@ export type DesktopStatus = PublicIdentity & {
   connection_state?: DaemonStatus['state']
   code?: string | undefined
   message?: string | undefined
+}
+
+export async function managedDaemonPid(
+  directory: string,
+  launcherPid: number | undefined,
+  inspect = readProcessIdentity,
+  readStatus = readDaemonStatus,
+): Promise<number | undefined> {
+  if (launcherPid === undefined) return undefined
+  try {
+    const record = Schema.decodeUnknownSync(
+      Schema.Struct({
+        launcher_pid: Schema.Int,
+        launcher_creation_time: Schema.String,
+        daemon_pid: Schema.Int,
+        daemon_creation_time: Schema.String,
+      }),
+    )(JSON.parse(await readFile(join(directory, 'launcher-child.json'), 'utf8')))
+    if (record.launcher_pid !== launcherPid) return undefined
+    const [launcher, daemon, status] = await Promise.all([
+      inspect(record.launcher_pid),
+      inspect(record.daemon_pid),
+      readStatus(directory),
+    ])
+    if (
+      launcher?.creationTime !== record.launcher_creation_time ||
+      daemon?.creationTime !== record.daemon_creation_time
+    )
+      return undefined
+    return status?.pid === record.daemon_pid ? record.daemon_pid : undefined
+  } catch {
+    return undefined
+  }
 }
 
 export function mergeStatus(

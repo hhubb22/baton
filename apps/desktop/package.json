@@ -12,7 +12,11 @@
     "lint": "vp lint .",
     "test": "vp test run --config ../../vitest.config.ts"
   },
+  "dependencies": {
+    "electron-updater": "6.8.12"
+  },
   "devDependencies": {
+    "@baton/batond": "workspace:*",
     "@baton/protocol": "workspace:*",
     "@types/node": "catalog:",
     "effect": "catalog:",

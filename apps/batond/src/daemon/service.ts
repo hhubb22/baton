@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { mkdir, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises'
 import { homedir, userInfo } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
+import { isSea } from 'node:sea'
 import { randomUUID } from 'node:crypto'
 import { promisify } from 'node:util'
 import { Schema } from 'effect'
@@ -294,7 +295,12 @@ export async function manageService(
     if (isMissing(error)) throw new ServiceError('service_not_registered', '设备尚未注册，请先运行 batond register')
     throw error
   }
-  const command = options.command ?? currentBatondCommand()
+  const command: BatondCommand =
+    options.command !== undefined
+      ? options.command
+      : isSea()
+        ? await (await import('./update-install.ts')).bootstrapInstallation(directory)
+        : currentBatondCommand()
   const definition = {
     command: { ...command, executable: await realpath(command.executable) },
     dataDirectory: directory,

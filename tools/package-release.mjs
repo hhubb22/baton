@@ -26,6 +26,10 @@ export function archiveArgs(archive, staging, name, platform = process.platform)
   return [platform === 'win32' ? '-acf' : '-czf', archive, '-C', staging, name]
 }
 
+export function archiveEnvironment(env = process.env) {
+  return { ...env, COPYFILE_DISABLE: '1' }
+}
+
 export function validateSeaVersion(raw, platform = process.platform, arch = process.arch) {
   const info = JSON.parse(raw)
   if (info?.sea !== true) throw new Error('batond 必须是 Node SEA 安装包')
@@ -97,7 +101,7 @@ async function checkCommands(binary, staging) {
   await mkdir(home)
   const options = { capture: true, cwd: home, env: isolatedEnv(home), timeout: 10_000 }
   if (!run(binary, ['--help'], options)) throw new Error('batond --help 输出为空')
-  const version = run(binary, ['--version'], options)
+  const version = run(binary, ['--binary-version'], options)
   if (!version) throw new Error('batond --version 输出为空')
   return validateSeaVersion(version)
 }
@@ -138,7 +142,7 @@ export async function packageRelease(
     await mkdir(output, { recursive: true })
     // Windows 显式使用系统 bsdtar，避免 Git Bash 的 GNU tar 生成非 zip 文件。
     const tar = process.platform === 'win32' ? win32.join(process.env.SystemRoot, 'System32', 'tar.exe') : 'tar'
-    run(tar, archiveArgs(archive, staging, name))
+    run(tar, archiveArgs(archive, staging, name), { env: archiveEnvironment() })
     const contents = await readFile(archive)
     const magic = extension === '.zip' ? Buffer.from([0x50, 0x4b, 0x03, 0x04]) : Buffer.from([0x1f, 0x8b])
     if (!contents.subarray(0, magic.length).equals(magic)) throw new Error('压缩包内容格式与扩展名不匹配')

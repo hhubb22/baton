@@ -1,9 +1,9 @@
 import { BUNDLED, releaseMetadata, NodeVersionIncompatibility } from '@baton/protocol/release'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { realpath } from 'node:fs/promises'
+import { realpath, lstat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { basename, join, resolve } from 'node:path'
+import { basename, isAbsolute, join, relative } from 'node:path'
 import { parseArgs } from 'node:util'
 import { isSea } from 'node:sea'
 import { Effect, Schema } from 'effect'
@@ -23,7 +23,6 @@ import { desktopDirectory, DesktopDirectoryError } from './daemon/desktop-direct
 import { ServiceError } from './daemon/service.ts'
 import { ProcessLockBusy } from './platform/lock.ts'
 import { StorageFormatError } from './storage-format.ts'
-import { loadCoordinatorCA } from './daemon/identity.ts'
 import { readUpgradeState, upgradeOffline } from './daemon/upgrade.ts'
 import { readPrivateFile, writePrivateFileAtomic } from './platform/private.ts'
 
@@ -47,13 +46,9 @@ up/run 支持 --control-timeout-seconds <秒>，认证与同步各默认等待 3
 设备管理：
 
   service install|uninstall|status
-  upgrade check --package <目录> [--ca-file <CA证书>]
-  upgrade prepare --package <目录>
-  upgrade prepare --version <中心版本>
-  upgrade prepare --package <本应用resources/batond> --self
-  upgrade migrate
-  upgrade status
-  upgrade cancel
+  update
+  update status | cancel
+  update policy [manual|idle]
   files add --id <标识> --path <绝对目录>
   files remove --id <标识>
   files list
@@ -79,7 +74,59 @@ open 返回持久接收回执，实际结果通过 command 或 reports 查询。
 export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Promise<void> {
   const [action, ...args] = argv
   if (
+    isSea() &&
+    action &&
+    ![
+      'dispatch',
+      'versioned-dispatch',
+      'update-worker',
+      'update-recover',
+      'update-preflight',
+      '--binary-version',
+      'worker',
+      'execution-worker',
+      'agent-host',
+      'watchdog',
+      'project-runtime',
+    ].includes(action) &&
+    !(action === 'update' && args[0] === 'bootstrap')
+  ) {
+    const index = argv.findIndex((arg) => arg === '--data-dir' || arg.startsWith('--data-dir='))
+    const directory =
+      index < 0
+        ? join(homedir(), '.baton-ts')
+        : argv[index] === '--data-dir'
+          ? argv[index + 1]
+          : argv[index]!.slice('--data-dir='.length)
+    if (directory) {
+      const { installationPaths, dispatchInstallation } = await import('./daemon/update-install.ts')
+      const paths = installationPaths(directory)
+      const exists = await lstat(paths.launcherCurrent).then(
+        () => true,
+        (error: unknown) => {
+          if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return false
+          throw error
+        },
+      )
+      if (exists) {
+        const versions = await realpath(paths.versions)
+        const executable = await realpath(process.execPath)
+        const within = relative(versions, executable)
+        if (
+          within === '..' ||
+          within.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) ||
+          within === '' ||
+          isAbsolute(within)
+        ) {
+          process.exitCode = await dispatchInstallation(directory, argv)
+          return
+        }
+      }
+    }
+  }
+  if (
     action === '--version' ||
+    action === '--binary-version' ||
     (['worker', 'execution-worker', 'agent-host', 'watchdog', 'project-runtime'].includes(action) &&
       args.length === 1 &&
       args[0] === '--version')
@@ -125,62 +172,131 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
     console.log(JSON.stringify(await manageService(command, values['data-dir']!)))
     return
   }
-  if (action === 'upgrade') {
-    const { positionals, values } = parseArgs({
-      args,
-      allowPositionals: true,
+  if (action === 'dispatch' || action === 'versioned-dispatch') {
+    const separator = args.indexOf('--')
+    if (separator < 0 || separator === args.length - 1) throw new Error('dispatch requires a command after --')
+    const { values } = parseArgs({ args: args.slice(0, separator), options: { 'data-dir': { type: 'string' } } })
+    if (!values['data-dir']) throw new Error('dispatch requires --data-dir')
+    const { dispatchInstallation, launchInstallation } = await import('./daemon/update-install.ts')
+    process.exitCode = await (action === 'dispatch' ? dispatchInstallation : launchInstallation)(
+      values['data-dir'],
+      args.slice(separator + 1),
+    )
+    return
+  }
+  if (action === 'update' && args[0] === 'bootstrap') {
+    const { values } = parseArgs({
+      args: args.slice(1),
+      options: { 'data-dir': { type: 'string', default: join(homedir(), '.baton-ts') } },
+    })
+    const { bootstrapInstallation } = await import('./daemon/update-install.ts')
+    console.log(JSON.stringify(await bootstrapInstallation(values['data-dir']!)))
+    return
+  }
+  if (action === 'update' && args[0] === 'status') {
+    const { values } = parseArgs({
+      args: args.slice(1),
+      options: { 'data-dir': { type: 'string', default: join(homedir(), '.baton-ts') } },
+    })
+    const { readUpdateState } = await import('./daemon/update-state.ts')
+    console.log(JSON.stringify({ state: (await readUpdateState(values['data-dir']!)) ?? null }))
+    return
+  }
+  if (action === 'update' && args[0] === 'manifest') {
+    const { values } = parseArgs({
+      args: args.slice(1),
+      options: { 'data-dir': { type: 'string', default: join(homedir(), '.baton-ts') } },
+    })
+    const { fetchUpdateManifest } = await import('./daemon/update-network.ts')
+    console.log(JSON.stringify({ manifest: await fetchUpdateManifest(values['data-dir']!) }))
+    return
+  }
+  if (action === 'update' && args[0] === 'desktop-feed') {
+    const { values } = parseArgs({
+      args: args.slice(1),
       options: {
         'data-dir': { type: 'string', default: join(homedir(), '.baton-ts') },
-        package: { type: 'string' },
-        version: { type: 'string' },
-        self: { type: 'boolean' },
-        'ca-file': { type: 'string' },
+        'operation-id': { type: 'string' },
+        attempt: { type: 'string' },
       },
     })
-    const command = positionals[0]
-    if (
-      positionals.length !== 1 ||
-      !['prepare', 'status', 'cancel', 'check', 'migrate'].includes(command ?? '') ||
-      (command === 'prepare'
-        ? Number(!!values.package) + Number(!!values.version) !== 1
-        : command === 'check'
-          ? !values.package || values.version !== undefined
-          : values.package !== undefined || values.version !== undefined) ||
-      (values.self !== undefined && (command !== 'prepare' || !values.package)) ||
-      (values['ca-file'] && command !== 'check')
+    if (!values['operation-id'] || !values.attempt || !/^[1-9]\d*$/.test(values.attempt))
+      throw new Error('update desktop-feed requires --operation-id and --attempt')
+    const { downloadDesktopFeed } = await import('./daemon/update-network.ts')
+    console.log(
+      JSON.stringify(await downloadDesktopFeed(values['data-dir']!, values['operation-id'], Number(values.attempt))),
     )
-      throw new Error(
-        '用法：upgrade prepare (--version <中心版本> | --package <目录> [--self]) | check --package <目录> | status | cancel | migrate',
-      )
-    const directory = values['data-dir']!
-    if (command === 'check') {
-      const { checkUpgrade } = await import('./daemon/upgrade-check.ts')
-      const result = await checkUpgrade(
-        directory,
-        values.package!,
-        await loadCoordinatorCA(directory, values['ca-file']),
-      )
-      console.log(JSON.stringify(result))
-      if (!result.ok) process.exitCode = 1
-    } else if (command === 'migrate') {
-      const { migrateUpgrade } = await import('./daemon/upgrade-migrate.ts')
-      console.log(JSON.stringify({ state: await migrateUpgrade(directory) }))
-    } else {
-      const { manageUpgrade } = await import('./daemon/upgrade-management.ts')
-      console.log(
-        JSON.stringify(
-          await manageUpgrade(
-            directory,
-            command as 'prepare' | 'status' | 'cancel',
-            values.version
-              ? { version: values.version }
-              : values.package
-                ? { package: resolve(values.package), ...(values.self ? { self: true } : {}) }
-                : undefined,
-          ),
-        ),
-      )
-    }
+    return
+  }
+  if (action === 'update' && args[0] === 'policy') {
+    const { values, positionals } = parseArgs({
+      args: args.slice(1),
+      allowPositionals: true,
+      options: { 'data-dir': { type: 'string', default: join(homedir(), '.baton-ts') } },
+    })
+    if (positionals.length > 1 || (positionals[0] !== undefined && !['manual', 'idle'].includes(positionals[0])))
+      throw new Error('update policy [manual|idle]')
+    const { readUpdatePolicy, saveUpdatePolicy } = await import('./daemon/update-background.ts')
+    const policy = positionals[0]
+      ? await saveUpdatePolicy(values['data-dir']!, positionals[0] as 'manual' | 'idle')
+      : await readUpdatePolicy(values['data-dir']!)
+    console.log(JSON.stringify({ policy }))
+    return
+  }
+  if (action === 'update' && args[0] === 'startup-failed') {
+    const { values } = parseArgs({
+      args: args.slice(1),
+      options: {
+        'data-dir': { type: 'string', default: join(homedir(), '.baton-ts') },
+        'operation-id': { type: 'string' },
+        attempt: { type: 'string' },
+      },
+    })
+    if (!values['operation-id'] || !values.attempt || !/^[1-9]\d*$/.test(values.attempt))
+      throw new Error('update startup-failed requires --operation-id and --attempt')
+    const { reportLocalStartupFailure } = await import('./daemon/update-orchestrator.ts')
+    console.log(
+      JSON.stringify(
+        await reportLocalStartupFailure(values['data-dir']!, values['operation-id'], Number(values.attempt)),
+      ),
+    )
+    return
+  }
+  if (action === 'update') {
+    const subcommand = args[0] === 'cancel' || args[0] === 'start' ? args[0] : 'start'
+    const { values } = parseArgs({
+      args: subcommand === args[0] ? args.slice(1) : args,
+      options: { 'data-dir': { type: 'string', default: join(homedir(), '.baton-ts') } },
+    })
+    const update = await import('./daemon/update-orchestrator.ts')
+    console.log(
+      JSON.stringify(
+        await (subcommand === 'cancel'
+          ? update.cancelUpdate(values['data-dir']!)
+          : update.beginLocalUpdate(values['data-dir']!)),
+      ),
+    )
+    return
+  }
+  if (action === 'update-worker') {
+    const { values } = parseArgs({ args, options: { 'data-dir': { type: 'string' } } })
+    if (!values['data-dir']) throw new Error('update-worker requires --data-dir')
+    const { runUpdateWorker } = await import('./daemon/update-orchestrator.ts')
+    await runUpdateWorker(values['data-dir'])
+    return
+  }
+  if (action === 'update-preflight') {
+    const { values } = parseArgs({ args, options: { 'data-dir': { type: 'string' } } })
+    if (!values['data-dir']) throw new Error('update-preflight requires --data-dir')
+    const { localUpgradePreflight } = await import('./daemon/upgrade-check.ts')
+    console.log(JSON.stringify(await localUpgradePreflight(values['data-dir'])))
+    return
+  }
+  if (action === 'update-recover') {
+    const { values } = parseArgs({ args, options: { 'data-dir': { type: 'string' } } })
+    if (!values['data-dir']) throw new Error('update-recover requires --data-dir')
+    const { recoverUpdateRollback } = await import('./daemon/update-orchestrator.ts')
+    await recoverUpdateRollback(values['data-dir'])
     return
   }
   if (action === 'files' || action === 'project-exec') {

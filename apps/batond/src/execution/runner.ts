@@ -23,16 +23,19 @@ import { listenAuthenticated } from '../daemon/ipc.ts'
 import { decodeRequest, decodeResponse, type ExecutionResponse } from './ipc.ts'
 import { openExecutionLedger, type ExecutionState } from './ledger.ts'
 import { executionPaths } from './paths.ts'
+import { assertNoUpdateRollback } from '../daemon/update-state.ts'
 
 export const runExecutionWorker = (dataDirectory: string, executionId: string, suppliedWatchdog?: ProcessWatchdog) =>
   Effect.gen(function* () {
     const scope = yield* Scope.Scope
+    yield* Effect.tryPromise(() => assertNoUpdateRollback(dataDirectory))
     const paths = executionPaths(dataDirectory, executionId)
     if (process.platform !== 'win32') process.umask(0o077)
     yield* Effect.promise(() => ensurePrivateDirectory(`${paths.root}/executions`))
     yield* Effect.promise(() => ensurePrivateDirectory(paths.directory))
     yield* Effect.promise(() => ensurePrivateDirectory(paths.ipcDirectory))
     yield* acquireProcessLockScoped(paths.lock)
+    yield* Effect.tryPromise(() => assertNoUpdateRollback(dataDirectory))
     const token = (yield* Effect.promise(() => readPrivateFile(paths.token))).toString('utf8')
     if (!/^[0-9a-f]{64}$/.test(token)) return yield* Effect.fail(new Error('Invalid execution IPC token'))
     const ledger = yield* openExecutionLedger(paths.ledger)

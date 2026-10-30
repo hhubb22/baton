@@ -1,11 +1,18 @@
-FROM node:26-bookworm-slim AS build
+FROM node:26.11.1-bookworm-slim AS build
 WORKDIR /src
 RUN npm install --global pnpm@12.11.2
 COPY . .
 RUN pnpm install --frozen-lockfile --ignore-scripts
-RUN pnpm --filter @baton/server build
+ARG BATON_VERSION=development
+ARG BATON_COMMIT=development
+RUN node tools/build/server.mjs --version "$BATON_VERSION" --commit "$BATON_COMMIT"
 
-FROM node:26-bookworm-slim
+FROM node:26.11.1-bookworm-slim
+ARG BATON_VERSION=development
+ARG BATON_COMMIT=development
+LABEL org.opencontainers.image.source="https://github.com/hhubb22/baton" \
+    org.opencontainers.image.version=$BATON_VERSION \
+    org.opencontainers.image.revision=$BATON_COMMIT
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \

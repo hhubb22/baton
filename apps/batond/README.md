@@ -14,7 +14,7 @@
 
 ## 安装包入口
 
-安装目录包含 `batond`（Windows 为 `batond.exe`）、旁置的 `node_modules/` 和许可文件。升级时整体替换安装包。SEA 中 Worker、watchdog、agent-host 与 Project Runtime 均使用当前可执行文件加子命令启动，不解析源码目录。管理命令与开发入口相同。
+安装目录包含 `batond`（Windows 为 `batond.exe`）、旁置的 `node_modules/` 和许可文件。设备更新保留固定启动入口和独立版本目录，数据目录单独保存；SEA 中 Worker、watchdog、agent-host 与 Project Runtime 使用对应版本的可执行文件加子命令启动，不解析源码目录。
 
 ```sh
 ./batond --version
@@ -33,7 +33,7 @@
 
 SEA 安装包首次执行 `up` 或 `register` 时读取可执行文件旁的 `deployment.json`，使用其中的 `coordinator_url` 和可选的 `ca_pem`；显式 `--coordinator` 和 `--ca-file` 分别优先。部署配置缺失时仍需指定中心地址，格式错误报 `deployment_invalid`。源码与 bundle 入口不读取部署配置，已有身份的命令也不读取它。
 
-`--ca-file` 同时供 HTTPS 注册、重新认证和 WSS 连接校验证书，使用系统已信任证书时可省略。注册和重新认证成功后，在 `identity.lock` 下先原子保存 CA 内容为私有文件 `coordinator-ca.pem`，再保存身份；本次未使用 CA 时删除保存的 CA。后续 `up`、`run`、`reauth` 和 `upgrade check` 默认使用保存的 CA，显式 `--ca-file` 可覆盖；只有注册或重新认证成功才更新保存的 CA。中心地址必须为 HTTPS，Relay 必须为 WSS，证书需匹配访问主机名。
+`--ca-file` 同时供 HTTPS 注册、重新认证和 WSS 连接校验证书，使用系统已信任证书时可省略。注册和重新认证成功后，在 `identity.lock` 下先原子保存 CA 内容为私有文件 `coordinator-ca.pem`，再保存身份；本次未使用 CA 时删除保存的 CA。后续 `up`、`run`、`reauth` 和更新默认使用保存的 CA；只有注册或重新认证成功才更新保存的 CA。中心地址必须为 HTTPS，Relay 必须为 WSS，证书需匹配访问主机名。
 
 员工在网页为原设备领取一次性重新认证凭据后，在设备本地执行：
 
@@ -54,19 +54,15 @@ SEA 安装包首次执行 `up` 或 `register` 时读取可执行文件旁的 `de
 
 `batond desktop-directory --thread-id <UUID> --data-dir <已有数据目录>` 为桌面客户端查询中心分配的 Thread 工作目录，成功时 stdout 输出一行 `{ node_id, employee_id, coordinator_url, working_directory }`，退出码为 0。身份通过 `loadIdentity` 读取，Thread 配置只取 `node.db` 的 `node_workers`，不读取本地 `local-open.json`，也不接受调用方传入工作路径。查询以只读连接打开已有账本，不建库、不迁移、不启动 daemon 或 Worker；目录须存在并通过当前授权根的真实路径和符号链接检查，返回 canonical 路径。失败时 stderr 输出 `{ ok: false, code, message }`，退出码为 1：目录已删除为 `directory_missing`，越界或不可访问为 `path_denied`，未知、本地独有或节点身份不匹配的 Thread 为 `thread_unknown`；参数错误、身份不可读、账本不可读分别为 `invalid_arguments`、`identity_unavailable`、`ledger_unavailable`。错误消息不包含凭据或底层异常。
 
-daemon 在连接变化时原子写入私有的 `daemon-status.json`，包含 `pid`、`batond_version`、`state`、`updated_at`；`batond_version` 为当前运行程序的 `BUILD.version`，旧状态文件可能缺失该字段。状态为 `connecting`、`online`、`rejected` 或 `stopping`，拒绝时附上 `code` 和 `message`，不含凭据。读取方需结合 PID 与 `daemon.lock` 判断状态是否过期。同一目录已有 daemon 时，第二个 `up` 或 `run` 报 `daemon_running`。`needs_reauth` 与 `node_version_incompatible` 的退出码为 78，其他失败为 1。
+daemon 在连接变化时原子写入私有的 `daemon-status.json`，包含 `pid`、`batond_version`、`state`、`updated_at`；`batond_version` 为当前运行程序的 `BUILD.version`，旧状态文件可能缺失该字段。状态为 `connecting`、`online`、`rejected` 或 `stopping`，拒绝时附上 `code` 和 `message`，不含凭据。读取方需结合 PID 与 `daemon.lock` 判断状态是否过期。同一目录已有 daemon 时，第二个 `up` 或 `run` 报 `daemon_running`。需要重新认证时退出码为 78；业务协议不兼容时保留更新管理通道。
 
 `run --exit-with-stdin` 是供进程监管使用的内部参数：stdin EOF 与 SIGTERM 走相同停止路径，关闭连接并写入 `stopping`。
 
-节点在认证时上报实际构建版本与协议。中心明确返回 `node_version_incompatible` 时，daemon 输出包含双方版本、协议、原因与升级指引的结构化诊断并退出，等待用户升级后重新启动；本地命令、待补报结果和独立 Worker 保留。development 与发布版联调可放行版本号差异，协议仍须一致。
+节点在认证时上报实际构建版本与协议；中心按协议检查业务连接。协议不兼容时业务保持暂停，独立认证更新通道继续运行，并保留本地命令和待补报结果。
 
-升级准备通过本地 `upgrade prepare --package <目录>`、`upgrade prepare --version <中心版本>`、`upgrade prepare --package <本应用resources/batond> --self`、`upgrade status`、`upgrade cancel` 管理。传统 `--package` 完整预检目标程序、中心兼容性、本地格式和备份空间；`--version` 只准备当前中心托管的精确版本，记录中心协议并检查备份空间，不要求旧 daemon 自身与新中心协议兼容，也不声称已核验目标包。daemon 已退出或因版本拒绝退出时，这些命令持原 `daemon.lock` 管理本地状态，不启动业务。已有 daemon 时普通准备、查询和取消走原认证 IPC；`--self` 只在无 daemon 时执行，外部服务占锁时返回 `upgrade_busy`，不停止或接管它。
+设备使用 `batond update` 开始更新，`batond update status` 查看状态，迁移前可用 `batond update cancel` 取消。`batond update policy manual|idle` 选择手动或空闲自动更新，默认为手动。设备后台从已配置中心检查签名清单并预下载，空闲自动更新仍通过准备屏障等待竞争开始的任务结束。
 
-新应用先停止普通监管，再用自己的 batond 执行 `prepare --package <resources/batond> --self`。它在锁内先保存 `draining` 暂停，再只读检查实际程序、发布清单、本地格式和备份空间，将同一操作绑定到新应用目录；已有目标版本、中心协议或构建身份不符时拒绝继续。直接准备缺少旧版本证据时源版本为 `unknown`；已有完成记录时沿用其目标版本。self 不连接中心、不打开业务写连接、不启动 Worker、Runtime 或清理存活进程；直接替换而没有中心协议记录时，由后续 syncing 认证完成协议校验，确认前保持业务暂停。`upgrade status` 在无 daemon 时持原锁重查 Worker/启动锁、持久执行及进程清理事实，并取得配置写锁后推进 `draining → ready`；未确认进程阻止就绪，本地未 ACK 结果不阻止就绪。离线 `cancel` 仅保存 `cancelled`、解除门禁并保留原队列，业务由正常监管恢复，不调用显式 resume。迁移开始后仍拒绝取消。
-
-prepare、status 和 cancel 成功输出 `{ state, blockers, pending_reports }`，无操作时 `state=null`；migrate 输出 `{ state }`。状态读取或迁移失败返回非零退出及 stderr JSON 的固定 `code` 和详细 `message`。self 绑定完成且 ready、daemon 真正退出后，由该目标程序执行 `upgrade migrate`，迁移重试和目录重新绑定保留原 operation ID、阶段与备份；不同构建不能覆盖原操作。启动时已有 draining 的 daemon 只做升级管理与就绪检查，不提前打开业务数据库。
-
-daemon 通过 `node.upgrade_state` 上报 operation_id、源版本、目标版本和 draining、ready、migrating、syncing、completed、cancelled 或 failed 阶段；本地安装路径和原始失败原因不上传。准备与迁移阶段先持久保存状态；同一进程按数据目录串行读写升级状态，避免原子替换与文件身份校验相互干扰。syncing 完成认证、初始同步、运行能力确认及原结果补报后请求中心确认 completed，取得回执才原子保存本地 completed 并解除门禁。未收到成功回执时按心跳间隔重试，回执须匹配操作、阶段及消息关联 ID；初次连接和重连均重报当前持久状态，离线期间跳过的阶段不补造。普通连接与受限连接均报告 `upgrade_protocol=1`；ready、migrating、failed 不打开业务数据库，syncing 仅重开节点结果账本并导入已退出 Worker 的持久报告用于补报。完成回执丢失时本地仍为 syncing，继续重发 completed；确认后当前进程关闭受限 Scope，再打开业务 Scope，Worker 与 Project Runtime 按原队列继续，不调用显式 resume。ready 需等待执行、进程清理与数据库关闭，未获中心确认的业务报告留在原账本；取消准备后恢复保留的队列。
+发布构建可内置受信公钥；自托管安装者可在数据目录的私有 `update-trust.json` 显式配置 key ID 到 Ed25519 SPKI 公钥 PEM 的 JSON 对象。更新不会从下载响应导入公钥。新程序通过固定入口及独立版本目录启动，迁移前持锁保存一致备份；业务恢复前的失败可核验备份并回切，恢复后不自动恢复旧数据。
 
 节点连接和能力探测分别进行。Cursor、Pi、Codex、Kiro 探测完成前上报 `unverified`，创建 Thread 需等待 `available` 且 `capabilities.create: true`；Kiro 另以限时 4 秒、stdout/stderr 各最多 4096 字节的 `kiro-cli --version` 获取版本，只上报版本号，诊断不外传，超时或不可解析记入 reason，已安装时仍允许新建，缺程序报告 `unavailable`。四个 Agent 认证 unknown 均允许新建；整次 host 探测失败且安装状态未确认时报告 `unverified`。Pi、Codex 支持 steer，Cursor、Kiro 上游不支持；Pi、Codex、Cursor 支持 Thread 内逐轮换模型，插入消息沿用活动回合的模型；Kiro 上游不支持换模型，原因写入报告。设备进程需显式配置 `CURSOR_API_KEY`。节点退出不结束独立 Worker，重启后从账本重新发现存活 Worker；未确认命令继续使用原 ID，已接收输入不会因为重连再次发送。
 

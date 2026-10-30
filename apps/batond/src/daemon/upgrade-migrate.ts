@@ -1,18 +1,21 @@
 import { releaseMetadata } from '@baton/protocol/release'
 import { Effect } from 'effect'
-import { realpath } from 'node:fs/promises'
+import * as Sqlite from '@baton/sqlite'
+import * as Reactivity from 'effect/reactivity/Reactivity'
+import { realpath, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { acquireProcessLock, ProcessLockBusy, type ProcessLock } from '../platform/lock.ts'
 import { openPrivateFile, validatePrivateDirectory, writePrivateFileAtomic } from '../platform/private.ts'
 import { makeNodeLedger } from './ledger.ts'
 import { makeProjectLedger } from '../project/ledger.ts'
 import { openWorkerLedger } from '../worker/ledger.ts'
+import { openExecutionLedger } from '../execution/ledger.ts'
 import { IPCError } from './ipc.ts'
 import { isMissing } from './identity.ts'
 import { readUpgradeState, saveUpgradeState, upgradeBlockers, type UpgradeState } from './upgrade.ts'
 import { readUpgradePackage, sameRelease, upgradeLedgers } from './upgrade-check.ts'
 import { createUpgradeBackup, verifyUpgradeBackup } from './upgrade-backup.ts'
-import { migrateNodeLedger } from './upgrade-node-ledger.ts'
+import { applyStorageMigrations, checkStorageFormat } from '../storage-format.ts'
 
 /** 节点锁覆盖备份、逐库核验和阶段提交；根配置沿用各自已有的写锁。 */
 export async function migrateUpgrade(dataDirectory: string): Promise<UpgradeState> {
@@ -79,10 +82,38 @@ export async function migrateUpgrade(dataDirectory: string): Promise<UpgradeStat
           if (!isMissing(error)) throw error
           await writePrivateFileAtomic(file.path, '')
         }
+        if ((await stat(file.path)).size > 0) {
+          checkStorageFormat(file.path, file.kind, file.baseline, true)
+          const marker =
+            file.kind === 'node'
+              ? ['node_commit', 'commit_token']
+              : file.kind === 'project'
+                ? ['project_commit', 'commit_token']
+                : file.kind === 'thread'
+                  ? ['worker_commit', 'commit_token']
+                  : ['commit_marker', 'token']
+          await Effect.runPromise(
+            Effect.scoped(
+              Effect.gen(function* () {
+                const sql = yield* Sqlite.make({
+                  filename: file.path,
+                  commitVerification: {
+                    writeToken: (token) => ({
+                      sql: `UPDATE ${marker[0]} SET ${marker[1]}=? WHERE id=1`,
+                      params: [token],
+                    }),
+                    readToken: { sql: `SELECT ${marker[1]} FROM ${marker[0]} WHERE id=1` },
+                  },
+                }).pipe(Effect.provide(Reactivity.layer))
+                yield* applyStorageMigrations(sql, file.kind, file.baseline)
+              }),
+            ),
+          )
+        }
         if (file.kind === 'node') {
-          migrateNodeLedger(file.path)
           await Effect.runPromise(Effect.scoped(makeNodeLedger(file.path)))
         } else if (file.kind === 'project') await Effect.runPromise(Effect.scoped(makeProjectLedger(file.path)))
+        else if (file.kind === 'execution') await Effect.runPromise(Effect.scoped(openExecutionLedger(file.path)))
         else await Effect.runPromise(Effect.scoped(openWorkerLedger({ dbPath: file.path, dataDirectory: directory })))
       }
       state = { ...state, phase: 'syncing' }

@@ -24,13 +24,16 @@ export function build(run = runCommand, release = {}) {
   run('pnpm', ['--dir', 'web', 'typecheck'])
   // 中心构建同时生成 bundle 旁的 web/ 和 migrations/。
   run('pnpm', ['--filter', '@baton/server', 'build', ...args])
-  run('pnpm', ['--filter', '@baton/batond', 'build', ...args])
-  run(process.execPath, ['tools/package-batond.mjs', '--out', 'bin', ...args])
+  const keys = release['update-keys'] ? ['--update-keys', release['update-keys']] : []
+  run('pnpm', ['--filter', '@baton/batond', 'build', ...args, ...keys])
+  run(process.execPath, ['tools/package-batond.mjs', '--out', 'bin', ...args, ...keys])
 }
 
 if (import.meta.main) {
   try {
-    const { values } = parseArgs({ options: { version: { type: 'string' }, commit: { type: 'string' } } })
+    const { values } = parseArgs({
+      options: { version: { type: 'string' }, commit: { type: 'string' }, 'update-keys': { type: 'string' } },
+    })
     build(runCommand, values)
   } catch (error) {
     console.error(error.message)

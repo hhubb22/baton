@@ -27,35 +27,36 @@ describe('device setup downloads', () => {
   it.each([
     ['macOS', 'darwin-arm64', 'a'],
     ['Linux', 'linux-x64', 'b'],
-  ] as const)(
-    'offers %s downloads and setup commands without credentials or deployment flags',
-    async (os, target, hash) => {
-      const user = userEvent.setup()
-      const f = setup()
-      await f.renderDialog()
-      await user.click(screen.getByRole('radio', { name: os }))
-      await user.type(screen.getByLabelText('设备名称'), 'Build server')
-      const file = `baton-v0.1.0-${target}.tar.gz`
-      const link = screen.getByRole('link', { name: `下载命令行工具 · ${target.endsWith('x64') ? 'x64' : 'arm64'}` })
-      expect(link).toHaveAttribute('href', `${window.location.origin}/downloads/${file}`)
-      expect(link).toHaveAttribute('download', file)
-      expect(screen.getByText(`SHA-256: ${hash.repeat(64)}`)).toBeInTheDocument()
-      expect(screen.getAllByText(/v0.1.0 · \d+(\.\d+)? MB/).length).toBeGreaterThan(0)
-      const curl = screen.getByLabelText('在终端下载')
-      expect(curl.textContent).toBe(`curl -fLk -O '${window.location.origin}/downloads/${file}'`)
-      const command = screen.getByLabelText('在终端运行')
-      expect(command).toHaveTextContent(`tar xzf "${file}" && cd "baton-v0.1.0-${target}"`)
-      expect(command).toHaveTextContent('read -rs BATON_ENROLLMENT_TOKEN && export BATON_ENROLLMENT_TOKEN')
-      expect(command).toHaveTextContent('./batond register --display-name "Build server" && ./batond service install')
-      expect(command.textContent).not.toContain(screen.getByLabelText('设置码').textContent!)
-      expect(command.textContent).not.toMatch(/--coordinator|--ca-file|batond up/)
-      if (os === 'macOS')
-        expect(screen.getByRole('link', { name: '下载桌面客户端 · arm64' })).toHaveAttribute(
-          'href',
-          expect.stringContaining('.dmg'),
-        )
-    },
-  )
+  ] as const)('offers %s downloads and a setup command with the current center', async (os, target, hash) => {
+    const user = userEvent.setup()
+    const f = setup()
+    await f.renderDialog()
+    await user.click(screen.getByRole('radio', { name: os }))
+    await user.type(screen.getByLabelText('设备名称'), 'Build server')
+    const file = `baton-v0.1.0-${target}.tar.gz`
+    const link = screen.getByRole('link', { name: `下载命令行工具 · ${target.endsWith('x64') ? 'x64' : 'arm64'}` })
+    expect(link).toHaveAttribute('href', `${window.location.origin}/downloads/${file}`)
+    expect(link).toHaveAttribute('download', file)
+    expect(screen.getByText(`SHA-256: ${hash.repeat(64)}`)).toBeInTheDocument()
+    expect(screen.getAllByText(/v0.1.0 · \d+(\.\d+)? MB/).length).toBeGreaterThan(0)
+    const curl = screen.getByLabelText('在终端下载')
+    expect(curl.textContent).toBe(`curl -fL -O '${window.location.origin}/downloads/${file}'`)
+    const command = screen.getByLabelText('在终端运行')
+    expect(command).toHaveTextContent(`tar xzf "${file}" && cd "baton-v0.1.0-${target}"`)
+    expect(command).toHaveTextContent('read -rs BATON_ENROLLMENT_TOKEN && export BATON_ENROLLMENT_TOKEN')
+    expect(command).toHaveTextContent(
+      `./batond register --coordinator '${window.location.origin}' --display-name "Build server" && ./batond service install`,
+    )
+    expect(screen.getByText(/添加 --cacert/)).toHaveTextContent('添加 --ca-file <本地证书路径>')
+    expect(screen.getByText(/添加 --cacert/)).toHaveTextContent('下载后请核对 SHA-256')
+    expect(command.textContent).not.toContain(screen.getByLabelText('设置码').textContent!)
+    expect(command.textContent).not.toMatch(/--ca-file|batond up/)
+    if (os === 'macOS')
+      expect(screen.getByRole('link', { name: '下载桌面客户端 · arm64' })).toHaveAttribute(
+        'href',
+        expect.stringContaining('.dmg'),
+      )
+  })
 
   it('switches Linux architecture for both terminal commands', async () => {
     const user = userEvent.setup()

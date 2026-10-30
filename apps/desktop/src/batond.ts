@@ -2,38 +2,17 @@ import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStd
 import { appendFile, mkdir, rename, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Schema } from 'effect'
+import { SignedUpdateManifest } from '@baton/protocol/update-manifest'
 import type { DeploymentConfig } from './deployment.ts'
 import { PublicIdentity } from './status.ts'
 import { lastFailure } from './supervisor.ts'
 import { ThreadDirectory } from './local.ts'
 
-const UpgradeState = Schema.Struct({
-  operation_id: Schema.String,
-  source_version: Schema.String,
-  target_version: Schema.String,
-  target_path: Schema.optionalKey(Schema.String),
-  phase: Schema.Literals(['draining', 'ready', 'migrating', 'syncing', 'completed', 'cancelled', 'failed']),
-  reason: Schema.optionalKey(Schema.String),
-  error_code: Schema.optionalKey(Schema.String),
-})
-export const UpgradeSnapshot = Schema.Struct({
-  state: Schema.NullOr(UpgradeState),
-  blockers: Schema.Array(
-    Schema.Struct({
-      kind: Schema.Literals(['thread', 'execution', 'runtime', 'process']),
-      id: Schema.String,
-      reason: Schema.String,
-      pid: Schema.optionalKey(Schema.Int),
-    }),
-  ),
-  pending_reports: Schema.Number,
-})
-export type UpgradeSnapshot = typeof UpgradeSnapshot.Type
-
 export type Spawn = (file: string, args: string[], options: SpawnOptionsWithoutStdio) => ChildProcessWithoutNullStreams
 
 export class Batond {
   readonly executable: string
+  private command: { executable: string; args: string[] } | undefined
   constructor(
     resources: string,
     readonly dataDirectory: string,
@@ -42,20 +21,25 @@ export class Batond {
     this.executable = join(resources, 'batond', process.platform === 'win32' ? 'batond.exe' : 'batond')
   }
 
-  private spawn(args: string[], code?: string) {
+  private spawn(args: string[], code?: string, bootstrap = false) {
     const env = { ...process.env }
     delete env.BATON_ENROLLMENT_TOKEN
+    if (args[0] === 'run') env.BATON_DESKTOP_MANAGED = '1'
     if (code !== undefined) env.BATON_ENROLLMENT_TOKEN = code
-    return this.spawnProcess(this.executable, [...args, '--data-dir', this.dataDirectory], { env, windowsHide: true })
+    const command = !bootstrap && this.command ? this.command : { executable: this.executable, args: [] }
+    return this.spawnProcess(command.executable, [...command.args, ...args, '--data-dir', this.dataDirectory], {
+      env,
+      windowsHide: true,
+    })
   }
 
   run() {
     return this.spawn(['run', '--exit-with-stdin'])
   }
 
-  private execute(args: string[], code?: string, upgrade = false, stdin?: string): Promise<string> {
+  private execute(args: string[], code?: string, upgrade = false, stdin?: string, bootstrap = false): Promise<string> {
     return new Promise((resolve, reject) => {
-      const child = this.spawn(args, code)
+      const child = this.spawn(args, code, bootstrap)
       let output = '',
         stderr = '',
         complete = false
@@ -66,24 +50,20 @@ export class Batond {
         if (error) reject(error)
         else resolve(output)
       }
-      // 迁移由持久状态和进程锁恢复，不因桌面命令超时而中断。
-      const timer =
-        args[0] === 'upgrade' && args[1] === 'migrate'
-          ? undefined
-          : setTimeout(() => {
-              child.kill()
-              finish(new Error('batond 命令超时，请检查本机设备状态后重试'))
-            }, 40_000)
+      const timer = setTimeout(
+        () => {
+          child.kill()
+          finish(new Error('batond 命令超时，请检查本机设备状态后重试'))
+        },
+        args[0] === 'update' && args[1] === 'desktop-download' ? 30 * 60_000 : 40_000,
+      )
       child.stdin.on('error', () => {})
       child.stdin.end(stdin)
       child.stdout.on('data', (chunk: Buffer) => {
         output += chunk.toString('utf8')
         if (output.length > 64 * 1024) {
-          if (args[0] === 'upgrade' && args[1] === 'migrate') output = output.slice(-64 * 1024)
-          else {
-            child.kill()
-            finish(new Error('batond 输出超过限制'))
-          }
+          child.kill()
+          finish(new Error('batond 输出超过限制'))
         }
       })
       child.stderr.on('data', (chunk: Buffer) => {
@@ -114,6 +94,124 @@ export class Batond {
     })
   }
 
+  async bootstrap(): Promise<void> {
+    const command = Schema.decodeUnknownSync(
+      Schema.Struct({ executable: Schema.String, args: Schema.Array(Schema.String) }),
+    )(JSON.parse(await this.execute(['update', 'bootstrap'], undefined, true, undefined, true)))
+    const expected = join(
+      this.dataDirectory,
+      'installation',
+      'launcher',
+      process.platform === 'win32' ? 'batond.exe' : 'batond',
+    )
+    if (
+      command.executable !== expected ||
+      JSON.stringify(command.args) !== JSON.stringify(['dispatch', '--data-dir', this.dataDirectory, '--'])
+    )
+      throw new Error('设备更新入口无效')
+    this.command = { executable: command.executable, args: [...command.args] }
+  }
+
+  async update(): Promise<void> {
+    await this.execute(['update'], undefined, true)
+  }
+
+  async cancelUpdate(): Promise<void> {
+    await this.execute(['update', 'cancel'], undefined, true)
+  }
+
+  async reportUpdateStartupFailure(operationId: string, attempt: number): Promise<void> {
+    await this.execute(
+      ['update', 'startup-failed', '--operation-id', operationId, '--attempt', String(attempt)],
+      undefined,
+      true,
+    )
+  }
+
+  async updatePolicy(policy?: 'manual' | 'idle'): Promise<'manual' | 'idle'> {
+    const result = Schema.decodeUnknownSync(Schema.Struct({ policy: Schema.Literals(['manual', 'idle']) }))(
+      JSON.parse(await this.execute(['update', 'policy', ...(policy ? [policy] : [])], undefined, true)),
+    )
+    return result.policy
+  }
+
+  async updateManifest(): Promise<typeof SignedUpdateManifest.Type> {
+    const value = Schema.decodeUnknownSync(Schema.Struct({ manifest: SignedUpdateManifest }))(
+      JSON.parse(await this.execute(['update', 'manifest'], undefined, true)),
+    )
+    return value.manifest
+  }
+
+  async downloadDesktopFeed(
+    operationId: string,
+    attempt: number,
+  ): Promise<{
+    version: string
+    commit: string
+    artifacts: ReadonlyArray<{
+      path: string
+      file: string
+      size: number
+      sha256: string
+      kind: string
+      platform: string
+      arch: string
+    }>
+  }> {
+    return Schema.decodeUnknownSync(
+      Schema.Struct({
+        version: Schema.String,
+        commit: Schema.String,
+        artifacts: Schema.Array(
+          Schema.Struct({
+            path: Schema.String,
+            file: Schema.String,
+            size: Schema.Number,
+            sha256: Schema.String,
+            kind: Schema.String,
+            platform: Schema.String,
+            arch: Schema.String,
+          }),
+        ),
+      }),
+    )(
+      JSON.parse(
+        await this.execute(
+          ['update', 'desktop-feed', '--operation-id', operationId, '--attempt', String(attempt)],
+          undefined,
+          true,
+        ),
+      ),
+    )
+  }
+
+  async updateStatus(): Promise<{
+    operation_id: string
+    attempt: number
+    phase: string
+    source_version?: string
+    target_version?: string
+    reason?: string
+    rollback_complete?: boolean
+  } | null> {
+    const result = Schema.decodeUnknownSync(
+      Schema.Struct({
+        state: Schema.NullOr(
+          Schema.Struct({
+            operation_id: Schema.String,
+            attempt: Schema.Number,
+            phase: Schema.String,
+            source_version: Schema.optionalKey(Schema.String),
+            target_version: Schema.optionalKey(Schema.String),
+            reason: Schema.optionalKey(Schema.String),
+            rollback_complete: Schema.optionalKey(Schema.Boolean),
+          }),
+        ),
+      }),
+    )(JSON.parse(await this.execute(['update', 'status'], undefined, true)))
+    return result.state
+  }
+
   async setModelConnectionKey(connectionId: string, key: string): Promise<void> {
     await this.execute(['project-runtime', 'connection-key', connectionId], undefined, false, key)
   }
@@ -127,36 +225,6 @@ export class Batond {
       const code = error instanceof Error && 'code' in error ? error.code : undefined
       throw new Error(code === 'directory_missing' ? '此文件夹已不存在。' : '此对话的文件夹不可用。')
     }
-  }
-
-  async upgradeStatus(): Promise<UpgradeSnapshot> {
-    return Schema.decodeUnknownSync(UpgradeSnapshot)(
-      JSON.parse(await this.execute(['upgrade', 'status'], undefined, true)),
-    )
-  }
-
-  async prepareVersion(version: string) {
-    await this.execute(['upgrade', 'prepare', '--version', version], undefined, true)
-    return this.upgradeStatus()
-  }
-
-  async prepareSelf(packageDirectory: string) {
-    await this.execute(['upgrade', 'prepare', '--package', packageDirectory, '--self'], undefined, true)
-    return this.upgradeStatus()
-  }
-
-  async cancelUpgrade() {
-    await this.execute(['upgrade', 'cancel'], undefined, true)
-    return this.upgradeStatus()
-  }
-
-  async migrate() {
-    await this.execute(['upgrade', 'migrate'], undefined, true)
-    return this.upgradeStatus()
-  }
-
-  async stopThread(id: string) {
-    await this.execute(['stop', '--thread-id', id], undefined, true)
   }
 
   async identity(): Promise<PublicIdentity> {

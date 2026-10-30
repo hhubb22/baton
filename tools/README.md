@@ -29,6 +29,12 @@ node tools/package-release.mjs v0.1.0-alpha.1 bin/package
 
 `package-release.mjs <版本> [安装目录=bin] [输出目录=bin/releases]` 检查布局、帮助、SEA 版本和清单，归档后重新解压并运行 `check-package`。输出对应平台的 tar.gz 或 zip、SHA256 和检查报告。检查未通过时默认不写出归档；加 `--allow-check-failure` 时照常写出归档和失败的检查报告，并在标准错误列出失败项。归档版本必须等于二进制内的发布版本，源码提交沿用构建输入；归档器不会给开发程序或其他版本重新贴标。`release.json` 保存版本、提交、平台、协议、中心迁移、三类账本格式和支持的 daemon 版本，并与程序输出及清单核对。应在目标平台执行发布验证。
 
+节点发布构建通过 `--update-keys <公钥列表.json>` 将可信 Ed25519 公钥编入程序，文件内容为 key ID 到 SPKI 公钥 PEM 的 JSON 对象。`build.mjs`、`build/batond.mjs` 和 `package-batond.mjs` 均接受该参数。私钥只用于签名，不能放入公钥列表或安装包。管理员也可在设备本地明确配置可信公钥；不能从未认证的更新响应建立信任。
+
+将各平台归档与发布输入 JSON 放在同一目录，输入包含 `version`、完整 `commit`、`protocol_version`、固定摘要的 `server_image` 和 `artifacts` 数组；每项包含 `kind`（`daemon`、`desktop`、`desktop-feed` 或 `desktop-manual`）、`platform`、`arch`、`file`。运行 `node tools/sign-update.mjs --metadata <发布输入.json> --key <私钥文件> --key-id <标识> --out <update-manifest.json>`。工具按归档实际内容计算大小和 SHA-256，再用 Ed25519 签名；设备核验签名、大小及摘要后才使用工件。
+
+推送 `v*` 标签或手动运行发布工作流会构建平台包、中心 GHCR 镜像并创建 GitHub Release；每个平台检查通过后才发布。仓库变量 `BATON_UPDATE_PUBLIC_KEYS`、`BATON_UPDATE_KEY_ID` 和仓库 secret `BATON_UPDATE_SIGNING_KEY` 分别提供受信公钥 JSON、密钥标识和 Ed25519 私钥。可选的 Apple 和 Windows 签名 secret 由发行者配置；没有 Apple Developer ID 签名和公证时，macOS 自动安装不进入清单，DMG 仍以手动安装工件签入。Windows 无 Authenticode 证书时仍可用清单校验更新，系统可能警告且发布者身份未认证。部署和所需权限见 [edge-01 部署](deploy-edge.md)。
+
 ## 桌面客户端
 
 ```sh

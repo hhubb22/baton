@@ -169,6 +169,18 @@ interface Notice {
 }
 
 const unreachableNotice: Notice = { title: '无法保存默认设备', detail: '请重试。' }
+const upgradeLabels: Record<NonNullable<Device['updateRequest']>['phase'], string> = {
+  requested: '等待设备处理',
+  downloading: '正在下载',
+  verifying: '正在校验',
+  draining: '等待工作结束',
+  ready: '准备就绪',
+  migrating: '正在迁移',
+  syncing: '正在同步',
+  completed: '更新完成',
+  cancelled: '已取消',
+  failed: '更新失败',
+}
 const connectionProtocol = {
   'openai-responses': 'OpenAI Responses',
   'openai-completions': 'OpenAI Chat Completions',
@@ -301,9 +313,11 @@ function DeviceDetails({
   onDisconnect: () => void
 }) {
   const [loginProvider, setLoginProvider] = useState<{ provider: string; localOnly: boolean } | null>(null)
+  const now = useNow(30_000)
   const client = useClient()
   const [editing, setEditing] = useState<ModelConnection | 'new' | null>(null)
   const [logoutError, setLogoutError] = useState(false)
+  const [updateState, setUpdateState] = useState<'idle' | 'sending' | 'accepted' | 'failed'>('idle')
   // 离线或同步中的设备只显示操作，Agent 信息要等设备同步完才准确。
   const connected = device.connection === 'online'
   // 一切正常时不列 Agent，只列需要处理的问题。
@@ -396,9 +410,35 @@ function DeviceDetails({
           onClose={() => setLoginProvider(null)}
         />
       )}
-      {device.upgradeState?.phase === 'failed' && (
-        <span {...stylex.props(text.small, text.muted)}>正在等待取消升级。</span>
+      {device.updateRequest && (
+        <span {...stylex.props(text.small, text.muted)}>
+          {device.upgradeState?.operationId === device.updateRequest.operationId &&
+            `${device.upgradeState.targetVersion} · `}
+          {upgradeLabels[device.updateRequest.phase]}
+          {device.updateRequest.reason && ` · ${device.updateRequest.reason}`}
+        </span>
       )}
+      {!device.updateRequest && device.upgradeState && (
+        <span {...stylex.props(text.small, text.muted)}>
+          {device.upgradeState.targetVersion} · {upgradeLabels[device.upgradeState.phase]}
+        </span>
+      )}
+      {device.updateProtocol === 1 && device.updateManagementLastSeen !== undefined && (
+        <span {...stylex.props(text.caption, text.muted)}>
+          {now - device.updateManagementLastSeen < 60_000 ? '更新管理通道可用' : '更新管理通道未连接'}
+        </span>
+      )}
+      {device.updateAvailability && (
+        <span {...stylex.props(text.caption, text.muted)}>
+          {device.updateAvailability.status === 'current'
+            ? '已是最新版本'
+            : `有新版本 ${device.updateAvailability.version}`}
+          {' · 检查时间 '}
+          {new Date(device.updateAvailability.checkedAt).toLocaleString('zh-CN')}
+        </span>
+      )}
+      {updateState === 'accepted' && !device.updateRequest && <span role="status">更新请求已保存，等待设备处理。</span>}
+      {updateState === 'failed' && <span role="alert">无法提交更新请求，请重试。</span>}
       {device.credentialState === 'idle_expired' && (
         <span {...stylex.props(text.small, styles.attention)}>需要登录</span>
       )}
@@ -424,6 +464,23 @@ function DeviceDetails({
         <CommandPermission state={permission} enabled={device.commandAccess.enabled} onChange={onPermission} />
       )}
       <div {...stylex.props(styles.actions)}>
+        {device.updateProtocol === 1 ? (
+          <Button
+            small
+            disabled={updateState === 'sending'}
+            onClick={() => {
+              setUpdateState('sending')
+              void client.updateDevice(device.id).then(
+                () => setUpdateState('accepted'),
+                () => setUpdateState('failed'),
+              )
+            }}
+          >
+            {updateState === 'sending' ? '正在提交…' : '更新设备'}
+          </Button>
+        ) : (
+          <span {...stylex.props(text.caption, text.muted)}>请在设备上安装新版并完成一次本机初始化。</span>
+        )}
         {device.credentialState === 'idle_expired' && (
           <Button small onClick={onReconnect}>
             重新连接设备

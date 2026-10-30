@@ -8,6 +8,9 @@ import { makeNodeLedger } from './daemon/ledger.ts'
 import { makeProjectLedger } from './project/ledger.ts'
 import { openWorkerLedger } from './worker/ledger.ts'
 import { LEDGER_VERSIONS } from '@baton/protocol/release'
+import * as Sqlite from '@baton/sqlite'
+import * as Reactivity from 'effect/reactivity/Reactivity'
+import { applyStorageMigrations, initializeStorage } from './storage-format.ts'
 
 const roots: string[] = []
 afterEach(async () => {
@@ -89,4 +92,42 @@ it.each(stores)('$kind rejects unversioned experimental databases without adopti
   const before = await readFile(filename)
   await expect(run(Effect.scoped(open(filename)))).rejects.toMatchObject({ code: 'storage_version_unsupported' })
   expect(await readFile(filename)).toEqual(before)
+})
+
+it('resumes ordered migrations after a later transaction fails without changing committed history', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'baton-format-migrate-'))
+  roots.push(root)
+  const filename = join(root, 'ledger.db')
+  const baseline = ['CREATE TABLE data (id INTEGER PRIMARY KEY)', 'CREATE TABLE guard (id INTEGER)']
+  const catalog = {
+    node: [
+      { id: '0002_add_value', from: 2, to: 3, statements: ['ALTER TABLE data ADD COLUMN value TEXT'] },
+      { id: '0003_add_guard', from: 3, to: 4, statements: ['INSERT INTO guard VALUES (1)'] },
+    ],
+  }
+  const withSql = <A, E>(use: (sql: Sqlite.SqliteClient) => Effect.Effect<A, E>) =>
+    run(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const sql = yield* Sqlite.make({ filename }).pipe(Effect.provide(Reactivity.layer))
+          return yield* use(sql)
+        }),
+      ),
+    )
+  await withSql((sql) => initializeStorage(sql, 'node', baseline))
+  edit(filename, "CREATE TRIGGER reject_guard BEFORE INSERT ON guard BEGIN SELECT RAISE(ABORT, 'interrupted'); END")
+  await expect(
+    withSql((sql) => applyStorageMigrations(sql, 'node', baseline, { catalog, targetVersion: 4 })),
+  ).rejects.toBeDefined()
+  const intermediate = metadata(filename)
+  expect(intermediate.format[0]).toMatchObject({ version: 3 })
+  expect(intermediate.migrations.map((row) => row.id)).toEqual(['0001_baseline', '0002_add_value'])
+  edit(filename, 'DROP TRIGGER reject_guard')
+  await withSql((sql) => applyStorageMigrations(sql, 'node', baseline, { catalog, targetVersion: 4 }))
+  const completed = metadata(filename)
+  expect(completed.format[0]).toMatchObject({ version: 4 })
+  expect(completed.migrations.slice(0, 2)).toEqual(intermediate.migrations)
+  expect(completed.migrations.map((row) => row.id)).toEqual(['0001_baseline', '0002_add_value', '0003_add_guard'])
+  await withSql((sql) => applyStorageMigrations(sql, 'node', baseline, { catalog, targetVersion: 4 }))
+  expect(metadata(filename)).toEqual(completed)
 })

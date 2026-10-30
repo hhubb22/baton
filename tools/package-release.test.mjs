@@ -5,10 +5,20 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { releaseMetadata } from '../packages/protocol/src/release.mjs'
 import { buildInfo, validateReleaseMetadata } from './lib/release.mjs'
-import { archiveArgs, releaseTarget, validatePackageManifest, validateSeaVersion } from './package-release.mjs'
+import {
+  archiveArgs,
+  archiveEnvironment,
+  releaseTarget,
+  validatePackageManifest,
+  validateSeaVersion,
+} from './package-release.mjs'
 import { validatePackageLayout, withTemporaryInstallation } from './lib/installation.mjs'
 
 const version = 'v0.1.0-alpha.1'
+
+test('archive creation suppresses macOS metadata while retaining the process environment', () => {
+  assert.deepEqual(archiveEnvironment({ PATH: '/bin' }), { PATH: '/bin', COPYFILE_DISABLE: '1' })
+})
 
 for (const [platform, arch, target, extension] of [
   ['linux', 'x64', 'linux-x64', '.tar.gz'],

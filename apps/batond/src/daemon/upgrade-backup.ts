@@ -6,7 +6,7 @@ import { Schema } from 'effect'
 import { ensurePrivateDirectory, readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
 import { IPCError } from './ipc.ts'
 
-/** 仅排除 IPC 和进程锁；WAL、身份、业务数据及完整输出都保留。 */
+/** 备份业务数据、身份配置和 WAL，排除更新进程自身的状态与安装目录。 */
 export async function dataEntries(directory: string) {
   const entries: Array<{ path: string; directory: boolean; bytes: number }> = []
   async function walk(relative: string) {
@@ -18,7 +18,23 @@ export async function dataEntries(directory: string) {
       if (
         (root &&
           (name === 'ipc' ||
-            ['daemon.lock', 'identity.lock', 'browse-roots.lock', 'project-exec.lock'].includes(name))) ||
+            name === 'installation' ||
+            [
+              'daemon.lock',
+              'identity.lock',
+              'browse-roots.lock',
+              'project-exec.lock',
+              'update-worker.lock',
+              'update-launch.lock',
+              'update-transition.lock',
+              'update-restart.lock',
+              'update-download.lock',
+              'update-policy.lock',
+              'update-progress.json',
+              'update-availability.json',
+              'update-availability-pending.json',
+              'launcher-child.json',
+            ].includes(name))) ||
         (thread && ['worker.lock', 'launch.lock'].includes(name)) ||
         (probe && name === 'probe.lock') ||
         ((root || thread || probe) && /^\.lock-[a-f0-9-]{36}$/.test(name))

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { upgradePaused, readUpgradeState, upgradeOffline } from '../daemon/upgrade.ts'
+import { assertNoUpdateRollback } from '../daemon/update-state.ts'
 import { IPCError } from '../daemon/ipc.ts'
 import { join } from 'node:path'
 import { rm, open } from 'node:fs/promises'
@@ -263,6 +264,7 @@ class Manager implements ProjectManager {
     if (run.owned) this.track(this.runner.reap(run.owned)).catch(() => {})
   }
   async command(input: ProjectRunCommand) {
+    await assertNoUpdateRollback(this.options.dataDir)
     const decoded = Schema.decodeUnknownOption(ProjectRunCommand)(input)
     if (decoded._tag === 'None' || decoded.value.lease_epoch <= 0 || this.cancel.signal.aborted) return
     const command = decoded.value

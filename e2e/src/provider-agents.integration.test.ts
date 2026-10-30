@@ -739,8 +739,6 @@ const traceCases = cases.map((provider) => ({
           : [
               { type: 'command_execution', text: 'count.txt' },
               { type: 'dynamic_tool', text: 'upToDate' },
-              // ACP adapter 的批准项最后状态仍为 waiting，host 在 Turn 结束前原样补发。
-              { type: 'approval_request', text: 'count.txt', status: 'waiting' },
             ],
   // Cursor adapter 的 providerTurnPayload 未映射录制的 SDK usage；Kiro 转录只有 context/credit 信息。
   tokenUsage:
@@ -774,6 +772,18 @@ test.each(traceCases)(
                 if (start?.type !== 'expect_outbound') throw new Error('Cursor recording has no run.start')
                 const prompt = Schema.decodeUnknownSync(Schema.Struct({ message: Schema.String }))(start.frame).message
                 const { entries, ...header } = Cursor.withRuntimeInstructions(original, provider.model)
+                // 录制使用沙箱；此测试的 Thread 使用 full-access，派生转录同步其启动参数。
+                const fullAccessEntries = entries.map((entry) => {
+                  if (entry.type !== 'expect_outbound' || entry.label !== 'agent.open') return entry
+                  const frame = entry.frame as { options: { local: Record<string, unknown> } }
+                  return {
+                    ...entry,
+                    frame: {
+                      ...frame,
+                      options: { ...frame.options, local: { ...frame.options.local, sandboxEnabled: false } },
+                    },
+                  }
+                })
                 await writeFile(
                   join(directory, 'cursor-first.ndjson'),
                   [
@@ -785,7 +795,7 @@ test.each(traceCases)(
                         derivedFrom: 'provider-cursor/src/testing/fixtures/tool_call_read_only.ndjson',
                       },
                     }),
-                    ...entries.map((entry) => JSON.stringify(entry)),
+                    ...fullAccessEntries.map((entry) => JSON.stringify(entry)),
                     '',
                   ].join('\n'),
                 )

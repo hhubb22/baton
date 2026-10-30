@@ -4,7 +4,7 @@ import { readdir, readFile, realpath, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Schema } from 'effect'
 import { UUID } from '@baton/protocol'
-import { ReleaseMetadata, LEDGER_VERSIONS } from '@baton/protocol/release'
+import { ReleaseMetadata, LEDGER_VERSIONS, releaseMetadata } from '@baton/protocol/release'
 import { checkStorageFormat, StorageFormatError } from '../storage-format.ts'
 import { storageBaseline as nodeBaseline } from './ledger.ts'
 import { storageBaseline as projectBaseline } from '../project/ledger.ts'
@@ -13,7 +13,6 @@ import { storageBaseline as executionBaseline } from '../execution/ledger.ts'
 import { coordinatorURL, isMissing, loadIdentity, loadCoordinatorCA } from './identity.ts'
 import { IPCError } from './ipc.ts'
 import { backupSpace } from './upgrade-backup.ts'
-import { checkNodeUpgradeStorage } from './upgrade-node-ledger.ts'
 
 export const sameRelease = (left: ReleaseMetadata, right: ReleaseMetadata) =>
   left.version === right.version &&
@@ -39,7 +38,7 @@ export async function readUpgradePackage(target: string) {
     const stdout = await new Promise<string>((resolve, reject) => {
       execFile(
         binary,
-        ['--version'],
+        ['--binary-version'],
         { cwd: path, timeout: 10000, maxBuffer: 64 * 1024, windowsHide: true },
         (error, stdout) => (error ? reject(error) : resolve(stdout)),
       )
@@ -136,8 +135,7 @@ export function centerRelease(url: string, ca?: string): Promise<ReleaseMetadata
 
 export async function checkUpgradeStorage(directory: string, release: ReleaseMetadata) {
   for (const file of await upgradeLedgers(directory)) {
-    if (file.kind === 'node') checkNodeUpgradeStorage(file.path)
-    else checkStorageFormat(file.path, file.kind, file.baseline)
+    checkStorageFormat(file.path, file.kind, file.baseline, true)
     const version = LEDGER_VERSIONS[file.kind]
     if (release.ledger_versions[file.kind] !== version)
       throw new IPCError(
@@ -153,17 +151,44 @@ export async function currentCenterRelease(directory: string, ca?: string) {
   return centerRelease(identity.coordinator_url, ca ?? (await loadCoordinatorCA(directory)))
 }
 
+/** Invoked inside the verified target process, with no network or business writes. */
+export async function localUpgradePreflight(directory: string) {
+  const release = releaseMetadata()
+  await checkUpgradeStorage(directory, release)
+  const space = await backupSpace(directory)
+  return { release, ...space }
+}
+
+export async function targetUpgradePreflight(directory: string, target: string, release: ReleaseMetadata) {
+  const binary = join(target, process.platform === 'win32' ? 'batond.exe' : 'batond')
+  const stdout = await new Promise<string>((resolve, reject) => {
+    execFile(
+      binary,
+      ['update-preflight', '--data-dir', directory],
+      { cwd: target, timeout: 30000, maxBuffer: 64 * 1024, windowsHide: true },
+      (error, output) =>
+        error ? reject(new IPCError('storage_version_unsupported', '目标程序无法验证设备账本')) : resolve(output),
+    )
+  })
+  const result = Schema.decodeUnknownSync(
+    Schema.Struct({ release: ReleaseMetadata, required_bytes: Schema.Number, available_bytes: Schema.Number }),
+  )(JSON.parse(stdout))
+  if (!sameRelease(result.release, release)) throw new IPCError('upgrade_package_invalid', '目标预检程序身份不匹配')
+  return result
+}
+
 export async function checkUpgrade(directory: string, target: string, ca?: string) {
   try {
     const { path, release } = await readUpgradePackage(target)
-    await checkUpgradeStorage(directory, release)
-    const center = await currentCenterRelease(directory, ca)
+    await targetUpgradePreflight(directory, path, release)
     if (
-      center.protocol_version !== release.protocol_version ||
-      (center.version !== 'development' &&
-        release.version !== 'development' &&
-        !center.supported_daemon_versions.includes(release.version))
+      Object.entries(LEDGER_VERSIONS).every(
+        ([kind, version]) => release.ledger_versions[kind as keyof typeof LEDGER_VERSIONS] === version,
+      )
     )
+      await checkUpgradeStorage(directory, release)
+    const center = await currentCenterRelease(directory, ca)
+    if (center.protocol_version !== release.protocol_version)
       throw new IPCError(
         'node_version_incompatible',
         `中心 ${center.version} / 协议 ${center.protocol_version} 不支持目标 ${release.version} / 协议 ${release.protocol_version}；请先升级中心`,

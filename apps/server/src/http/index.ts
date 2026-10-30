@@ -14,7 +14,10 @@ import { Schema } from 'effect'
 import { captureTrace, traceFromHeaders, withTraceSpan } from '@baton/telemetry'
 import { RuntimeMode, UUID } from '@baton/protocol'
 import { createDownloads } from '../downloads.ts'
+import { readUpdateArtifact, readUpdateManifest } from '../update-assets.ts'
 import * as Nodes from '../nodes.ts'
+import * as NodeUpdates from '../node-updates.ts'
+import { NodeUpdateReport, NodeUpdateAvailability } from '@baton/protocol'
 import * as Threads from '../threads/index.ts'
 import * as Projects from '../project/projects.ts'
 import { AppError } from '../errors.ts'
@@ -174,6 +177,65 @@ export const httpApplication = (options: HTTPOptions) =>
       const path = new URL(request.url, 'http://localhost').pathname
       const requestId = newRequestId()
       const operation = Effect.gen(function* () {
+        if (request.method === 'GET' && path === '/api/v1/update/manifest') {
+          if (!options.downloads) return yield* notFound()
+          return json(
+            yield* Effect.tryPromise({
+              try: () => readUpdateManifest(options.downloads!.directory),
+              catch: () => new AppError(404, 'not_found'),
+            }),
+          )
+        }
+        if (request.method === 'GET' && path.startsWith('/api/v1/update/artifacts/')) {
+          if (!options.downloads) return yield* notFound()
+          const name = path.slice('/api/v1/update/artifacts/'.length)
+          const artifact = yield* Effect.tryPromise({
+            try: () => readUpdateArtifact(options.downloads!.directory, name),
+            catch: () => new AppError(404, 'not_found'),
+          })
+          if (!artifact) return yield* notFound()
+          return yield* Response.file(artifact.path, {
+            contentType: 'application/octet-stream',
+            headers: {
+              'content-length': String(artifact.size),
+              'cache-control': 'no-store',
+              'x-content-type-options': 'nosniff',
+            },
+          }).pipe(
+            Effect.provide(NodeHttpPlatform.layer),
+            Effect.mapError(() => new AppError(404, 'not_found')),
+          )
+        }
+        if (path.startsWith('/api/v1/node-update/')) {
+          const token = request.headers.authorization?.match(/^Bearer ([^\s]+)$/)?.[1]
+          if (!token) return yield* Effect.fail(new AppError(401, 'invalid_node_credential'))
+          if (path === '/api/v1/node-update/pending' && request.method === 'GET')
+            return json(yield* NodeUpdates.pendingUpdate(token, options.signer))
+          if (path === '/api/v1/node-update/request' && request.method === 'POST')
+            return json(yield* NodeUpdates.requestDeviceUpdate(token, options.signer))
+          if (path === '/api/v1/node-update/availability' && request.method === 'POST') {
+            const body = yield* request.json.pipe(
+              Effect.provideService(Incoming.MaxBodySize, ByteSize.kibibytes(8)),
+              Effect.mapError(() => new AppError(400, 'invalid_json')),
+            )
+            const availability = yield* Schema.decodeUnknownEffect(NodeUpdateAvailability)(body).pipe(
+              Effect.mapError(() => new AppError(400, 'invalid_request')),
+            )
+            return json(yield* NodeUpdates.saveAvailability(token, options.signer, availability))
+          }
+          if (path === '/api/v1/node-update/report' && request.method === 'POST') {
+            const body = yield* request.json.pipe(
+              Effect.provideService(Incoming.MaxBodySize, ByteSize.kibibytes(8)),
+              Effect.mapError(() => new AppError(400, 'invalid_json')),
+            )
+            const report = yield* Schema.decodeUnknownEffect(NodeUpdateReport)(body).pipe(
+              Effect.mapError(() => new AppError(400, 'invalid_request')),
+            )
+            if (report.phase === 'requested') return yield* Effect.fail(new AppError(400, 'invalid_request'))
+            return json(yield* NodeUpdates.reportUpdate(token, options.signer, { ...report, phase: report.phase }))
+          }
+          return yield* notFound()
+        }
         if (isLoginRequest(request.method, request.url)) {
           const ip =
             loginClientIp(

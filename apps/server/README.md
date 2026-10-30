@@ -10,7 +10,11 @@
 
 中心使用 `OTEL_EXPORTER_OTLP_ENDPOINT` 和 `OTEL_EXPORTER_OTLP_HEADERS` 导出并转发遥测；设置 `BATON_TELEMETRY_FORWARD=off` 可关闭设备与网页转发，`BATON_WEB_SESSION_REPLAY=masked` 启用遮挡回放。设备和网页不接收后端地址或 key。配置、敏感字段和本地 ClickStack 示例见[可观测性设计](../../specs/observability/TECH.md)与[遥测包](../../packages/telemetry/README.md)。
 
-`node server.cjs --version` 无需数据库配置即可输出构建版本、提交、平台、协议与格式版本；默认身份为 `development`。公开只读的 `GET /api/v1/release` 返回相同发布元数据，无需登录，不访问或续期设备凭据；已登录诊断的 `release` 字段与其一致。构建参数见工具说明，节点身份验证后、登记连接和同步前按支持清单及协议版本核对；不兼容返回 `node_version_incompatible` 并关闭连接，不改写业务、outbox 或设备凭据。development 联调允许版本号不同，协议仍须一致。
+`node server.cjs --version` 无需数据库配置即可输出构建版本、提交、平台、协议与格式版本；默认身份为 `development`。公开只读的 `GET /api/v1/release` 返回相同发布元数据，无需登录，不访问或续期设备凭据；已登录诊断的 `release` 字段与其一致。节点身份验证后、登记业务连接和同步前核对协议版本，产品版本不同可以共存；协议不兼容返回 `node_version_incompatible` 并关闭业务连接，不改写业务、outbox 或设备凭据。
+
+设备更新管理独立于业务协议：`GET /api/v1/node-update/pending` 和 `POST /api/v1/node-update/request|report|availability` 使用现有设备 Bearer 凭据，逐次验证归属、吊销和闲置期限。管理请求不登记业务 Presence，也不开放任务派发。网页通过受会话和 CSRF 保护的 `POST /api/v1/nodes/:nodeId/update` 为自己的设备保存更新请求；设备离线时请求继续保留。未上报 `update_protocol: 1` 且从未连接更新管理通道的旧设备返回 `update_bootstrap_required`，需要在本机先安装支持更新的版本。
+
+同一设备的活动更新请求只有一个；失败后显式重试沿用 `operation_id` 并增加 `attempt`，旧轮次的报告不改变新轮次状态。`NodeStatus.update_request` 提供阶段和安全错误码；`update_management_last_seen` 与 `update_availability` 提供最近管理联系、可用版本和检查时间，业务在线状态仍由原 Presence 决定。更新管理不接收下载地址、程序路径或任意命令。
 
 数据库迁移按文件版本记录，在事务 advisory lock 内串行执行；`serve`、`migrate` 和账号管理都会先执行并核对迁移。时间配置接受整数加 `ms`、`s`、`m`、`h`。
 

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { readdirSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
+import { createPublicKey } from 'node:crypto'
 import { SCHEMA_VERSION } from '../../packages/protocol/src/release.mjs'
 
 export function releaseVersion(version) {
@@ -24,6 +25,24 @@ export function buildInfo({ version, commit } = {}) {
   if (typeof commit !== 'string' || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(commit))
     throw new Error('发布构建需要 --commit 指定完整的小写 Git 提交哈希')
   return { version, commit }
+}
+
+export function updateKeys(path) {
+  if (!path) return {}
+  const keys = JSON.parse(readFileSync(path, 'utf8'))
+  if (!keys || typeof keys !== 'object' || Array.isArray(keys) || Object.keys(keys).length > 16)
+    throw new Error('更新信任密钥列表无效')
+  for (const [id, pem] of Object.entries(keys)) {
+    if (
+      !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(id) ||
+      typeof pem !== 'string' ||
+      pem.length > 4096 ||
+      !/^-----BEGIN PUBLIC KEY-----\r?\n/.test(pem) ||
+      createPublicKey(pem).asymmetricKeyType !== 'ed25519'
+    )
+      throw new Error('更新信任密钥必须是 Ed25519 公钥')
+  }
+  return keys
 }
 
 export function validateReleaseMetadata(metadata, runtime, expectedVersion) {

@@ -28,7 +28,7 @@ export async function measureWorkerStartup({
   const home = join(root, 'driver-home')
   await mkdir(home, { mode: 0o700 })
   const executable = installedExecutable(installed)
-  const version = spawnSync(executable, ['--version'], {
+  const version = spawnSync(executable, ['--binary-version'], {
     cwd: home,
     env: isolatedEnv(home),
     encoding: 'utf8',

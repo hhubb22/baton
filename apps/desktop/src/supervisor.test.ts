@@ -1,9 +1,20 @@
 import { afterEach, expect, it, vi } from 'vite-plus/test'
-import { Supervisor, restartDecision } from './supervisor.ts'
+import { isUpdateStartupFailure, Supervisor, restartDecision } from './supervisor.ts'
 import { fakeProcess } from './testing/process.ts'
 import { redactDiagnostics } from './diagnostics.ts'
 
 afterEach(() => vi.useRealTimers())
+it('only treats explicit local startup failures as update rollback evidence', () => {
+  expect(isUpdateStartupFailure({ code: 1, signal: null, failure: { code: 'storage_version_unsupported' } })).toBe(true)
+  for (const code of ['node_version_incompatible', 'needs_reauth', 'batond_failed', 'daemon_running'])
+    expect(isUpdateStartupFailure({ code: 1, signal: null, failure: { code } })).toBe(false)
+  expect(isUpdateStartupFailure({ code: 0, signal: null, failure: { code: 'storage_version_unsupported' } })).toBe(
+    false,
+  )
+  expect(
+    isUpdateStartupFailure({ code: null, signal: 'SIGTERM', failure: { code: 'storage_version_unsupported' } }),
+  ).toBe(false)
+})
 function fixture(now?: () => number) {
   vi.useFakeTimers()
   const children: ReturnType<typeof fakeProcess>[] = []

@@ -13,7 +13,7 @@ import { NodeToControlBody, type NodeUpgradeStateRequest, type RuntimeReport } f
 import type WebSocket from 'ws'
 import { setupDaemon } from '../testing/daemon.ts'
 import { ensurePrivateDirectory, writePrivateFileAtomic } from '../platform/private.ts'
-import { acquireProcessLock } from '../platform/lock.ts'
+import { acquireProcessLock, processLockIsHeld } from '../platform/lock.ts'
 import { initializeWorkerDirectory } from './host.ts'
 import { requestWorker } from './ipc.ts'
 import { readUpgradeState, requestUpgrade, upgradePaths } from './upgrade.ts'
@@ -114,12 +114,7 @@ it('authenticates upgrade commands, blocks readiness on living or unconfirmed pr
   for (const directory of [target, other]) {
     await writeUpgradePackage(directory)
   }
-  const log = vi.spyOn(console, 'log').mockImplementation(() => {})
-  try {
-    await runBatondCLI(['upgrade', 'prepare', '--package', target, '--data-dir', path])
-  } finally {
-    log.mockRestore()
-  }
+  await requestUpgrade(path, 'upgrade_prepare', target)
   const prepared = await readUpgradeState(path)
   expect(prepared?.phase).toBe('draining')
   expect(prepared?.source_version).toBe(BUILD.version)
@@ -225,3 +220,54 @@ it('authenticates upgrade commands, blocks readiness on living or unconfirmed pr
   expect(runtimeReports.some((report) => (report.agents?.length ?? 0) > 0)).toBe(true)
   expect(daemon.failure()).toBeUndefined()
 }, 15000)
+
+it('acknowledges matching ready shutdown before closing the daemon lock', async () => {
+  const { path, id, wss, start } = await setupDaemon(cleanup)
+  const center = await upgradeCenter(cleanup)
+  await writePrivateFileAtomic(join(path, 'identity.json'), JSON.stringify({ ...id, coordinator_url: center.url }))
+  wss.on('connection', (socket) =>
+    socket.on('message', (bytes) => {
+      const frame = JSON.parse(webSocketText(bytes))
+      if (frame.kind === 'auth') socket.send(JSON.stringify({ kind: 'auth_result', ok: true }))
+      if (frame.envelope?.body?.type === 'node.sync')
+        socket.send(
+          JSON.stringify({
+            kind: 'envelope',
+            envelope: {
+              version: 1,
+              message_id: randomUUID(),
+              route: { to: 'node' },
+              priority: 'control',
+              source: { kind: 'control' },
+              correlation_id: frame.envelope.message_id,
+              body: { type: 'node.sync_result', ok: true },
+            },
+          }),
+        )
+    }),
+  )
+  start()
+  await vi.waitFor(() => requestUpgrade(path, 'upgrade_status'), { timeout: 5000 })
+  const target = join(path, 'package')
+  await writeUpgradePackage(target)
+  const result = (await requestUpgrade(path, 'upgrade_prepare', target)) as { state: { operation_id: string } }
+  await vi.waitFor(async () => expect((await readUpgradeState(path))?.phase).toBe('ready'), { timeout: 10000 })
+  const paths = upgradePaths(path)
+  const token = (await import('../platform/private.ts')).readPrivateFile
+  const auth = (await token(paths.token)).toString('utf8')
+  const wrong = await requestWorker({
+    ...paths,
+    token: auth,
+    request: { type: 'upgrade_shutdown', ok: false, payload: randomUUID() },
+  })
+  expect(wrong.ok).toBe(false)
+  const accepted = await requestWorker({
+    ...paths,
+    token: auth,
+    request: { type: 'upgrade_shutdown', ok: false, payload: result.state.operation_id },
+  })
+  expect(accepted.ok).toBe(true)
+  await vi.waitFor(async () => expect(await processLockIsHeld(join(path, 'daemon.lock'))).toBe(false), {
+    timeout: 5000,
+  })
+}, 20000)

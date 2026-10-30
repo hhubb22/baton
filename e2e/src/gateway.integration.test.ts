@@ -173,7 +173,13 @@ it('drains more than 128 durable reports through Gateway limits while accepting 
     },
     async request(_threadId, request) {
       if (request.type === 'status')
-        return { type: 'result', ok: true, worker_ready: true, storage_generation: generation }
+        return {
+          type: 'result',
+          ok: true,
+          worker_ready: true,
+          storage_generation: generation,
+          runtime_mode: 'full-access',
+        }
       if (request.type === 'thread_stop')
         return {
           type: 'result',

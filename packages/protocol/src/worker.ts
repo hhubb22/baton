@@ -117,6 +117,7 @@ export const WorkerIPCMessage = Schema.Struct({
     'upgrade_prepare',
     'upgrade_status',
     'upgrade_cancel',
+    'upgrade_shutdown',
   ]),
   token: Schema.optionalKey(Schema.String),
   ok: Schema.Boolean,
@@ -280,6 +281,10 @@ export const WorkerRequest = Schema.Union([
   ),
   WorkerIPCMessage.mapFields(
     (fields) => ({ ...fields, type: Schema.Literals(['upgrade_status', 'upgrade_cancel']) }),
+    preserveChecks,
+  ),
+  WorkerIPCMessage.mapFields(
+    (fields) => ({ ...fields, type: Schema.Literal('upgrade_shutdown'), payload: UUID }),
     preserveChecks,
   ),
 ]).check(jsonLimit(256 * 1024))

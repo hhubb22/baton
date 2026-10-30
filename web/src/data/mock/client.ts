@@ -241,6 +241,12 @@ export function createMockClient(
       store.setDefaultDevice(deviceId)
       return structuredClone(store.snapshot().session)
     },
+    async updateDevice(deviceId) {
+      await connect(latency.save)
+      signedIn()
+      if (!store.snapshot().devices.some((item) => item.id === deviceId))
+        throw new ClientError('notFound', '找不到设备。')
+    },
     async listDeviceFolders(deviceId) {
       await connect(latency.read)
       signedIn()

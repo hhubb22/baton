@@ -32,6 +32,7 @@ export const listenAuthenticated = <Request, Response>(options: {
   readonly decodeRequest: (value: unknown) => Request
   readonly decodeResponse: (value: unknown) => Response
   readonly handle: (request: Request) => Effect.Effect<Response, unknown>
+  readonly onResponse?: (request: Request, response: Response) => void
 }): Effect.Effect<void, Error, Scope.Scope> =>
   Effect.gen(function* () {
     const context = yield* Effect.context<never>()
@@ -81,7 +82,7 @@ export const listenAuthenticated = <Request, Response>(options: {
                     reject('response_too_large')
                     return
                   }
-                  socket.end(`${encoded}\n`)
+                  socket.end(`${encoded}\n`, () => options.onResponse?.(request, result))
                 },
                 () => reject('worker_unavailable'),
               )
@@ -120,6 +121,7 @@ export const listenWorker = (options: {
   readonly endpoint: string
   readonly token: string
   readonly handle: (request: typeof WorkerRequest.Type) => Effect.Effect<Message, unknown>
+  readonly onResponse?: (request: typeof WorkerRequest.Type, response: Message) => void
 }) =>
   listenAuthenticated({
     ...options,

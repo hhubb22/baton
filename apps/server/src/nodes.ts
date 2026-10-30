@@ -761,6 +761,9 @@ type NodeRow = {
   status_updated_at: Date | null
   runtime_report: Record<string, unknown> | null
   upgrade_state: NodeUpgradeState | null
+  update_request: Record<string, unknown> | null
+  update_management_last_seen: Date | null
+  update_availability: Record<string, unknown> | null
   runtime_report_version: number
   runtime_reported_at: Date | null
   requested_at: Date | null
@@ -776,6 +779,9 @@ const nodeRows = (employeeId: string, nodeId?: string): DatabaseEffect<readonly 
     n.registration_seq::float8, n.registered_at, n.revoked_at IS NOT NULL AS revoked,
     c.expires_at<=clock_timestamp() AS expired,c.expires_at AS idle_expires_at,
     (SELECT jsonb_build_object('operation_id',u.operation_id,'source_version',u.source_version,'target_version',u.target_version,'phase',u.phase) FROM node_upgrades u WHERE u.node_id=n.id ORDER BY u.id DESC LIMIT 1) AS upgrade_state,
+    (SELECT jsonb_build_object('operation_id',u.operation_id,'attempt',u.attempt,'phase',u.phase,'reason',u.reason,'created_at',u.created_at,'management_last_seen',u.management_last_seen) FROM node_update_requests u WHERE u.node_id=n.id ORDER BY u.created_at DESC LIMIT 1) AS update_request,
+    (SELECT last_seen FROM node_update_management m WHERE m.node_id=n.id) AS update_management_last_seen,
+    (SELECT availability FROM node_update_management m WHERE m.node_id=n.id) AS update_availability,
     COALESCE(p.online,false) AS online, COALESCE(p.synced,false) AS synced, p.last_contact_at, p.status_updated_at,
     r.report AS runtime_report, COALESCE(r.report_version,0)::float8 AS runtime_report_version, r.reported_at AS runtime_reported_at,
     v.requested_at, v.applied_at, v.operator_id, COALESCE(v.credential_ids,ARRAY[]::text[]) AS credential_ids
@@ -819,6 +825,13 @@ const nodeFrom = (row: NodeRow): Record<string, unknown> => ({
     !row.expired &&
     (!row.upgrade_state || ['completed', 'cancelled'].includes(row.upgrade_state.phase)),
   upgrade_state: row.upgrade_state,
+  ...(row.update_management_last_seen
+    ? { update_management_last_seen: timestamp(row.update_management_last_seen) }
+    : {}),
+  update_availability: row.update_availability,
+  update_request: row.update_request
+    ? Object.fromEntries(Object.entries(row.update_request).filter(([, value]) => value !== null))
+    : null,
   credential_state: row.revoked ? 'revoked' : row.expired ? 'idle_expired' : 'active',
   idle_expires_at: timestamp(row.idle_expires_at),
   last_contact_at: timestamp(row.last_contact_at),

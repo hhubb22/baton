@@ -5,6 +5,23 @@ export interface DaemonFailure {
   code?: string
   message?: string
 }
+export function isUpdateStartupFailure(info: {
+  code: number | null
+  signal: NodeJS.Signals | null
+  failure: DaemonFailure
+}) {
+  return (
+    info.code !== null &&
+    info.code !== 0 &&
+    info.signal === null &&
+    [
+      'storage_version_unsupported',
+      'migration_checksum_mismatch',
+      'upgrade_migration_failed',
+      'upgrade_package_invalid',
+    ].includes(info.failure.code ?? '')
+  )
+}
 const terminal = new Set([
   'needs_reauth',
   'node_version_incompatible',
@@ -63,6 +80,7 @@ export class Supervisor {
       spawn: () => ChildProcessWithoutNullStreams
       changed: (state: SupervisorState) => void
       log: (chunk: Buffer) => void
+      unexpectedExit?: (info: { code: number | null; signal: NodeJS.Signals | null; failure: DaemonFailure }) => void
       now?: () => number
     },
   ) {}
@@ -111,6 +129,7 @@ export class Supervisor {
       this.child = undefined
       completion.resolve()
       if (this.stopped) return
+      this.options.unexpectedExit?.({ code, signal, failure })
       this.exited(code, failure)
     })
   }

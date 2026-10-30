@@ -1,5 +1,5 @@
 export const PROTOCOL_VERSION = 1
-export const SCHEMA_VERSION = '0018_executions.sql'
+export const SCHEMA_VERSION = '0019_node_updates.sql'
 export const LEDGER_VERSIONS = Object.freeze({ node: 2, project: 1, thread: 1, execution: 1 })
 
 // 构建时注入同一份身份；源码运行和未指定身份的构建明确标为开发版本。

@@ -1,9 +1,10 @@
 import { BUILD, releaseMetadata, ReleaseMetadata } from '@baton/protocol/release'
 import { createHash, randomUUID } from 'node:crypto'
-import { readdir, stat } from 'node:fs/promises'
+import { lstat, readdir, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { Schema } from 'effect'
+import { UUID } from '@baton/protocol'
 import { readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
 import { processLockIsHeld } from '../platform/lock.ts'
 import { readProcessIdentity } from '../platform/identity.ts'
@@ -14,7 +15,7 @@ import { readLedger } from '../worker/ledger.ts'
 import { readExecutionState } from '../execution/ledger.ts'
 import { executionPaths } from '../execution/paths.ts'
 import { checkStorageFormat } from '../storage-format.ts'
-import { checkNodeUpgradeStorage } from './upgrade-node-ledger.ts'
+import { storageBaseline as nodeBaseline } from './ledger.ts'
 import { storageBaseline as projectBaseline } from '../project/ledger.ts'
 import {
   checkUpgrade,
@@ -78,16 +79,34 @@ export function readUpgradeState(dataDirectory: string): Promise<UpgradeState | 
 }
 export async function upgradePaused(dataDirectory?: string): Promise<boolean> {
   if (!dataDirectory) return false
+  try {
+    await lstat(join(dataDirectory, 'installation', 'rollback.json'))
+    return true
+  } catch (error) {
+    if (!isMissing(error)) throw error
+  }
+  try {
+    await readPrivateFile(join(dataDirectory, 'version-incompatible.json'))
+    return true
+  } catch (error) {
+    if (!isMissing(error)) throw error
+  }
   const state = await readUpgradeState(dataDirectory)
   return state !== undefined && !['cancelled', 'completed'].includes(state.phase)
 }
 export const saveUpgradeState = (directory: string, state: UpgradeState) =>
   withUpgradeStateFile(directory, () => writePrivateFileAtomic(join(directory, 'upgrade.json'), JSON.stringify(state)))
 
-export async function prepareUpgrade(directory: string, target: string, ca?: string): Promise<UpgradeState> {
+export async function prepareUpgrade(
+  directory: string,
+  target: string,
+  ca?: string,
+  operationId?: string,
+): Promise<UpgradeState> {
   const { path, release } = await readUpgradePackage(target)
   const previous = await readUpgradeState(directory)
   if (previous && !['cancelled', 'completed'].includes(previous.phase)) {
+    if (operationId && previous.operation_id !== operationId) throw new IPCError('upgrade_conflict', '已有其他升级操作')
     if ((previous.target_path && previous.target_path !== path) || previous.target_version !== release.version)
       throw new IPCError('upgrade_conflict', '已有不同目标的升级准备')
     if (previous.checked_release && sameRelease(previous.checked_release, release)) return previous
@@ -101,7 +120,7 @@ export async function prepareUpgrade(directory: string, target: string, ca?: str
     previous && !['cancelled', 'completed'].includes(previous.phase)
       ? { ...previous, target_path: path, checked_release: checked.release }
       : {
-          operation_id: randomUUID(),
+          operation_id: operationId ?? randomUUID(),
           source_version: BUILD.version,
           target_version: release.version,
           target_path: path,
@@ -131,8 +150,6 @@ export async function prepareUpgradeVersion(
   const center = await currentCenterRelease(directory, ca)
   if (center.version !== version)
     throw new IPCError('upgrade_conflict', `当前中心版本为 ${center.version}，不能准备 ${version}`)
-  if (version !== 'development' && !center.supported_daemon_versions.includes(version))
-    throw new IPCError('node_version_incompatible', `中心不支持目标版本 ${version}`)
   await backupSpace(directory)
   const state: UpgradeState = {
     operation_id: randomUUID(),
@@ -183,9 +200,13 @@ export async function prepareSelfUpgrade(directory: string, target: string): Pro
 }
 
 export function prepareUpgradeRequest(directory: string, payload: string, ca?: string) {
-  return payload.startsWith('{')
-    ? prepareUpgradeVersion(directory, Schema.decodeUnknownSync(VersionPreparation)(JSON.parse(payload)), ca)
-    : prepareUpgrade(directory, payload, ca)
+  if (!payload.startsWith('{')) return prepareUpgrade(directory, payload, ca)
+  const parsed: unknown = JSON.parse(payload)
+  if (parsed && typeof parsed === 'object' && 'package' in parsed) {
+    const target = Schema.decodeUnknownSync(Schema.Struct({ package: Schema.String, operation_id: UUID }))(parsed)
+    return prepareUpgrade(directory, target.package, ca, target.operation_id)
+  }
+  return prepareUpgradeVersion(directory, Schema.decodeUnknownSync(VersionPreparation)(parsed), ca)
 }
 
 export async function cancelUpgrade(directory: string): Promise<UpgradeState | undefined> {
@@ -286,7 +307,7 @@ export async function upgradeBlockers(
     try {
       await stat(join(directory, filename))
       if (table === 'project_processes') checkStorageFormat(join(directory, filename), 'project', projectBaseline)
-      else checkNodeUpgradeStorage(join(directory, filename))
+      else checkStorageFormat(join(directory, filename), 'node', nodeBaseline)
       db = new DatabaseSync(join(directory, filename), { readOnly: true })
       if (table === 'project_processes') {
         for (const row of db
@@ -364,7 +385,7 @@ export function upgradePaths(directory: string) {
 export async function requestUpgrade(
   directory: string,
   type: 'upgrade_prepare' | 'upgrade_status' | 'upgrade_cancel',
-  target?: string | VersionPreparation,
+  target?: string | VersionPreparation | { readonly package: string; readonly operation_id: string },
 ) {
   const paths = upgradePaths(directory)
   const result = await requestWorker({

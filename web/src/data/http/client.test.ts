@@ -28,6 +28,15 @@ const fetcher = () => vi.fn<typeof fetch>()
 afterEach(() => vi.useRealTimers())
 
 describe('HTTP transport', () => {
+  it('submits a device update with an empty JSON body', async () => {
+    const fetch = fetcher()
+      .mockResolvedValueOnce(response({ employee, csrf_token: 'token' }))
+      .mockResolvedValueOnce(response({ operation_id: 'operation' }, 202))
+    const client = createHttpClient({ fetch, WebSocket: null })
+    await client.updateDevice('node/one')
+    expect(requestURL(fetch.mock.calls[1]![0])).toBe('/api/v1/nodes/node%2Fone/update')
+    expect(fetch.mock.calls[1]![1]).toMatchObject({ method: 'POST', body: '{}' })
+  })
   it('uses session cookies and recovers CSRF from me before a write', async () => {
     const fetch = fetcher()
       .mockResolvedValueOnce(response({ employee, csrf_token: 'csrf-one' }))
@@ -101,6 +110,23 @@ it('reads notification baselines and decimal cursors without losing precision', 
 })
 
 describe('HTTP account and devices', () => {
+  it('maps update availability and the management channel independently of business connection', () => {
+    const device = mapDevice({
+      id: 'desk',
+      display_name: 'Desk',
+      system: 'linux',
+      online: false,
+      synced: false,
+      revocation_status: 'none',
+      update_management_last_seen: '2026-10-30T10:00:00Z',
+      update_availability: { status: 'available', version: 'v1.2.3', checked_at: '2026-10-30T09:00:00Z' },
+    })
+    expect(device).toMatchObject({
+      connection: 'offline',
+      updateManagementLastSeen: Date.parse('2026-10-30T10:00:00Z'),
+      updateAvailability: { status: 'available', version: 'v1.2.3', checkedAt: Date.parse('2026-10-30T09:00:00Z') },
+    })
+  })
   it.each([
     ['draining', 'neutral', '等待升级'],
     ['ready', 'neutral', '等待升级'],

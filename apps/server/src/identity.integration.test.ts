@@ -84,6 +84,7 @@ describe('identity storage on local PostgreSQL', () => {
       '0016_project_trace.sql',
       '0017_outbox_created_at.sql',
       '0018_executions.sql',
+      '0019_node_updates.sql',
     ])
     const names = await run(query<{ current: string }>('SELECT current_schema() AS current'))
     expect(names[0].current).toBe(schema)
@@ -172,6 +173,8 @@ describe('identity storage on local PostgreSQL', () => {
       await writeFile(join(directory, '0017_outbox_created_at.sql'), outboxCreated)
       const executions = await readFile(new URL('../../../migrations/0018_executions.sql', import.meta.url), 'utf8')
       await writeFile(join(directory, '0018_executions.sql'), executions)
+      const nodeUpdates = await readFile(new URL('../../../migrations/0019_node_updates.sql', import.meta.url), 'utf8')
+      await writeFile(join(directory, '0019_node_updates.sql'), nodeUpdates)
       const checksums = await run(
         query<{ version: string; checksum: string }>(
           'SELECT version, checksum FROM schema_migrations ORDER BY version',

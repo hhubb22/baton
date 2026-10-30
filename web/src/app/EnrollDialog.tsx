@@ -105,7 +105,7 @@ export function registerCommand(
     return [
       `tar xzf ${shellQuote(download.file, os)} && cd ${shellQuote(download.file.replace(/\.tar\.gz$/, ''), os)}`,
       tokenInput,
-      `./batond ${reauth ? 'reauth' : `register --display-name ${displayName}`} && ./batond service install`,
+      `./batond ${reauth ? 'reauth' : `register --coordinator ${shellQuote(window.location.origin, os)} --display-name ${displayName}`} && ./batond service install`,
     ].join(' &&\n')
   }
   if (reauth) return `${tokenInput}\nbatond reauth && batond up`
@@ -215,7 +215,7 @@ function BrowserEnrollDialog({
   const items = manifest?.enabled ? manifest.items.filter((item) => item.platform === platform) : []
   const cliItems = items.filter((item) => item.kind === 'cli' && item.platform !== 'win32')
   const cli = cliItems.find((item) => item.arch === arch) ?? cliItems[0]
-  const downloadCommand = cli ? `curl -fLk -O ${shellQuote(downloadUrl(cli.file), targetOS)}` : ''
+  const downloadCommand = cli ? `curl -fL -O ${shellQuote(downloadUrl(cli.file), targetOS)}` : ''
   const desktopOnly = downloadable && targetOS === 'Windows'
   const showCommand = downloads.isSuccess && (!downloadable || cli !== undefined) && !desktopOnly
   const command =
@@ -413,6 +413,12 @@ function BrowserEnrollDialog({
               <p {...stylex.props(text.caption, styles.helper)}>
                 {copied?.target === 'download' && !copied.ok ? blocked : '运行设置命令前，请核对 SHA-256。'}
               </p>
+              {!device && (
+                <p {...stylex.props(text.caption, styles.helper)}>
+                  如果中心使用自签名证书，请先将可信的 CA 证书保存到设备，下载时给 curl 添加 --cacert
+                  &lt;本地证书路径&gt;，注册时给 register 添加 --ca-file &lt;本地证书路径&gt;。下载后请核对 SHA-256。
+                </p>
+              )}
             </>
           )}
         </div>

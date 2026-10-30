@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vite-plus/test'
-import { mergeStatus, readDaemonStatus, readDaemonRejection, type PublicIdentity } from './status.ts'
+import { managedDaemonPid, mergeStatus, readDaemonStatus, readDaemonRejection, type PublicIdentity } from './status.ts'
 import { assertIdentityOrigin, authorizeBridge } from './bridge.ts'
 
 const identity: PublicIdentity = {
@@ -13,6 +13,34 @@ const identity: PublicIdentity = {
   system: 'macos',
 }
 const online = { pid: 42, state: 'online' as const, updated_at: '2026-10-27T00:00:00Z' }
+it('只认可 launcher 与 daemon 的进程身份和状态均匹配的记录', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'desktop-launcher-'))
+  try {
+    await writeFile(
+      join(directory, 'launcher-child.json'),
+      JSON.stringify({
+        launcher_pid: 41,
+        launcher_creation_time: 'launcher-start',
+        daemon_pid: 42,
+        daemon_creation_time: 'daemon-start',
+      }),
+    )
+    const inspect = async (pid: number) => ({ pid, creationTime: pid === 41 ? 'launcher-start' : 'daemon-start' })
+    expect(await managedDaemonPid(directory, 41, inspect, async () => online)).toBe(42)
+    expect(await managedDaemonPid(directory, 43, inspect, async () => online)).toBeUndefined()
+    expect(
+      await managedDaemonPid(
+        directory,
+        41,
+        async (pid: number) => ({ pid, creationTime: 'reused' }),
+        async () => online,
+      ),
+    ).toBeUndefined()
+    expect(await managedDaemonPid(directory, 41, inspect, async () => ({ ...online, pid: 44 }))).toBeUndefined()
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
 it('合并当前进程的连接状态，拒绝状态不会被旧文件覆盖', () => {
   expect(mergeStatus({ registered: false }, { state: 'stopped' }).state).toBe('unregistered')
   expect(mergeStatus(identity, { state: 'connecting', pid: 42 }, online).state).toBe('online')

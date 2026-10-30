@@ -38,6 +38,7 @@ export async function packageBatond({
   node = process.execPath,
   version: releaseVersion,
   commit,
+  updateKeysFile,
 } = {}) {
   const identity = buildInfo({ version: releaseVersion, commit })
   output = resolve(output)
@@ -56,6 +57,7 @@ export async function packageBatond({
     let bundledDependencies
     const bundle = await buildBatond(join(buildDirectory, 'batond.cjs'), {
       ...identity,
+      updateKeysFile,
       onMetafile: async ({ inputs }) => {
         bundledDependencies = await bundledPackages(inputs, repository)
       },
@@ -145,6 +147,7 @@ if (import.meta.main) {
       node: { type: 'string' },
       version: { type: 'string' },
       commit: { type: 'string' },
+      'update-keys': { type: 'string' },
     },
     allowPositionals: true,
   })
@@ -158,6 +161,7 @@ if (import.meta.main) {
           node: values.node,
           version: values.version,
           commit: values.commit,
+          updateKeysFile: values['update-keys'],
         }),
         null,
         2,

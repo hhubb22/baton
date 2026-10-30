@@ -22,7 +22,7 @@ daemon 在私有数据目录的 `daemon-status.json` 中报告连接状态。致
 ```
 浏览器 / 桌面客户端窗口 ──HTTPS──► 中心
   │  GET /api/v1/downloads     下载清单、接入链接（匿名）
-  │  GET /downloads/<文件>      CLI 包（注入部署配置并缓存）/ 客户端安装包（原样）
+  │  GET /downloads/<文件>      原始 CLI 包 / 客户端安装包
   │
   └ 桌面客户端 main 进程
        ├ 部署配置存储（userData/deployment.json、ca.pem）
@@ -30,12 +30,12 @@ daemon 在私有数据目录的 `daemon-status.json` 中报告连接状态。致
        ├ preload 桥接 window.batonDesktop（只注入中心页面）
        └ batond 进程监管 ──spawn──► resources/batond/batond run --exit-with-stdin
                                         └ 写 <数据目录>/daemon-status.json
-CLI 用户：解压 CLI 包 → batond register（读包内 deployment.json）→ batond service install
+CLI 用户：解压 CLI 包 → batond register（显式指定中心与 CA）→ batond service install
 ```
 
 ## 部署配置
 
-中心在 CLI 包中注入、桌面客户端从接入链接保存的内容都是同一结构：
+桌面客户端从接入链接保存的内容使用以下结构：
 
 ```json
 { "format": 1, "coordinator_url": "https://10.28.243.116:8443", "ca_pem": "-----BEGIN CERTIFICATE-----..." }
@@ -51,7 +51,6 @@ CLI 用户：解压 CLI 包 → batond register（读包内 deployment.json）�
 |---|---|
 | `BATON_DOWNLOADS_DIR` | 安装包目录；未设置时不提供下载，清单返回 `enabled: false` |
 | `BATON_PUBLIC_CA_FILE` | 写入部署配置和接入链接的 CA；未设置表示中心证书由公共 CA 签发 |
-| `BATON_DOWNLOADS_CACHE` | 注入后 CLI 包的缓存目录，默认工作目录下的 `downloads-cache`，权限 0700 |
 
 **目录约定**
 
@@ -59,21 +58,19 @@ CLI 用户：解压 CLI 包 → batond register（读包内 deployment.json）�
 - CLI 包：`baton-<版本>-<darwin-arm64|linux-x64|linux-arm64>.tar.gz`。Windows 的 zip 不提供下载。
 - 桌面客户端：`baton-desktop-<版本>-darwin-arm64.dmg` 和 `baton-desktop-<版本>-win32-x64.exe`。
 
-新模块 `apps/server/src/downloads.ts` 负责扫描、核验和注入。
+`apps/server/src/downloads.ts` 负责扫描与核验原始安装包。
 
 **索引**
 
-中心启动时和清单请求时扫描目录与文件属性，发现新增、删除和原地替换的安装包。对每个文件依次核验：文件名中的版本必须在 `release.supported_daemon_versions` 中，`.sha256` 存在，并且与按 size+mtime 缓存的实际哈希一致。不合格的文件写一条带原因的日志后跳过（DS-03）。
+中心读取目录与文件属性，发现新增、删除和原地替换的安装包。文件版本须等于当前中心发布版本，`.sha256` 与实际哈希一致；不合格的文件跳过。
 
-**注入**
+**原始归档**
 
-对通过核验的 CLI 包，中心逐个流式处理：gunzip 后按 512 字节块解析 tar，核对顶层目录名和 `release.json` 中的 version 与平台；在 tar 结束块之前插入 `<顶层目录>/deployment.json`（权限 0644，mtime 取该归档里 `release.json` 的 mtime），再写结束块，并用固定压缩级别 gzip（头部 mtime 为 0）。输出写入 `<缓存目录>/<源sha256>-<配置sha256>.tar.gz`，同时生成 `.sha256`，最后原子改名。
-
-相同输入总是产生相同字节（DS-02）。tar 按原始条目边界透传，不引入依赖。PAX 扩展头（`x`、`g`）及 GNU 长名与长链接头（`L`、`K`）保留原字节，只读取名称信息用于顶层校验和定位 `release.json`；AppleDouble 的 `._` 前缀条目不参与顶层校验。新增的 `deployment.json` 使用普通 ustar 头，原有头、内容和填充字节不变。注入在后台串行执行，完成前该文件不出现在清单中；失败任务清除去重标记，下次扫描可重试。
+中心按大小和摘要核验安装包后原样提供，不将部署配置写入签名工件。中心地址与 CA 通过接入链接或显式命令参数单独传递。
 
 **对外地址**
 
-部署配置中的中心地址按请求 `Host` 头匹配 `BATON_ALLOWED_ORIGINS` 中的同 host 源来确定，不新增配置项。没有匹配的源时，清单不列 CLI 包，`connect_url` 为空，并记录日志。注册对话框用的是 `window.location.origin`，与这个规则得到的地址相同。若同一中心配置了多个可访问的源，每个源分别生成一份缓存。
+接入链接中的中心地址按请求 `Host` 头匹配 `BATON_ALLOWED_ORIGINS` 中的同 host 源确定；没有匹配的源时不生成接入链接，原始安装包仍可下载。
 
 **接口**（在 `packages/protocol/src/http-api.ts` 中与 `release` 一样声明为匿名接口）
 
@@ -100,7 +97,7 @@ CLI 用户：解压 CLI 包 → batond register（读包内 deployment.json）�
 
 `registerNode` 和 `reauthNode` 在写入 `identity.json` 之前，先在同一把 `identity.lock` 下用 `writePrivateFileAtomic` 写 `<数据目录>/coordinator-ca.pem`。本次没有使用 CA 时删除这个文件，让设备回到系统信任。之后由 `loadCoordinatorCA(dataDirectory, explicitFile?)` 统一取值：先用显式文件，再用保存的文件，都没有就返回 undefined。`runDaemon`、`reauthNode` 和 `checkUpgrade` 都改用这个函数。
 
-注册时传入的 CA 被服务器证书校验通过并成功注册后才保存；重新认证成功后替换。`upgrade migrate` 的备份复制整个私有数据目录，自然包含这个文件。
+注册时传入的 CA 被服务器证书校验通过并成功注册后才保存；重新认证成功后替换。设备更新的一致备份包含这个文件。
 
 **状态文件**
 
@@ -236,9 +233,8 @@ macOS 的应用整体做临时签名，内置的 batond 保留自身的临时签
 
 | Requirement | Setup and observation | Failure condition | Where | Status |
 |---|---|---|---|---|
-| DS-02、DS-03 | 使用发布脚本相同的系统 tar 参数生成归档，另测 ustar 和 GNU 长名；注入两次并比较原 tar 条目字节及解包内容；目录中放版本、哈希、顶层名和 release 平台不符的包 | 两次输出字节不同，解包后除 `deployment.json` 外有变化，不合格的包出现在清单中 | `apps/server` 单元 + 集成 | implemented |
+| DS-02、DS-03 | 提供原始发布包并核对下载字节和摘要，另放入摘要不符的包 | 下载内容被修改或摘要不符的包进入清单 | `apps/server` 单元 + 集成 | 待验证 |
 | DS-01、DS-02 | 中心集成测试启用下载，匿名请求清单与文件，变换 Host | 需要登录；清单哈希与下载内容不一致；未列出的文件名能被下载；Host 不匹配时仍生成部署配置 | `apps/server` 集成 | implemented |
-| 后台注入重试 | 注入函数首次报临时错误；再次扫描同一源包与部署配置 | 恢复后仍不重试或包不能进入清单 | `apps/server` 单元 | implemented |
 | DS-05～DS-07 | 用注入的 transport 注册和重新认证；SEA 场景用临时目录模拟 `deployment.json` | 未保存或未替换 CA；已有身份时读了部署配置；显式参数没有优先 | `apps/batond` 单元 | implemented |
 | DS-08～DS-10 | 生成 plist 和 unit 文本；用替身 runner 验证重复安装替换、命令失败回滚、状态查询、daemon 快照读取与过期判断、卸载保留数据 | 定义缺少参数；失败后残留或覆盖了原定义；状态遗漏拒绝原因；快照缺失或损坏导致查询失败；卸载删除数据目录 | `apps/batond` 单元 | implemented |
 | DS-11 | 持有 `daemon.lock` 时运行 `run` | 没有输出 `daemon_running` | `apps/batond` 单元 | implemented |
@@ -256,7 +252,7 @@ macOS 的应用整体做临时签名，内置的 batond 保留自身的临时签
 ## 实施顺序
 
 1. 部署配置 Schema、batond 读取部署配置和保存 CA、`identity` 命令、状态文件、错误码、`--exit-with-stdin`。客户端和 CLI 都依赖这一步。
-2. 中心安装包托管与注入、下载接口，以及网页注册对话框的 CLI 部分。
+2. 中心原始安装包托管、下载接口，以及网页注册对话框的 CLI 部分。
 3. `batond service`。
 4. `apps/desktop`、网页桌面模式、`package-desktop` 与发布流水线。
 

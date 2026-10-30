@@ -34,7 +34,10 @@ export function desktopConfig({
   buildInfo(release)
   if (release.platform !== platform || release.arch !== arch)
     throw new Error('batond 发布信息与桌面打包平台不匹配，请在目标平台重新构建')
-  const { appVersion, artifactName } = desktopTarget(release.version, platform, arch)
+  const { appVersion } = desktopTarget(release.version, platform, arch)
+  const production = release.version !== 'development'
+  const hasMacCertificate = Boolean(process.env.CSC_LINK)
+  const hasWindowsCertificate = Boolean(process.env.WIN_CSC_LINK || process.env.CSC_LINK)
   return {
     appId: 'dev.baton.desktop',
     productName: 'Baton',
@@ -55,26 +58,27 @@ export function desktopConfig({
           ]
         : []),
     ],
-    artifactName,
+    artifactName: `baton-desktop-${release.version}-${platform}-${arch}.\${ext}`,
     asar: true,
     // batond 的原生依赖由独立 Node SEA 加载，保持其 Node ABI。
     npmRebuild: false,
     nodeGypRebuild: false,
     buildDependenciesFromSource: false,
-    publish: null,
+    publish: { provider: 'generic', url: 'http://127.0.0.1', channel: 'latest' },
+    forceCodeSigning: production && (platform === 'darwin' ? hasMacCertificate : hasWindowsCertificate),
     protocols: [{ name: 'Baton 接入链接', schemes: ['baton'] }],
     mac: {
-      target: [{ target: 'dmg', arch: ['arm64'] }],
-      identity: '-',
-      hardenedRuntime: false,
-      gatekeeperAssess: false,
-      notarize: false,
-      // 保留 SEA 和旁置原生依赖的签名，只给 Electron 应用做临时签名。
+      target: [
+        { target: 'dmg', arch: ['arm64'] },
+        { target: 'zip', arch: ['arm64'] },
+      ],
+      ...(hasMacCertificate ? {} : { identity: '-', notarize: false }),
+      hardenedRuntime: production,
       signIgnore: ['[/\\\\]Resources[/\\\\]batond(?:[/\\\\]|$)'],
     },
     win: {
       target: [{ target: 'nsis', arch: ['x64'] }],
-      signAndEditExecutable: false,
+      signAndEditExecutable: hasWindowsCertificate,
     },
     nsis: {
       oneClick: true,
@@ -107,7 +111,7 @@ async function buildInstaller({ appDirectory, config, platform, arch }) {
   const target = platform === 'darwin' ? Platform.MAC : Platform.WINDOWS
   return build({
     projectDir: appDirectory,
-    targets: target.createTarget(platform === 'darwin' ? 'dmg' : 'nsis', Arch[arch]),
+    targets: target.createTarget(platform === 'darwin' ? ['dmg', 'zip'] : ['nsis'], Arch[arch]),
     config: {
       ...config,
       ...(process.env.electron_config_cache ? { electronDownload: { cache: process.env.electron_config_cache } } : {}),
@@ -154,7 +158,7 @@ export async function packageDesktop({
   // Windows 文件系统没有 POSIX 执行位，宿主为 Windows 时不检查。
   await requireFile(executable, platform !== 'win32' && process.platform !== 'win32')
   const runtime = validateSeaVersion(
-    run(executable, ['--version'], { capture: true, timeout: 30_000, cwd: batond }),
+    run(executable, ['--binary-version'], { capture: true, timeout: 30_000, cwd: batond }),
     platform,
     arch,
   )
@@ -167,7 +171,7 @@ export async function packageDesktop({
   if (platform === 'darwin') await requireFile(join(appDirectory, 'dist', 'notification-permission.node'))
   await mkdir(output, { recursive: true })
   const artifacts = await builder({ appDirectory, config, platform, arch })
-  const artifact = join(output, config.artifactName)
+  const artifact = join(output, desktopTarget(release.version, platform, arch).artifactName)
   if (!Array.isArray(artifacts) || !artifacts.some((path) => resolve(path) === artifact))
     throw new Error(`electron-builder 未生成预期安装包：${artifact}`)
   await requireFile(artifact)

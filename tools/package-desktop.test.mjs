@@ -73,10 +73,12 @@ test('打包配置保留完整 batond 资源、原生 ABI 与 macOS 临时签名
   assert.equal(config.npmRebuild, false)
   assert.equal(config.nodeGypRebuild, false)
   assert.equal(config.buildDependenciesFromSource, false)
-  assert.equal(config.mac.identity, '-')
-  assert.equal(config.mac.hardenedRuntime, false)
-  assert.equal(config.mac.notarize, false)
-  assert.deepEqual(config.mac.target, [{ target: 'dmg', arch: ['arm64'] }])
+  assert.equal(config.forceCodeSigning, Boolean(process.env.CSC_LINK))
+  assert.equal(config.mac.hardenedRuntime, true)
+  assert.deepEqual(config.mac.target, [
+    { target: 'dmg', arch: ['arm64'] },
+    { target: 'zip', arch: ['arm64'] },
+  ])
   const ignored = (path) => config.mac.signIgnore.some((pattern) => new RegExp(pattern).test(path))
   for (const path of [
     '/out/Baton.app/Contents/Resources/batond/batond',
@@ -101,7 +103,7 @@ test('Windows 只产出 x64 按用户安装的 NSIS，关闭提权和发布签�
     false,
   )
   assert.deepEqual(config.win.target, [{ target: 'nsis', arch: ['x64'] }])
-  assert.equal(config.win.signAndEditExecutable, false)
+  assert.equal(config.win.signAndEditExecutable, Boolean(process.env.WIN_CSC_LINK || process.env.CSC_LINK))
   assert.deepEqual(config.nsis, {
     oneClick: true,
     runAfterFinish: true,
@@ -109,7 +111,7 @@ test('Windows 只产出 x64 按用户安装的 NSIS，关闭提权和发布签�
     allowElevation: false,
     packElevateHelper: false,
   })
-  assert.equal(config.artifactName, `baton-desktop-${version}-win32-x64.exe`)
+  assert.equal(config.artifactName, `baton-desktop-${version}-win32-x64.\${ext}`)
 })
 
 async function fixture(t, { platform = 'darwin', arch = 'arm64', releaseVersion = version } = {}) {
@@ -141,8 +143,8 @@ async function fixture(t, { platform = 'darwin', arch = 'arm64', releaseVersion 
       if (command === executable) return JSON.stringify({ ...release, sea: true })
       return ''
     },
-    async builder({ config }) {
-      const artifact = join(output, config.artifactName)
+    async builder() {
+      const artifact = join(output, desktopTarget(releaseVersion, platform, arch).artifactName)
       await writeFile(artifact, contents)
       return [artifact]
     },
@@ -167,7 +169,7 @@ for (const [platform, arch, releaseVersion] of [
     assert.equal(result.sha256, hash)
     assert.equal(await readFile(result.artifact + '.sha256', 'utf8'), `${hash}  ${basename(result.artifact)}\n`)
     assert.equal(calls[0].command, executable)
-    assert.deepEqual(calls[0].args, ['--version'])
+    assert.deepEqual(calls[0].args, ['--binary-version'])
     assert.deepEqual(calls[1], {
       command: process.execPath,
       args: ['../../tools/build/desktop.mjs'],

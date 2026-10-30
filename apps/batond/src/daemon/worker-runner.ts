@@ -14,6 +14,7 @@ import { listenWorker } from './ipc.ts'
 import { currentBatondCommand, initializeWorkerDirectory, type BatondCommand } from './host.ts'
 import { makeNodeLedger } from './ledger.ts'
 import { readUpgradeState, upgradeOffline } from './upgrade.ts'
+import { assertNoUpdateRollback } from './update-state.ts'
 
 export const runWorker = (options: {
   readonly dataDirectory: string
@@ -22,10 +23,12 @@ export const runWorker = (options: {
   readonly agentFactory?: AgentFactory
 }): Effect.Effect<void, unknown, Scope.Scope> =>
   Effect.gen(function* () {
+    yield* Effect.tryPromise(() => assertNoUpdateRollback(options.dataDirectory))
     if (upgradeOffline(yield* Effect.tryPromise(() => readUpgradeState(options.dataDirectory)))) return
     if (process.platform !== 'win32') process.umask(0o077)
     const paths = yield* Effect.promise(() => initializeWorkerDirectory(options.dataDirectory, options.threadId))
     yield* acquireProcessLockScoped(paths.lock)
+    yield* Effect.tryPromise(() => assertNoUpdateRollback(options.dataDirectory))
     if (upgradeOffline(yield* Effect.tryPromise(() => readUpgradeState(options.dataDirectory)))) return
     const token = (yield* Effect.promise(() => readPrivateFile(paths.token))).toString('utf8')
     if (!/^[0-9a-f]{64}$/.test(token)) return yield* Effect.fail(new Error('Invalid Worker IPC token'))

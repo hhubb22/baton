@@ -164,6 +164,7 @@ export interface BatonClient {
   retryProject(projectId: ID): Promise<Project>
 
   setDefaultDevice(deviceId: ID): Promise<Session>
+  updateDevice(deviceId: ID): Promise<void>
   addDeviceFolder(input: { deviceId: ID; path: string }): Promise<Device>
   removeDeviceFolder(input: { deviceId: ID; path: string }): Promise<Device>
   startSubscriptionLogin(input: { deviceId: ID; provider: string }): Promise<SubscriptionLoginChallenge>

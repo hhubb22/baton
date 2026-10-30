@@ -321,7 +321,7 @@ async function main() {
       return { exitCode: result.status }
     })
     await check('version', () => {
-      const result = run(executable, ['--version'], options)
+      const result = run(executable, ['--binary-version'], options)
       assert.equal(result.status, 0, result.stderr)
       const version = JSON.parse(result.stdout)
       assert.equal(version.sea, true)
@@ -330,6 +330,14 @@ async function main() {
       assert.match(version.node, /^v\d+\.\d+\.\d+/)
       report.runtime = version
       return version
+    })
+    await check('updateModules', async () => {
+      const directory = join(root, 'update-data')
+      await mkdir(directory, { mode: 0o700 })
+      const result = run(executable, ['update', 'policy', '--data-dir', directory], options)
+      assert.equal(result.status, 0, result.stderr)
+      assert.equal(JSON.parse(result.stdout).policy, 'manual')
+      return { policy: 'manual' }
     })
     await check('releaseMetadata', async () => {
       const metadata = JSON.parse(await readFile(join(installed, 'release.json'), 'utf8'))

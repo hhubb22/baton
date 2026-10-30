@@ -15,8 +15,10 @@ export async function writeUpgradePackage(directory: string, release: ReleaseMet
   await writePrivateFileAtomic(
     binary,
     `#!/usr/bin/env node
-if (process.argv[2] !== '--version') process.exit(1)
-process.stdout.write(require('node:fs').readFileSync(require('node:path').join(__dirname, 'version.json')))
+const release = JSON.parse(require('node:fs').readFileSync(require('node:path').join(__dirname, 'version.json')))
+if (process.argv[2] === '--version' || process.argv[2] === '--binary-version') process.stdout.write(JSON.stringify(release))
+else if (process.argv[2] === 'update-preflight') process.stdout.write(JSON.stringify({ release, required_bytes: 1, available_bytes: 1000000 }))
+else process.exit(1)
 `,
   )
   await chmod(binary, 0o700)
@@ -71,7 +73,7 @@ export async function upgradeProcessFixture() {
       typeof args[0] === 'string' &&
       ['batond', 'batond.exe'].includes(basename(args[0])) &&
       Array.isArray(args[1]) &&
-      args[1][0] === '--version'
+      (args[1][0] === '--version' || args[1][0] === '--binary-version' || args[1][0] === 'update-preflight')
     )
       return Reflect.apply(actual.execFile, undefined, [process.execPath, [args[0], ...args[1]], ...args.slice(2)])
     return Reflect.apply(actual.execFile, undefined, args)

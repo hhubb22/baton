@@ -43,14 +43,7 @@ export const checkNodeVersion = (
   daemon: Pick<NodeAuth, 'daemon_version' | 'protocol_version'>,
   center: Pick<ReleaseMetadata, 'version' | 'protocol_version' | 'supported_daemon_versions'>,
 ): void => {
-  const reason =
-    daemon.protocol_version !== center.protocol_version
-      ? 'protocol_version_unsupported'
-      : daemon.daemon_version !== 'development' &&
-          center.version !== 'development' &&
-          !center.supported_daemon_versions.includes(daemon.daemon_version)
-        ? 'daemon_version_unsupported'
-        : undefined
+  const reason = daemon.protocol_version !== center.protocol_version ? 'protocol_version_unsupported' : undefined
   if (!reason) return
   const detail: NodeVersionIncompatibility = {
     center_version: center.version,
@@ -59,7 +52,7 @@ export const checkNodeVersion = (
     daemon_protocol_version: daemon.protocol_version,
     supported_daemon_versions: center.supported_daemon_versions,
     reason,
-    guidance: '先升级中心，再将节点升级到中心支持的版本后重新运行 batond。',
+    guidance: '业务协议不兼容，请在设备页或使用 batond update 更新设备；更新管理通道仍可使用。',
   }
   throw new AppError(
     409,

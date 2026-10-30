@@ -54,6 +54,7 @@ it('凭据仅通过注册子进程环境传入，命令输出只返回公开身�
   const daemon = batond.run()
   expect(calls[2]!.args).toEqual(['run', '--exit-with-stdin', '--data-dir', '/data'])
   expect(calls[2]!.env?.BATON_ENROLLMENT_TOKEN).toBeUndefined()
+  expect(calls[2]!.env?.BATON_DESKTOP_MANAGED).toBe('1')
   daemon.stdin.end()
 })
 
@@ -99,52 +100,59 @@ it('失败不向网页返回子进程原始输出或注册凭据', async () => {
   expect(String(error)).not.toContain('enrollment-secret')
 })
 
-it('升级命令沿用原入口，迁移超过普通命令时限仍等待并保留原因', async () => {
-  vi.useFakeTimers()
-  const calls: string[][] = []
-  const migration = fakeProcess()
-  const kill = vi.spyOn(migration, 'kill')
-  const snapshot = { state: null, blockers: [], pending_reports: 0 }
-  const batond = new Batond('/resources', '/data', (_file, args) => {
-    calls.push(args)
-    if (args[1] === 'migrate') return migration
+it('引导持久入口后通过同一入口运行和查询更新', async () => {
+  const calls: Array<{ file: string; args: string[] }> = []
+  const launcher = join('/data', 'installation', 'launcher', process.platform === 'win32' ? 'batond.exe' : 'batond')
+  const prefix = ['dispatch', '--data-dir', '/data', '--']
+  const batond = new Batond('/resources', '/data', (file, args) => {
+    calls.push({ file, args })
     const child = fakeProcess()
-    void Promise.resolve().then(() => {
-      child.stdout.emit('data', Buffer.from(JSON.stringify(snapshot)))
+    queueMicrotask(() => {
+      const output =
+        args[0] === 'update'
+          ? { executable: launcher, args: prefix }
+          : {
+              state: {
+                operation_id: 'operation',
+                attempt: 1,
+                phase: 'draining',
+                source_version: 'v1',
+                target_version: 'v2',
+              },
+            }
+      child.stdout.emit('data', Buffer.from(JSON.stringify(output)))
       child.emit('close', 0)
     })
     return child
   })
-  await batond.prepareVersion('v1.2.3')
-  await batond.prepareSelf('/new/resources/batond')
-  const migrating = batond.migrate()
-  await vi.advanceTimersByTimeAsync(120_000)
-  expect(kill).not.toHaveBeenCalled()
-  migration.emit('close', 0)
-  await expect(migrating).resolves.toEqual(snapshot)
-  expect(calls).toContainEqual(['upgrade', 'prepare', '--version', 'v1.2.3', '--data-dir', '/data'])
-  expect(calls).toContainEqual([
-    'upgrade',
-    'prepare',
-    '--package',
-    '/new/resources/batond',
-    '--self',
-    '--data-dir',
-    '/data',
-  ])
+  await batond.bootstrap()
+  expect(await batond.updateStatus()).toMatchObject({ phase: 'draining', target_version: 'v2' })
+  await batond.update()
+  await batond.cancelUpdate()
+  expect(calls[0]?.args).toEqual(['update', 'bootstrap', '--data-dir', '/data'])
+  expect(calls.slice(1).map((call) => call.file)).toEqual([launcher, launcher, launcher])
+  expect(calls[1]?.args).toEqual([...prefix, 'update', 'status', '--data-dir', '/data'])
+  expect(calls[2]?.args).toEqual([...prefix, 'update', '--data-dir', '/data'])
+  expect(calls[3]?.args).toEqual([...prefix, 'update', 'cancel', '--data-dir', '/data'])
+})
 
-  const failed = new Batond('/resources', '/data', () => {
+it('通过设备命令读取并保存更新策略', async () => {
+  const calls: string[][] = []
+  const batond = new Batond('/resources', '/data', (_file, args) => {
+    calls.push(args)
     const child = fakeProcess()
-    void Promise.resolve().then(() => {
-      child.stderr.emit(
-        'data',
-        Buffer.from('{"code":"upgrade_migration_failed","message":"thread.db: storage_version_unsupported"}'),
-      )
-      child.emit('close', 1)
+    queueMicrotask(() => {
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ policy: args.includes('idle') ? 'idle' : 'manual' })))
+      child.emit('close', 0)
     })
     return child
   })
-  await expect(failed.migrate()).rejects.toThrow('thread.db: storage_version_unsupported')
+  expect(await batond.updatePolicy()).toBe('manual')
+  expect(await batond.updatePolicy('idle')).toBe('idle')
+  expect(calls).toEqual([
+    ['update', 'policy', '--data-dir', '/data'],
+    ['update', 'policy', 'idle', '--data-dir', '/data'],
+  ])
 })
 
 it('运行日志超过 10MB 时只保留一份轮转文件', async () => {

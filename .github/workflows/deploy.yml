@@ -1,0 +1,62 @@
+name: Deploy edge-01
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published release tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-edge-01
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: '12.11.2'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.11.1'
+      - name: Install verification dependencies
+        run: |
+          git submodule update --init --depth 1 upstream/t3code
+          pnpm install --frozen-lockfile --ignore-scripts
+      - name: Download and verify immutable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          UPDATE_PUBLIC_KEYS: ${{ vars.BATON_UPDATE_PUBLIC_KEYS }}
+        run: |
+          node --input-type=module -e 'import { releaseVersion } from "./tools/lib/release.mjs"; releaseVersion(process.env.RELEASE_VERSION)'
+          mkdir -p "$RUNNER_TEMP/baton-assets"
+          printf '%s' "$UPDATE_PUBLIC_KEYS" > "$RUNNER_TEMP/update-keys.json"
+          gh release download "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/baton-assets"
+          node tools/verify-release.mjs "$RUNNER_TEMP/baton-assets" "$RUNNER_TEMP/update-keys.json" "$RELEASE_VERSION" > "$RUNNER_TEMP/server-image.txt"
+      - name: Deploy verified release
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 0700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ed25519
+          chmod 0600 ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          staging="/tmp/baton-deploy-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          image=$(cat "$RUNNER_TEMP/server-image.txt")
+          ssh -o BatchMode=yes ops@2.29.124.38 "mkdir -m 0700 '$staging' '$staging/assets'"
+          scp -r "$RUNNER_TEMP/baton-assets/." "ops@2.29.124.38:$staging/assets/"
+          scp tools/deploy-edge.sh "ops@2.29.124.38:$staging/deploy.sh"
+          ssh -o BatchMode=yes ops@2.29.124.38 "sudo -n bash '$staging/deploy.sh' '$RELEASE_VERSION' '$staging' '$image'"
+          ssh -o BatchMode=yes ops@2.29.124.38 "rm -rf '$staging'"

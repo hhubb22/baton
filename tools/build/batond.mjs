@@ -1,17 +1,17 @@
 import { build } from 'esbuild'
 import { parseArgs } from 'node:util'
-import { buildInfo } from '../lib/release.mjs'
+import { buildInfo, updateKeys } from '../lib/release.mjs'
 import { resolve, dirname, join, relative } from 'node:path'
 import { packageDirectory } from '../package-dependencies.mjs'
 import { fileURLToPath } from 'node:url'
 import { assertWorkerDependencies } from './worker-dependencies.mjs'
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
-const external = ['@cursor/sdk', '@cursor/sdk/*', '@napi-rs/keyring']
+const external = ['@cursor/sdk', '@cursor/sdk/*', '@napi-rs/keyring', '@aws-sdk/client-s3']
 
 export async function buildBatond(
   output = join(repository, 'apps/batond/dist/batond.cjs'),
-  { onMetafile, ...release } = {},
+  { onMetafile, updateKeysFile, ...release } = {},
 ) {
   const identity = buildInfo(release)
   await assertWorkerDependencies({ external })
@@ -56,7 +56,11 @@ export async function buildBatond(
         },
       },
     ],
-    define: { 'import.meta.url': '__baton_import_meta_url__', __BATON_BUILD__: JSON.stringify(identity) },
+    define: {
+      'import.meta.url': '__baton_import_meta_url__',
+      __BATON_BUILD__: JSON.stringify(identity),
+      __BATON_UPDATE_KEYS__: JSON.stringify(updateKeys(updateKeysFile)),
+    },
     banner: {
       js: `require = require('node:module').createRequire(require('node:sea').isSea() ? require('node:path').join(require('node:path').dirname(process.execPath), 'package.json') : __filename);
 const __baton_import_meta_url__ = require('node:url').pathToFileURL(__filename).href;`,
@@ -70,10 +74,15 @@ const __baton_import_meta_url__ = require('node:url').pathToFileURL(__filename).
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const { values, positionals } = parseArgs({
-    options: { version: { type: 'string' }, commit: { type: 'string' } },
+    options: { version: { type: 'string' }, commit: { type: 'string' }, 'update-keys': { type: 'string' } },
     allowPositionals: true,
   })
   if (positionals.length > 1)
     throw new Error('用法：node tools/build/batond.mjs [输出路径] [--version 版本 --commit 提交]')
-  console.log(await buildBatond(positionals[0] ? resolve(positionals[0]) : undefined, values))
+  console.log(
+    await buildBatond(positionals[0] ? resolve(positionals[0]) : undefined, {
+      ...values,
+      updateKeysFile: values['update-keys'],
+    }),
+  )
 }

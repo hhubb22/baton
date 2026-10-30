@@ -1,6 +1,9 @@
 name: Release packages
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       version:
@@ -13,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-packages-${{ github.ref }}-${{ inputs.version }}
+  group: release-packages-${{ github.event_name == 'push' && github.ref_name || inputs.version }}
   cancel-in-progress: false
 
 jobs:
@@ -48,8 +51,9 @@ jobs:
           --health-timeout 5s
           --health-retries 12
     env:
-      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
       RELEASE_TARGET: ${{ matrix.target }}
+      UPDATE_PUBLIC_KEYS: ${{ vars.BATON_UPDATE_PUBLIC_KEYS }}
       BATON_TEST_DATABASE_URL: postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable
     defaults:
       run:
@@ -58,6 +62,8 @@ jobs:
       - uses: actions/checkout@v7
       - name: Check out t3code submodule
         run: git submodule update --init --depth 1 upstream/t3code
+      - name: Record source commit
+        run: echo "RELEASE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@v6
         with:
           version: '12.11.2'
@@ -69,21 +75,31 @@ jobs:
       - name: Validate version and native target
         run: |
           node --input-type=module -e 'import { releaseTarget } from "./tools/package-release.mjs"; const result = releaseTarget(process.env.RELEASE_VERSION); if (result.target !== process.env.RELEASE_TARGET) throw new Error("Runner architecture does not match release target");'
+          git ls-remote --tags origin "refs/tags/$RELEASE_VERSION" "refs/tags/$RELEASE_VERSION^{}" > "$RUNNER_TEMP/release-tag.txt"
+          tag_commit=$(awk '/\^\{\}$/ { peeled=$1 } !/\^\{\}$/ { direct=$1 } END { print peeled ? peeled : direct }' "$RUNNER_TEMP/release-tag.txt")
+          if [[ -n "$tag_commit" && "$tag_commit" != "$RELEASE_COMMIT" ]]; then
+            echo '发布标签已指向其他提交' >&2
+            exit 1
+          fi
       - name: Install workspace
         run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Prepare trusted update keys
+        run: |
+          test -n "$UPDATE_PUBLIC_KEYS"
+          printf '%s' "$UPDATE_PUBLIC_KEYS" > "$RUNNER_TEMP/update-public-keys.json"
+          node --input-type=module -e 'import { updateKeys } from "./tools/lib/release.mjs"; if (!Object.keys(updateKeys(process.argv[1])).length) throw new Error("Missing update public key");' "$RUNNER_TEMP/update-public-keys.json"
       - name: Workspace checks
         run: |
           pnpm check
           pnpm typecheck
-          node --test tools/*.test.mjs
+          node --test tools/*.test.mjs tools/release/update-input.test.mjs
       - name: Linux workspace tests and server build
         if: runner.os == 'Linux'
         run: |
           pnpm test
-          pnpm --filter @baton/server build --version "$RELEASE_VERSION" --commit "$GITHUB_SHA"
+          pnpm --filter @baton/server build --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT"
       - name: Native node and Runtime tests
         if: runner.os != 'Linux'
-        continue-on-error: ${{ runner.os == 'Windows' }}
         run: |
           mkdir -p bin/releases
           set +e
@@ -99,38 +115,160 @@ jobs:
       - name: Build native SEA package
         run: |
           mkdir -p bin/releases
-          node tools/package-batond.mjs --out bin/package --version "$RELEASE_VERSION" --commit "$GITHUB_SHA" > bin/releases/package-build.json
+          node tools/package-batond.mjs --out bin/package --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" --update-keys "$RUNNER_TEMP/update-public-keys.json" > bin/releases/package-build.json
       - name: Check installed package
-        continue-on-error: ${{ runner.os == 'Windows' }}
         run: node tools/check-package.mjs bin/package > bin/releases/package-check.json
       - name: Measure Worker startup and FULL ledger
-        continue-on-error: ${{ runner.os == 'Windows' }}
         run: node tools/measure/worker-startup.mjs 100 --package bin/package --ledger 2000 > bin/releases/worker-startup.json
       - name: Check Windows process recovery
         if: runner.os == 'Windows'
-        continue-on-error: true
         run: node tools/verify/windows-processes.mjs > bin/releases/windows-processes.json
       - name: Archive and verify extracted package
-        # Windows 安装包检查失败时写入检查报告，不阻止归档和桌面打包。
-        run: node tools/package-release.mjs "$RELEASE_VERSION" bin/package ${{ runner.os == 'Windows' && '--allow-check-failure' || '' }}
+        run: node tools/package-release.mjs "$RELEASE_VERSION" bin/package
       - name: Package desktop client
         if: runner.os == 'macOS' || runner.os == 'Windows'
         env:
           electron_config_cache: ${{ runner.temp }}/electron
           ELECTRON_BUILDER_CACHE: ${{ runner.temp }}/electron-builder
-        run: node tools/package-desktop.mjs --batond bin/package --out bin/releases
+          CSC_LINK: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          if [[ "$RUNNER_OS" == macOS && -n "$APPLE_API_KEY" ]]; then
+            umask 077
+            printf '%s' "$APPLE_API_KEY" > "$RUNNER_TEMP/apple-api-key.p8"
+            export APPLE_API_KEY="$RUNNER_TEMP/apple-api-key.p8"
+            trap 'rm -f "$RUNNER_TEMP/apple-api-key.p8"' EXIT
+          fi
+          node tools/package-desktop.mjs --batond bin/package --out bin/releases
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: baton-${{ inputs.version }}-${{ matrix.target }}
+          name: baton-${{ github.event_name == 'push' && github.ref_name || inputs.version }}-${{ matrix.target }}
           path: |
             bin/releases/*.tar.gz
             bin/releases/*.zip
             bin/releases/*.dmg
             bin/releases/*.exe
+            bin/releases/*.yml
             bin/releases/*.sha256
             bin/releases/*.json
             bin/releases/*.log
           if-no-files-found: warn
           compression-level: 0
           retention-days: 30
+      - uses: actions/upload-artifact@v7
+        with:
+          name: update-payload-${{ matrix.target }}
+          path: |
+            bin/releases/*.tar.gz
+            bin/releases/*.zip
+            bin/releases/*.dmg
+            bin/releases/*.exe
+            bin/releases/*.yml
+            bin/releases/*.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  image:
+    name: Publish center image
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - id: identity
+        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - id: image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/hhubb22/baton:${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+          build-args: |
+            BATON_VERSION=${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+            BATON_COMMIT=${{ steps.identity.outputs.commit }}
+      - name: Record image digest
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: printf 'ghcr.io/hhubb22/baton@%s\n' "$IMAGE_DIGEST" > server-image.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: update-image
+          path: server-image.txt
+          if-no-files-found: error
+
+  publish:
+    name: Sign and publish release
+    needs: [package, image]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+      UPDATE_PUBLIC_KEYS: ${{ vars.BATON_UPDATE_PUBLIC_KEYS }}
+      UPDATE_KEY_ID: ${{ vars.BATON_UPDATE_KEY_ID }}
+      UPDATE_SIGNING_KEY: ${{ secrets.BATON_UPDATE_SIGNING_KEY }}
+      MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - name: Record source commit
+        run: echo "RELEASE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - uses: pnpm/action-setup@v6
+        with:
+          version: '12.11.2'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.11.1'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: update-payload-*
+          path: release-assets
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: update-image
+          path: release-assets
+      - name: Sign update manifest
+        run: |
+          test -n "$UPDATE_PUBLIC_KEYS" && test -n "$UPDATE_KEY_ID" && test -n "$UPDATE_SIGNING_KEY"
+          umask 077
+          printf '%s' "$UPDATE_PUBLIC_KEYS" > "$RUNNER_TEMP/update-public-keys.json"
+          printf '%s' "$UPDATE_SIGNING_KEY" > "$RUNNER_TEMP/update-private-key.pem"
+          trap 'rm -f "$RUNNER_TEMP/update-private-key.pem"' EXIT
+          auto_flags=(--windows-auto-update)
+          if [[ -n "$MAC_CSC_LINK" && -n "$APPLE_API_KEY" && -n "$APPLE_API_KEY_ID" && -n "$APPLE_API_ISSUER" ]]; then auto_flags+=(--mac-auto-update); fi
+          node tools/release/update-input.mjs --dir release-assets --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" --out release-assets/release-input.json "${auto_flags[@]}"
+          node tools/sign-update.mjs --metadata release-assets/release-input.json --key "$RUNNER_TEMP/update-private-key.pem" --key-id "$UPDATE_KEY_ID" --out release-assets/update-manifest.json
+          node tools/verify-release.mjs release-assets "$RUNNER_TEMP/update-public-keys.json" "$RELEASE_VERSION" > /dev/null
+          rm release-assets/release-input.json
+      - name: Publish GitHub Release
+        run: |
+          flags=()
+          if [[ "$RELEASE_VERSION" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$RELEASE_VERSION" --target "$RELEASE_COMMIT" --title "$RELEASE_VERSION" "${flags[@]}" release-assets/*

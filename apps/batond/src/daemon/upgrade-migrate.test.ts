@@ -13,17 +13,18 @@ import { writeUpgradePackage, upgradeCenter } from '../testing/upgrade.ts'
 import { writePrivateFileAtomic } from '../platform/private.ts'
 import { acquireProcessLock } from '../platform/lock.ts'
 import { openWorkerLedger, readLedger } from '../worker/ledger.ts'
+import { openExecutionLedger } from '../execution/ledger.ts'
+import { ensurePrivateDirectory } from '../platform/private.ts'
 import { makeProjectLedger } from '../project/ledger.ts'
 import { makeNodeLedger } from './ledger.ts'
 import { initializeWorkerDirectory } from './host.ts'
 import { checkUpgrade } from './upgrade-check.ts'
-import { dataEntries } from './upgrade-backup.ts'
+import { createUpgradeBackup, dataEntries, verifyUpgradeBackup } from './upgrade-backup.ts'
 import { migrateUpgrade } from './upgrade-migrate.ts'
 import { manageUpgrade } from './upgrade-management.ts'
 import { prepareUpgrade, readUpgradeState, requestUpgrade, saveUpgradeState } from './upgrade.ts'
 import { runWorker } from './worker-runner.ts'
 import { runDaemon } from './daemon.ts'
-import { runBatondCLI } from '../cli.ts'
 
 vi.mock('node:fs/promises', async (original) => {
   const actual = await original<typeof import('node:fs/promises')>()
@@ -131,47 +132,66 @@ async function snapshot(path: string) {
   return files
 }
 
-it('migrates a v0.1.3 node ledger while preserving unacknowledged reports and the backup', async () => {
+it('preserves an execution ledger during offline migration', async () => {
   const f = await fixture()
-  const file = join(f.path, 'node.db')
-  const checksum = 'b0c6072be2ce435eb49ad22fe645cddabc081ff54b540386f06f1b9fae98c880'
-  edit(
-    file,
-    `BEGIN;
-    ALTER TABLE node_outbox DROP COLUMN created_ms;
-    UPDATE storage_format SET version=1;
-    UPDATE storage_migrations SET checksum='${checksum}';
-    COMMIT;`,
-  )
-  const prepared = await manageUpgrade(f.path, 'prepare', { package: f.target, self: true })
-  expect(prepared).toMatchObject({ state: { phase: 'draining' } })
-  const status = await manageUpgrade(f.path, 'status')
-  expect(status).toMatchObject({ state: { phase: 'ready' }, blockers: [] })
-  const state = await migrateUpgrade(f.path)
-  expect(state.phase).toBe('syncing')
-  expect(
-    await Effect.runPromise(
-      Effect.scoped(makeNodeLedger(file).pipe(Effect.flatMap((ledger) => ledger.pendingReports()))),
-    ),
-  ).toEqual([f.report])
-  await saveUpgradeState(f.path, { ...state, phase: 'migrating' })
-  expect((await migrateUpgrade(f.path)).backup_path).toBe(state.backup_path)
-  const backup = new DatabaseSync(join(state.backup_path!, 'data', 'node.db'), { readOnly: true })
-  try {
-    expect(backup.prepare('SELECT version FROM storage_format').get()).toEqual({ version: 1 })
-    expect(backup.prepare('SELECT count(*) AS count FROM node_outbox WHERE acked=0').get()).toEqual({ count: 1 })
-  } finally {
-    backup.close()
+  const executionId = randomUUID()
+  const directory = join(f.path, 'executions', executionId)
+  await ensurePrivateDirectory(join(f.path, 'executions'))
+  await ensurePrivateDirectory(directory)
+  const file = join(directory, 'execution.db')
+  const generation = randomUUID()
+  const command = {
+    type: 'execution.command' as const,
+    action: 'start' as const,
+    execution_id: executionId,
+    storage_generation: generation,
   }
+  const report = {
+    type: 'execution.report' as const,
+    execution_id: executionId,
+    storage_generation: generation,
+    event_id: randomUUID(),
+    seq: 1,
+    status: 'completed' as const,
+  }
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const ledger = yield* openExecutionLedger(file)
+        yield* ledger.save({ command, intent: true, reports: [{ report, acked: true }] })
+      }),
+    ),
+  )
+  await manageUpgrade(f.path, 'prepare', { package: f.target, self: true })
+  expect(await manageUpgrade(f.path, 'status')).toMatchObject({ state: { phase: 'ready' } })
+  expect((await migrateUpgrade(f.path)).phase).toBe('syncing')
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const ledger = yield* openExecutionLedger(file)
+        expect(ledger.state.reports).toEqual([{ report, acked: true }])
+      }),
+    ),
+  )
 })
 
-it('rejects a legacy node ledger with a changed baseline checksum', async () => {
+it('excludes updater control state and installation files from the business backup', async () => {
   const f = await fixture()
-  const file = join(f.path, 'node.db')
-  edit(file, "UPDATE storage_format SET version=1; UPDATE storage_migrations SET checksum='tampered'")
-  await expect(manageUpgrade(f.path, 'prepare', { package: f.target, self: true })).rejects.toMatchObject({
-    code: 'migration_checksum_mismatch',
-  })
+  await ensurePrivateDirectory(join(f.path, 'installation'))
+  await writePrivateFileAtomic(join(f.path, 'installation', 'payload'), 'program')
+  await writePrivateFileAtomic(join(f.path, 'update-progress.json'), 'before')
+  await writePrivateFileAtomic(join(f.path, 'launcher-child.json'), 'before')
+  await writePrivateFileAtomic(join(f.path, 'update-trust.json'), 'trusted-public-key')
+  const id = randomUUID()
+  const backup = await createUpgradeBackup(f.path, id)
+  await writePrivateFileAtomic(join(f.path, 'update-progress.json'), 'after')
+  await writePrivateFileAtomic(join(f.path, 'launcher-child.json'), 'after')
+  await verifyUpgradeBackup(backup.backup_path, backup.backup_checksum, id, f.path)
+  const paths = (await dataEntries(join(backup.backup_path, 'data'))).map((entry) => entry.path)
+  expect(paths).toContain('update-trust.json')
+  expect(paths).not.toContain('installation')
+  expect(paths).not.toContain('update-progress.json')
+  expect(paths).not.toContain('launcher-child.json')
 })
 
 it('uses the saved CA for upgrade checks and lets the CLI override it without changing the saved file', async () => {
@@ -186,18 +206,13 @@ it('uses the saved CA for upgrade checks and lets the CLI override it without ch
     expect.objectContaining({ ca: 'saved-ca' }),
     expect.any(Function),
   )
-  const output = vi.spyOn(console, 'log').mockImplementation(() => undefined)
-  try {
-    await runBatondCLI(['upgrade', 'check', '--data-dir', f.path, '--package', f.target, '--ca-file', explicit])
-    expect(request).toHaveBeenLastCalledWith(
-      `${f.center.url}/api/v1/release`,
-      expect.objectContaining({ ca: 'explicit-ca' }),
-      expect.any(Function),
-    )
-    expect(await fs.readFile(ca, 'utf8')).toBe('saved-ca')
-  } finally {
-    output.mockRestore()
-  }
+  await checkUpgrade(f.path, f.target, await fs.readFile(explicit, 'utf8'))
+  expect(request).toHaveBeenLastCalledWith(
+    `${f.center.url}/api/v1/release`,
+    expect.objectContaining({ ca: 'explicit-ca' }),
+    expect.any(Function),
+  )
+  expect(await fs.readFile(ca, 'utf8')).toBe('saved-ca')
 })
 
 it('checks actual package identity, local formats, center compatibility and backup space without changing data', async () => {
@@ -231,9 +246,19 @@ it('checks actual package identity, local formats, center compatibility and back
   const published = { ...original, version: 'v2', commit: 'a'.repeat(40), supported_daemon_versions: ['v2'] }
   await writeUpgradePackage(f.target, published)
   f.center.setRelease({ ...original, version: 'v1', supported_daemon_versions: ['v1'] })
-  expect(await checkUpgrade(f.path, f.target)).toMatchObject({ ok: false, code: 'node_version_incompatible' })
+  expect(await checkUpgrade(f.path, f.target)).toMatchObject({ ok: true })
   f.center.setRelease({ ...original, version: 'v1', supported_daemon_versions: ['v2'] })
   expect(await checkUpgrade(f.path, f.target)).toMatchObject({ ok: true })
+  const future = {
+    ...published,
+    ledger_versions: { ...published.ledger_versions, node: published.ledger_versions.node + 1 },
+  }
+  await writeUpgradePackage(f.target, future)
+  expect(await checkUpgrade(f.path, f.target)).toMatchObject({
+    ok: true,
+    release: { ledger_versions: { node: future.ledger_versions.node } },
+  })
+  await writeUpgradePackage(f.target, published)
   f.center.setRelease({ ...original, protocol_version: 2 })
   expect(await checkUpgrade(f.path, f.target)).toMatchObject({ ok: false, code: 'node_version_incompatible' })
   f.center.setRelease(original)
@@ -309,15 +334,9 @@ it('backs up once, resumes a failed per-ledger pass and keeps daemon and indepen
   expect(files.map(migrations)).toEqual(facts)
   expect(await manageUpgrade(f.path, 'prepare', { package: f.target, self: true })).toMatchObject({ state: failed })
   await expect(manageUpgrade(f.path, 'cancel')).rejects.toMatchObject({ code: 'upgrade_busy' })
-  const output = vi.spyOn(console, 'log').mockImplementation(() => {})
-  try {
-    await runBatondCLI(['upgrade', 'status', '--data-dir', f.path])
-    expect(JSON.parse(String(output.mock.calls.at(-1)?.[0]))).toMatchObject({
-      state: { phase: 'failed', error_code: 'upgrade_migration_failed' },
-    })
-  } finally {
-    output.mockRestore()
-  }
+  expect(await manageUpgrade(f.path, 'status')).toMatchObject({
+    state: { phase: 'failed', error_code: 'upgrade_migration_failed' },
+  })
   expect(readLedger(f.thread.ledger).initial.messages[f.messageId]?.state).toBe('queued')
   const migration = migrateUpgrade(f.path)
   try {

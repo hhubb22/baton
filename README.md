@@ -49,19 +49,18 @@ node apps/server/dist/server.cjs serve
 
 中心可通过 `BATON_DOWNLOADS_DIR` 托管发布安装包；每个包旁须有同名 `.sha256` 文件。支持的文件名为：
 
-- CLI：`baton-<版本>-<darwin-arm64|linux-x64|linux-arm64>.tar.gz`。
+- CLI：`baton-<版本>-<darwin-arm64|linux-x64|linux-arm64>.tar.gz`、`baton-<版本>-win-x64.zip`。
 - 桌面客户端：`baton-desktop-<版本>-darwin-arm64.dmg`、`baton-desktop-<版本>-win32-x64.exe`。
 
 ```sh
 export BATON_DOWNLOADS_DIR='/srv/baton/releases'
 export BATON_PUBLIC_CA_FILE='/srv/baton/ca.pem'
-export BATON_DOWNLOADS_CACHE='/srv/baton/downloads-cache'
 node apps/server/dist/server.cjs serve
 ```
 
-公共 CA 签发的中心证书可省略 `BATON_PUBLIC_CA_FILE`。中心只提供受当前版本接受且 SHA-256 核验通过的包；CLI 包会在后台串行加入公开的 `deployment.json`，完成后才出现在清单中。相同源包与部署配置生成相同字节，缓存目录默认是工作目录下的 `downloads-cache`，权限为 0700。桌面安装包原样返回。
+公共 CA 签发的中心证书可省略 `BATON_PUBLIC_CA_FILE`。中心核对已发布安装包的 SHA-256 后原样提供；中心地址和 CA 通过接入链接或命令参数单独传递，不修改签名归档。
 
-`GET /api/v1/downloads` 与 `GET /downloads/<文件名>` 无需登录；未配置目录时清单返回 `enabled: false`。反向代理须转发 `/downloads/`，并保留浏览器请求的 Host，使中心能从 `BATON_ALLOWED_ORIGINS` 选择对应的 HTTPS 源。Host 无匹配时只列桌面包，不生成接入链接。
+`GET /api/v1/downloads` 与 `GET /downloads/<文件名>` 无需登录；未配置目录时清单返回 `enabled: false`。反向代理须转发 `/downloads/`，并保留浏览器请求的 Host，使中心能从 `BATON_ALLOWED_ORIGINS` 选择对应的 HTTPS 源。Host 无匹配时不生成接入链接，安装包仍可下载。
 
 网页注册对话框按平台展示下载链接、版本、大小、SHA-256 和终端命令；Windows 引导下载桌面客户端。Devices 页面提供「Open in desktop app」接入链接。未配置下载时保留原有接入命令。
 
@@ -85,7 +84,7 @@ node apps/batond/dist/batond.cjs files add --id repo --path /你的代码目录
 node apps/batond/dist/batond.cjs run
 ```
 
-注册将规范化的中心 HTTPS 地址保存为 `identity.json` 的 `coordinator_url`，`run` 据此推导 WSS 地址；`--relay` 可显式指定。默认数据目录为 `~/.baton-ts`，所有命令使用相同的 `--data-dir`。注册凭据也可用 `--enrollment-file` 从私有文件读取。SEA 安装包首次执行 `up` 或 `register` 时，中心地址与 CA 可来自安装目录的 `deployment.json`，显式 `--coordinator` 和 `--ca-file` 优先；源码和 bundle 入口仍需指定中心地址。注册或重新认证成功后，CA 保存为数据目录的私有文件 `coordinator-ca.pem`，后续 `up`、`run`、`reauth` 与 `upgrade check` 默认使用它，`--ca-file` 可覆盖。已有身份不读取安装包的部署配置。`batond identity` 输出注册状态、中心地址与公开身份，不含凭据。更多本地命令和恢复语义见 [节点文档](apps/batond/README.md)。
+注册将规范化的中心 HTTPS 地址保存为 `identity.json` 的 `coordinator_url`，`run` 据此推导 WSS 地址；`--relay` 可显式指定。默认数据目录为 `~/.baton-ts`，所有命令使用相同的 `--data-dir`。注册凭据也可用 `--enrollment-file` 从私有文件读取。SEA 安装包首次执行 `up` 或 `register` 时，中心地址与 CA 可来自安装目录的 `deployment.json`，显式 `--coordinator` 和 `--ca-file` 优先；源码和 bundle 入口仍需指定中心地址。注册或重新认证成功后，CA 保存为数据目录的私有文件 `coordinator-ca.pem`，后续 `up`、`run`、`reauth` 与设备更新默认使用它，`--ca-file` 可覆盖。已有身份不读取安装包的部署配置。`batond identity` 输出注册状态、中心地址与公开身份，不含凭据。更多本地命令和恢复语义见 [节点文档](apps/batond/README.md)。
 
 macOS 与 Linux 可以将已注册设备安装为当前用户的后台服务；先停止前台运行的 daemon，再执行：
 
@@ -111,21 +110,17 @@ Linux 需要有效的 `XDG_RUNTIME_DIR` 和 systemd 用户实例；`status` 还�
 
 ### 设备升级
 
-先升级中心，再将完整目标安装包解压到独立目录，保留旧安装目录。用当前程序准备升级并重复查询状态：
+设备从已配置中心读取签名发布清单并在后台预下载。首次安装使用发布构建内的可信公钥，或由设备操作者明确配置本地公钥；中心下载响应不能添加信任根。设备详情可发起更新，离线请求在设备重新连接后处理。本地命令如下：
 
 ```sh
-/旧安装目录/batond upgrade prepare --package /目标安装目录 --data-dir /原数据目录
-/旧安装目录/batond upgrade status --data-dir /原数据目录
+batond update --data-dir /原数据目录
+batond update status --data-dir /原数据目录
+batond update policy manual --data-dir /原数据目录
 ```
 
-等 `state.phase` 为 `ready` 后正常停止旧 daemon，再用目标程序迁移并启动，始终使用原数据目录：
+默认等待正在运行的任务结束；`update policy idle` 允许设备空闲时自动更新，迁移前可用 `batond update cancel` 取消。桌面客户端使用「更新并重启」。升级前设备生成一致备份，目标版本使用独立目录和固定启动入口；断线后继续等待中心，结果补报并确认完成后恢复队列。
 
-```sh
-/目标安装目录/batond upgrade migrate --data-dir /原数据目录
-/目标安装目录/batond run --data-dir /原数据目录
-```
-
-启动时保留原 Runtime 凭据目录与启动配置；私有 CA 默认使用数据目录中保存的证书，也可传 `--ca-file` 覆盖。Windows 使用 `batond.exe`，服务管理器由用户显式改为目标程序路径。目标 daemon 补报结果并取得中心完成回执后恢复原队列；`upgrade status` 应显示 `completed`。迁移前可用 `upgrade cancel --data-dir /原数据目录` 取消准备。备份、失败重跑与未测范围见 [设备准备与切换](specs/release/TECH.md#设备准备与切换)。
+正式发布基线之前的本地实验数据可重建。备份、失败恢复与验证范围见 [设备准备与切换](specs/release/TECH.md#设备准备与切换)。
 
 ### Project 与模型订阅
 
@@ -157,7 +152,6 @@ node apps/batond/dist/batond.cjs project-runtime connection-key <连接 ID> < ke
 | `BATON_WEB_DIR` | 中心 | 网页目录，默认 bundle 旁的 `web/` |
 | `BATON_DOWNLOADS_DIR` | 中心 | 发布安装包与同名 `.sha256` 所在目录；未配置时不提供下载 |
 | `BATON_PUBLIC_CA_FILE` | 中心 | 注入 CLI 包并通过接入链接提供的公开 CA PEM 文件；公共信任证书可省略 |
-| `BATON_DOWNLOADS_CACHE` | 中心 | 注入后的 CLI 归档缓存目录，默认工作目录下的 `downloads-cache`，权限 0700 |
 | `BATON_SESSION_TTL` | 中心 | 浏览器会话期限，默认 `12h`，范围 5 分钟至 7 天 |
 | `BATON_ENROLLMENT_TTL` | 中心 | 一次性注册凭据期限，默认 `10m`，范围 1 分钟至 24 小时 |
 | `BATON_HEARTBEAT_INTERVAL` | 中心 | 连接检查间隔，默认 `10s`，范围 100 ms 至 2 分钟 |

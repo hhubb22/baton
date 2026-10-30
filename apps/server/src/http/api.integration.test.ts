@@ -154,7 +154,7 @@ beforeAll(async () => {
       gateway: () => gateway,
       forwardTelemetry: (signal, payload, employeeId) => forwarded.push({ signal, payload, employeeId }),
       webDirectory: join(directory, 'web'),
-      downloads: { directory: join(directory, 'packages'), cacheDirectory: join(directory, 'cache') },
+      downloads: { directory: join(directory, 'packages') },
     }).pipe(Effect.provideService(Scope.Scope, scope)),
   )
   const context = await database.runtime.runPromise(Effect.context<SqlClient.SqlClient>())
@@ -205,25 +205,18 @@ it('serves anonymous download listings and only verified files for the matching 
     expect(createHash('sha256').update(content).digest('hex')).toBe(item.sha256)
     if (item.kind === 'desktop') expect(content.toString()).toBe('desktop bytes')
     else {
-      const extracted = join(directory, 'http-extracted')
-      await mkdir(extracted)
-      const { execFileSync } = await import('node:child_process')
       const { readFile } = await import('node:fs/promises')
-      const { tarCommand } = await import('../testing/downloads.ts')
-      const path = join(directory, 'download.tar.gz')
-      await writeFile(path, content)
-      execFileSync(tarCommand(), ['-xf', path, '-C', extracted])
-      expect(JSON.parse(await readFile(join(extracted, item.file.slice(0, -7), 'deployment.json'), 'utf8'))).toEqual({
-        format: 1,
-        coordinator_url: origin,
-      })
+      expect(content).toEqual(await readFile(join(directory, 'packages', item.file)))
     }
   }
   expect(await listing('unmatched.local')).toMatchObject({
     connect_url: null,
-    items: [expect.objectContaining({ kind: 'desktop' })],
+    items: expect.arrayContaining([
+      expect.objectContaining({ kind: 'desktop' }),
+      expect.objectContaining({ kind: 'cli' }),
+    ]),
   })
-  expect((await listing('baton.local:443')).items.every((item) => item.kind === 'desktop')).toBe(true)
+  expect((await listing('baton.local:443')).items).toHaveLength(2)
   for (const file of [
     'secret.txt',
     'baton-old-linux-x64.tar.gz',
@@ -233,7 +226,7 @@ it('serves anonymous download listings and only verified files for the matching 
   ]) {
     expect((await anonymous(`/downloads/${file}`)).status).toBe(404)
   }
-  expect((await anonymous('/downloads/baton-development-linux-x64.tar.gz', 'unmatched.local')).status).toBe(404)
+  expect((await anonymous('/downloads/baton-development-linux-x64.tar.gz', 'unmatched.local')).status).toBe(200)
 })
 
 it('authenticates replay and activity, validates cursors and isolates employee notifications', async () => {

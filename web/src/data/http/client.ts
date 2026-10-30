@@ -11,6 +11,7 @@ import { createOutputAPI, type OutputResult } from './output'
 import { createTransport, HttpError } from './transport'
 
 interface RuntimeReport {
+  update_protocol?: number
   agents?: {
     agent_type: string
     version: string
@@ -62,6 +63,15 @@ interface NodeDTO {
   registered_at?: string
   batond_version?: string
   runtime_report?: RuntimeReport | null
+  update_management_last_seen?: string | null
+  update_availability?: { status: 'current' | 'available'; version: string; checked_at: string } | null
+  update_request?: {
+    operation_id: string
+    attempt: number
+    phase: import('@baton/protocol').NodeUpdateRequest['phase']
+    reason?: string
+    management_last_seen?: string
+  } | null
   upgrade_state?: {
     operation_id: string
     source_version: string
@@ -105,6 +115,25 @@ export function mapDevice(node: NodeDTO): Device {
     os,
     system: node.system,
     batondVersion: node.batond_version ?? '未报告',
+    updateProtocol: report?.update_protocol,
+    updateRequest: node.update_request
+      ? {
+          operationId: node.update_request.operation_id,
+          attempt: node.update_request.attempt,
+          phase: node.update_request.phase,
+          reason: node.update_request.reason,
+        }
+      : undefined,
+    updateManagementLastSeen: node.update_management_last_seen
+      ? timestamp(node.update_management_last_seen)
+      : undefined,
+    updateAvailability: node.update_availability
+      ? {
+          status: node.update_availability.status,
+          version: node.update_availability.version,
+          checkedAt: timestamp(node.update_availability.checked_at),
+        }
+      : undefined,
     connection: online ? (node.synced ? 'online' : 'syncing') : 'offline',
     upgradeState: node.upgrade_state
       ? {
@@ -467,6 +496,10 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
       await request('/me/default-device', { method: 'PUT', body: JSON.stringify({ node_id: deviceId }) })
       emit('session', 'devices')
       return getSession()
+    },
+    async updateDevice(deviceId) {
+      await request(`/nodes/${apiPath(deviceId)}/update`, { method: 'POST', body: '{}' })
+      emit('devices')
     },
     async addDeviceFolder({ deviceId, path }) {
       const value = await request<NodeDTO>(`/nodes/${apiPath(deviceId)}/roots`, {

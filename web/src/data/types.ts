@@ -86,6 +86,15 @@ export interface Device {
   // 系统版本，例如 `macOS 15.0.1`、`Ubuntu 24.04`。
   system: string
   batondVersion: string
+  updateProtocol?: number
+  updateManagementLastSeen?: number
+  updateAvailability?: { status: 'current' | 'available'; version: string; checkedAt: number }
+  updateRequest?: {
+    operationId: string
+    attempt: number
+    phase: import('@baton/protocol').NodeUpdateRequest['phase']
+    reason?: string
+  }
   connection: DeviceConnection
   upgradeState?: {
     operationId: string

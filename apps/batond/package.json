@@ -7,6 +7,7 @@
     "./daemon/daemon": "./src/daemon/daemon.ts",
     "./daemon/cli": "./src/daemon/cli.ts",
     "./daemon/identity": "./src/daemon/identity.ts",
+    "./daemon/update-version": "./src/daemon/update-version.ts",
     "./daemon/transport": "./src/daemon/transport.ts",
     "./daemon/telemetry-relay": "./src/daemon/telemetry-relay.ts",
     "./devices/roots": "./src/devices/roots.ts",
@@ -17,6 +18,7 @@
     "./worker/agent": "./src/worker/agent.ts",
     "./worker/output": "./src/worker/output.ts",
     "./platform/process": "./src/platform/process.ts",
+    "./platform/identity": "./src/platform/identity.ts",
     "./execution/runner": "./src/execution/runner.ts",
     "./testing/cursor/transcripts": "./src/testing/cursor/transcripts.ts",
     "./testing/pi/transcripts": "./src/testing/pi/transcripts.ts",
@@ -50,6 +52,8 @@
     "effect-codex-app-server": "workspace:*",
     "@t3tools/shared": "workspace:*",
     "effect": "catalog:",
+    "tar": "7.5.22",
+    "unzipper": "0.12.5",
     "ws": "8.22.0"
   },
   "optionalDependencies": {

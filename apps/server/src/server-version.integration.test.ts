@@ -18,7 +18,7 @@ vi.mock('@baton/protocol', async (original) => {
   }
 })
 
-it('admits supported versions and rejects incompatible authenticated nodes before connection, sync or outbox writes', async () =>
+it('admits different releases with the same protocol and rejects incompatible business connections without writes', async () =>
   withTestDatabase(async ({ run }) => {
     const node = await seedNode(run, { online: false, synced: false })
     const threadId = randomUUID()
@@ -80,11 +80,7 @@ it('admits supported versions and rejects incompatible authenticated nodes befor
       const invalid = await connect('v0.9.0', 1, 'invalid')
       await invalid.closed
       expect(invalid.frames[0].code).not.toBe('node_version_incompatible')
-      for (const [version, protocol, reason] of [
-        ['v0.9.0', 1, 'daemon_version_unsupported'],
-        ['v1.1.0', 1, 'daemon_version_unsupported'],
-        ['development', 2, 'protocol_version_unsupported'],
-      ] as const) {
+      for (const [version, protocol, reason] of [['development', 2, 'protocol_version_unsupported']] as const) {
         const { frames, closed } = await connect(version, protocol)
         expect((await closed)[0]).toBe(1008)
         expect(frames).toHaveLength(1)
@@ -104,7 +100,7 @@ it('admits supported versions and rejects incompatible authenticated nodes befor
         })
         expect(await snapshot()).toEqual(before)
       }
-      for (const version of ['v1.0.0', 'development']) {
+      for (const version of ['v0.9.0', 'v1.0.0', 'v1.1.0', 'development']) {
         const { ws, frames, closed } = await connect(version, 1)
         expect(frames[0]).toMatchObject({ ok: true })
         ws.send(

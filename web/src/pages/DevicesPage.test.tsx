@@ -9,6 +9,68 @@ import { createDesktopBridge, registeredDesktop } from '../test/desktop'
 
 afterEach(() => vi.unstubAllGlobals())
 
+it('queues an update for an offline device and displays reported progress', async () => {
+  const user = userEvent.setup()
+  const client = createMockClient('normal', { latency: { read: 0, save: 0, device: 0, run: 8000 } })
+  const list = client.listDevices.bind(client)
+  client.listDevices = async () =>
+    (await list()).map((device) => ({
+      ...device,
+      connection: 'offline' as const,
+      updateProtocol: 1,
+      updateManagementLastSeen: Date.now(),
+      updateAvailability: { status: 'available' as const, version: 'v2', checkedAt: Date.now() },
+    }))
+  const update = vi.spyOn(client, 'updateDevice').mockResolvedValue(undefined)
+  const router = createAppRouter({ history: createMemoryHistory({ initialEntries: ['/devices'] }) })
+  render(<App client={client} router={router} />)
+  await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
+  expect(screen.getByText('更新管理通道可用')).toBeInTheDocument()
+  expect(screen.getByText(/有新版本 v2 · 检查时间/)).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: '更新设备' }))
+  expect(update).toHaveBeenCalledWith('dev-ubuntu')
+  expect(await screen.findByText('更新请求已保存，等待设备处理。')).toBeInTheDocument()
+})
+
+it('asks for local initialization when the device does not report update support', async () => {
+  const user = userEvent.setup()
+  const client = createMockClient('normal', { latency: { read: 0, save: 0, device: 0, run: 8000 } })
+  const update = vi.spyOn(client, 'updateDevice')
+  const router = createAppRouter({ history: createMemoryHistory({ initialEntries: ['/devices'] }) })
+  render(<App client={client} router={router} />)
+  await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
+  expect(screen.getByText('请在设备上安装新版并完成一次本机初始化。')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '更新设备' })).not.toBeInTheDocument()
+  expect(update).not.toHaveBeenCalled()
+})
+
+it('shows reported device update progress without changing its connection state', async () => {
+  const user = userEvent.setup()
+  const client = createMockClient('normal', { latency: { read: 0, save: 0, device: 0, run: 8000 } })
+  const list = client.listDevices.bind(client)
+  client.listDevices = async () =>
+    (await list()).map((device) =>
+      device.id === 'dev-ubuntu'
+        ? {
+            ...device,
+            connection: 'offline' as const,
+            updateProtocol: 1,
+            upgradeState: {
+              operationId: 'operation',
+              sourceVersion: 'v1',
+              targetVersion: 'v2',
+              phase: 'migrating' as const,
+            },
+          }
+        : device,
+    )
+  const router = createAppRouter({ history: createMemoryHistory({ initialEntries: ['/devices'] }) })
+  render(<App client={client} router={router} />)
+  await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
+  expect(screen.getByText('v2 · 正在迁移')).toBeInTheDocument()
+  expect(screen.getByText('新对话将等待设备就绪。')).toBeInTheDocument()
+})
+
 it('adds, edits and deletes a device API connection without sending a key to the center', async () => {
   const user = userEvent.setup()
   const client = createMockClient('modelSources', { latency: { read: 0, save: 0, device: 0, run: 8000 } })
