@@ -1,0 +1,18 @@
+name: Diagnose Windows SQLite I/O
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.11.1'
+      - run: node tools/verify/windows-sqlite-io.mjs
