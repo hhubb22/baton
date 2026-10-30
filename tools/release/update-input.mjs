@@ -9,15 +9,25 @@ export async function makeUpdateInput(
   directory,
   version,
   commit,
-  { macAutoUpdate = false, windowsAutoUpdate = false } = {},
+  { macAutoUpdate = false, windowsAutoUpdate = false, cliOnly = false } = {},
 ) {
   buildInfo({ version, commit })
+  if (cliOnly && (macAutoUpdate || windowsAutoUpdate)) throw new Error('仅 CLI 发布不能声明桌面自动更新')
   const artifacts = [
     { kind: 'daemon', platform: 'darwin', arch: 'arm64', file: `baton-${version}-darwin-arm64.tar.gz` },
     { kind: 'daemon', platform: 'linux', arch: 'x64', file: `baton-${version}-linux-x64.tar.gz` },
     { kind: 'daemon', platform: 'linux', arch: 'arm64', file: `baton-${version}-linux-arm64.tar.gz` },
     { kind: 'daemon', platform: 'win32', arch: 'x64', file: `baton-${version}-win-x64.zip` },
-    { kind: 'desktop-manual', platform: 'darwin', arch: 'arm64', file: `baton-desktop-${version}-darwin-arm64.dmg` },
+    ...(cliOnly
+      ? []
+      : [
+          {
+            kind: 'desktop-manual',
+            platform: 'darwin',
+            arch: 'arm64',
+            file: `baton-desktop-${version}-darwin-arm64.dmg`,
+          },
+        ]),
     ...(macAutoUpdate
       ? [
           { kind: 'desktop', platform: 'darwin', arch: 'arm64', file: `baton-desktop-${version}-darwin-arm64.zip` },
@@ -47,6 +57,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
         out: { type: 'string' },
         'mac-auto-update': { type: 'boolean', default: false },
         'windows-auto-update': { type: 'boolean', default: false },
+        'cli-only': { type: 'boolean', default: false },
       },
     })
     if (!values.dir || !values.version || !values.commit || !values.out)
@@ -56,6 +67,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const input = await makeUpdateInput(values.dir, values.version, values.commit, {
       macAutoUpdate: values['mac-auto-update'],
       windowsAutoUpdate: values['windows-auto-update'],
+      cliOnly: values['cli-only'],
     })
     await writeFile(values.out, JSON.stringify(input) + '\n')
   } catch (error) {

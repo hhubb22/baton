@@ -2,6 +2,8 @@
 
 `Deploy edge-01` 工作流把已发布 GitHub Release 的中心镜像和设备安装包部署到 `edge-01`，入口为 `https://baton.suupa.dev`。工作流使用受保护的 `production` environment，手动选择版本；发布版本和允许设备升级是两个独立操作。
 
+只发布 CLI 和中心时，手动触发 `Release packages` 并将 `desktop` 设为 `false`；发布仍验证四个平台的 CLI 安装包。标签触发默认包含桌面安装包。
+
 ## 配置
 
 - 仓库变量 `BATON_UPDATE_PUBLIC_KEYS`：与安装包内置公钥一致的 JSON 公钥列表。

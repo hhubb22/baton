@@ -11,6 +11,11 @@ on:
         required: true
         default: v0.1.0-alpha.1
         type: string
+      desktop:
+        description: Include desktop installers
+        required: true
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -53,6 +58,7 @@ jobs:
     env:
       RELEASE_VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
       RELEASE_TARGET: ${{ matrix.target }}
+      BUILD_DESKTOP: ${{ github.event_name == 'push' || inputs.desktop }}
       UPDATE_PUBLIC_KEYS: ${{ vars.BATON_UPDATE_PUBLIC_KEYS }}
       BATON_TEST_DATABASE_URL: postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable
     defaults:
@@ -126,7 +132,7 @@ jobs:
       - name: Archive and verify extracted package
         run: node tools/package-release.mjs "$RELEASE_VERSION" bin/package
       - name: Package desktop client
-        if: runner.os == 'macOS' || runner.os == 'Windows'
+        if: env.BUILD_DESKTOP == 'true' && (runner.os == 'macOS' || runner.os == 'Windows')
         env:
           electron_config_cache: ${{ runner.temp }}/electron
           ELECTRON_BUILDER_CACHE: ${{ runner.temp }}/electron-builder
@@ -222,6 +228,7 @@ jobs:
       contents: write
     env:
       RELEASE_VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+      BUILD_DESKTOP: ${{ github.event_name == 'push' || inputs.desktop }}
       UPDATE_PUBLIC_KEYS: ${{ vars.BATON_UPDATE_PUBLIC_KEYS }}
       UPDATE_KEY_ID: ${{ vars.BATON_UPDATE_KEY_ID }}
       UPDATE_SIGNING_KEY: ${{ secrets.BATON_UPDATE_SIGNING_KEY }}
@@ -261,8 +268,11 @@ jobs:
           printf '%s' "$UPDATE_PUBLIC_KEYS" > "$RUNNER_TEMP/update-public-keys.json"
           printf '%s' "$UPDATE_SIGNING_KEY" > "$RUNNER_TEMP/update-private-key.pem"
           trap 'rm -f "$RUNNER_TEMP/update-private-key.pem"' EXIT
-          auto_flags=(--windows-auto-update)
-          if [[ -n "$MAC_CSC_LINK" && -n "$APPLE_API_KEY" && -n "$APPLE_API_KEY_ID" && -n "$APPLE_API_ISSUER" ]]; then auto_flags+=(--mac-auto-update); fi
+          auto_flags=(--cli-only)
+          if [[ "$BUILD_DESKTOP" == true ]]; then
+            auto_flags=(--windows-auto-update)
+            if [[ -n "$MAC_CSC_LINK" && -n "$APPLE_API_KEY" && -n "$APPLE_API_KEY_ID" && -n "$APPLE_API_ISSUER" ]]; then auto_flags+=(--mac-auto-update); fi
+          fi
           node tools/release/update-input.mjs --dir release-assets --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" --out release-assets/release-input.json "${auto_flags[@]}"
           node tools/sign-update.mjs --metadata release-assets/release-input.json --key "$RUNNER_TEMP/update-private-key.pem" --key-id "$UPDATE_KEY_ID" --out release-assets/update-manifest.json
           node tools/verify-release.mjs release-assets "$RUNNER_TEMP/update-public-keys.json" "$RELEASE_VERSION" > /dev/null
