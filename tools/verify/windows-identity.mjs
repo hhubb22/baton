@@ -10,6 +10,8 @@ if (process.platform !== 'win32') throw new Error('Windows required')
 if (process.argv[2] === '--isolated') {
   const first = await readProcessIdentity(process.pid)
   const second = await readProcessIdentity(process.pid)
+  if (!first || first.creationTime !== second?.creationTime) throw new Error('Current process identity is not stable')
+  console.log('current-process-ok')
   const child = spawn(process.execPath, ['-e', ''])
   const pid = child.pid
   await new Promise((resolve, reject) => {
@@ -17,6 +19,8 @@ if (process.argv[2] === '--isolated') {
     child.once('exit', resolve)
   })
   const exited = await readProcessIdentity(pid)
+  if (exited !== null) throw new Error('Exited process still has an identity')
+  console.log('exited-process-ok')
   let protectedProcess
   try {
     protectedProcess = (await readProcessIdentity(4)) ? 'accessible' : 'absent'

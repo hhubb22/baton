@@ -44,7 +44,7 @@ export async function readProcessIdentity(pid: number): Promise<ProcessIdentity 
   validatePid(pid)
   if (process.platform === 'win32') {
     const creationTime = await powershell(
-      `$p = $null; try { $p = [Diagnostics.Process]::GetProcessById(${pid}) } catch { if ($_.Exception.InnerException -is [ArgumentException]) { return }; throw }; try { [Console]::Out.WriteLine($p.StartTime.ToUniversalTime().Ticks.ToString([Globalization.CultureInfo]::InvariantCulture)) } catch { if (-not $p.HasExited) { throw } } finally { $p.Dispose() }`,
+      `$p = $null; try { $p = [Diagnostics.Process]::GetProcessById(${pid}) } catch { if ($_.Exception.InnerException -is [ArgumentException]) { exit 0 }; throw }; try { [Console]::Out.WriteLine($p.StartTime.ToUniversalTime().Ticks.ToString([Globalization.CultureInfo]::InvariantCulture)) } catch { if (-not $p.HasExited) { throw } } finally { $p.Dispose() }; exit 0`,
     )
     if (creationTime && !/^\d+$/.test(creationTime)) throw new Error('Invalid process creation time')
     return creationTime ? { pid, creationTime } : null

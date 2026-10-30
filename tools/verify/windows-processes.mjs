@@ -46,7 +46,7 @@ if (role === '--leaf') {
   const registered = []
   function creationTime(pid) {
     if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('Invalid PID')
-    const source = `$ErrorActionPreference = 'Stop'; $p = $null; try { $p = [Diagnostics.Process]::GetProcessById(${pid}) } catch { if ($_.Exception.InnerException -is [ArgumentException]) { return }; throw }; try { [Console]::Out.WriteLine($p.StartTime.ToUniversalTime().Ticks.ToString([Globalization.CultureInfo]::InvariantCulture)) } catch { if (-not $p.HasExited) { throw } } finally { $p.Dispose() }`
+    const source = `$ErrorActionPreference = 'Stop'; $p = $null; try { $p = [Diagnostics.Process]::GetProcessById(${pid}) } catch { if ($_.Exception.InnerException -is [ArgumentException]) { exit 0 }; throw }; try { [Console]::Out.WriteLine($p.StartTime.ToUniversalTime().Ticks.ToString([Globalization.CultureInfo]::InvariantCulture)) } catch { if (-not $p.HasExited) { throw } } finally { $p.Dispose() }; exit 0`
     const output = execFileSync(
       powershell,
       ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(source, 'utf16le').toString('base64')],
