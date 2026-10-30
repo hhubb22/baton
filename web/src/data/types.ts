@@ -332,6 +332,10 @@ export type ProjectEntry =
       runId?: string
     })
   | (EntryBase & { kind: 'note'; body: string })
+  | (EntryBase & { kind: 'threadFailure'; threadId: ID; cause: ThreadFailureCause })
+
+// 项目助手发给 Thread 的消息没有送达的原因，按用户能做的事分类；完整错误在 Thread 详情里。
+export type ThreadFailureCause = 'unknown' | 'network' | 'timeout' | 'start' | 'other'
 
 export interface MemoryVersion {
   details?: {

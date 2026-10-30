@@ -33,6 +33,7 @@ import {
   assistantWait,
   deviceConnectionView,
   projectAgentStatus,
+  agentNames,
   relativeTime,
   runTimer,
   threadView,
@@ -62,6 +63,7 @@ import type {
   Project,
   ProjectEntry,
   Thread,
+  ThreadFailureCause,
 } from '../data/types'
 import { fonts } from '../theme/base.stylex'
 import { text } from '../theme/text'
@@ -226,6 +228,25 @@ const styles = stylex.create({
   threadIcon: { flexShrink: 0, color: colors.muted },
   threadMeta: { flexShrink: 0, color: colors.muted, whiteSpace: 'nowrap' },
   note: { alignSelf: 'center', color: colors.faint, textAlign: 'center' },
+  failure: {
+    display: 'grid',
+    gridTemplateColumns: '16px minmax(0, 1fr) auto',
+    columnGap: space.sm,
+    rowGap: space.xxs,
+    alignItems: 'center',
+    width: `calc(100% + ${space.lg})`,
+    marginInline: `calc(-1 * ${space.sm})`,
+    paddingBlock: space.sm,
+    paddingInline: space.sm,
+    borderRadius: radius.md,
+    backgroundColor: { default: 'transparent', ':hover': colors.hover },
+    borderWidth: 0,
+    color: colors.text,
+    textAlign: 'start',
+    cursor: { default: 'pointer', ':disabled': 'default' },
+  },
+  failureStatus: { display: 'inline-flex', alignItems: 'center', gap: space.xs, whiteSpace: 'nowrap' },
+  failureReason: { gridColumn: '2 / 4', color: colors.muted },
   activity: { display: 'inline-flex', alignItems: 'center', gap: space.sm, color: colors.agentText },
   empty: {
     display: 'flex',
@@ -553,6 +574,47 @@ function ThreadCard({
   )
 }
 
+const failureReasons: Record<ThreadFailureCause, (agent: string) => string> = {
+  network: (agent) => `${agent} 连不上网络。`,
+  timeout: (agent) => `${agent} 启动超时。`,
+  start: (agent) => `${agent} 无法启动。`,
+  unknown: () => '设备无法确认消息是否送达，助手不会自动重发。',
+  other: () => '打开 Thread 查看原因。',
+}
+
+// 项目助手发给 Thread 的消息没有送达：一行 Thread 加一句原因，完整错误在 Thread 详情里。
+function ThreadFailure({
+  cause,
+  thread,
+  selected,
+  onOpen,
+}: {
+  cause: ThreadFailureCause
+  thread: Thread | undefined
+  selected: boolean
+  onOpen: () => void
+}) {
+  const unknown = cause === 'unknown'
+  const agent = thread?.agent ? agentNames[thread.agent] : '助手'
+  return (
+    <button
+      type="button"
+      disabled={!thread}
+      aria-current={selected || undefined}
+      onClick={onOpen}
+      {...stylex.props(text.small, styles.failure, selected && styles.threadSelected, focusRing.ring)}
+    >
+      <Icon name="threads" size={16} style={styles.threadIcon} />
+      <span {...stylex.props(styles.threadTitle, text.truncate)}>{thread?.title ?? 'Thread'}</span>
+      <span {...stylex.props(text.caption, styles.failureStatus, statusTextStyle(unknown ? 'attention' : 'danger'))}>
+        {unknown ? '无法确认送达' : '没有送达'}
+        {thread && <Icon name="chevron-right" size={14} />}
+      </span>
+      <span {...stylex.props(styles.failureReason)}>{failureReasons[cause](agent)}</span>
+    </button>
+  )
+}
+
 const Entry = memo(function Entry({
   entry,
   threads,
@@ -609,6 +671,15 @@ const Entry = memo(function Entry({
       )
     case 'note':
       return <p {...stylex.props(text.caption, styles.note)}>{entry.body}</p>
+    case 'threadFailure':
+      return (
+        <ThreadFailure
+          cause={entry.cause}
+          thread={threads.find((item) => item.id === entry.threadId)}
+          selected={entry.threadId === openThread}
+          onOpen={() => onOpenThread(entry.threadId)}
+        />
+      )
   }
 })
 
