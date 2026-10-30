@@ -271,10 +271,9 @@ const styles = stylex.create({
     pointerEvents: 'auto',
     flexDirection: 'column',
     gap: space.lg,
-    flexShrink: 0,
-    width: 'calc(100% - 8px)',
-    maxHeight: 'calc(100% - 56px)',
-    marginTop: '56px',
+    flexShrink: 1,
+    minHeight: 0,
+    width: '100%',
     overflowY: 'auto',
     padding: space.lg,
     backgroundColor: colors.surface,
@@ -555,18 +554,10 @@ function ThreadCard({
 
 const Entry = memo(function Entry({
   entry,
-  threads,
-  devices,
-  openThread,
-  onOpenThread,
   onOpenPath,
   streaming = false,
 }: {
   entry: ProjectEntry
-  threads: Thread[]
-  devices: Device[]
-  openThread: string | undefined
-  onOpenThread: (threadId: string) => void
   onOpenPath: (path: string) => void
   streaming?: boolean
 }) {
@@ -586,19 +577,6 @@ const Entry = memo(function Entry({
     case 'assistant':
       return (
         <article aria-label={streaming ? '项目助手正在回复' : '项目助手'} {...stylex.props(styles.assistant)}>
-          {(entry.process.length > 0 || entry.threads) && (
-            <ProcessLine steps={entry.process} devices={devices}>
-              {entry.threads && (
-                <ThreadCard
-                  threads={entry.threads}
-                  all={threads}
-                  devices={devices}
-                  openThread={openThread}
-                  onOpen={onOpenThread}
-                />
-              )}
-            </ProcessLine>
-          )}
           {entry.body && (
             <div {...stylex.props(text.body, styles.assistantBody)}>
               <MessageBody body={entry.body} onOpenPath={onOpenPath} streaming={streaming} />
@@ -1342,6 +1320,7 @@ export function ProjectPage() {
                 id: `preview-${livePreview.afterSeq}`,
                 projectId,
                 kind: 'assistant' as const,
+                runId: previewRunId,
                 body: livePreview.text,
                 process: [],
                 threads: null,
@@ -1368,28 +1347,56 @@ export function ProjectPage() {
           ]
         : []),
     ].sort((a, b) => a.at - b.at || a.id.localeCompare(b.id))
-    conversation = timeline.map(({ id, at, entry, streaming }, index) => {
-      const previous = timeline[index - 1]
+    const groups: (typeof timeline)[] = []
+    for (const item of timeline) {
+      const group = groups.at(-1)
+      const previous = group?.at(-1)?.entry
+      if (
+        group &&
+        previous?.kind === 'assistant' &&
+        item.entry.kind === 'assistant' &&
+        item.entry.runId &&
+        item.entry.runId === previous.runId
+      )
+        group.push(item)
+      else groups.push([item])
+    }
+    conversation = groups.map((group, index) => {
+      const { id, at } = group[0]!
+      const previous = groups[index - 1]?.[0]
       const day = dayLabel(at, now)
+      const assistants = group.flatMap(({ entry }) => (entry.kind === 'assistant' ? [entry] : []))
+      const steps = assistants.flatMap((entry) => entry.process)
+      const threadGroups = assistants.flatMap((entry) => (entry.threads ? [entry.threads] : []))
       return (
-        <div key={id} data-entry-id={entry?.id} {...stylex.props(styles.assistant)}>
+        <div key={id} {...stylex.props(styles.assistant)}>
           {(!previous || dayLabel(previous.at, now) !== day) && (
             <span {...stylex.props(text.caption, styles.day)}>{day}</span>
           )}
-          {entry && (
-            <Entry
-              entry={entry}
-              threads={projectThreads}
-              devices={allDevices}
-              openThread={search.thread}
-              onOpenThread={onOpenThread}
-              onOpenPath={setPreviewPath}
-              streaming={streaming}
-            />
+          {(steps.length > 0 || threadGroups.length > 0) && (
+            <ProcessLine steps={steps} devices={allDevices}>
+              {threadGroups.map((threads, i) => (
+                <ThreadCard
+                  key={i}
+                  threads={threads}
+                  all={projectThreads}
+                  devices={allDevices}
+                  openThread={search.thread}
+                  onOpen={onOpenThread}
+                />
+              ))}
+            </ProcessLine>
           )}
-          {streaming && livePreview?.truncated && (
-            <span {...stylex.props(text.caption, styles.faint)}>预览已截断，正在等待完整回复。</span>
-          )}
+          {group
+            .filter(({ entry }) => entry.kind !== 'assistant' || entry.body)
+            .map(({ id: entryKey, entry, streaming }) => (
+              <div key={entryKey} data-entry-id={entry.id}>
+                <Entry entry={entry} onOpenPath={setPreviewPath} streaming={streaming} />
+                {streaming && livePreview?.truncated && (
+                  <span {...stylex.props(text.caption, styles.faint)}>预览已截断，正在等待完整回复。</span>
+                )}
+              </div>
+            ))}
         </div>
       )
     })
@@ -1558,7 +1565,7 @@ export function ProjectPage() {
         <ResizablePane
           key={search.thread ? 'thread' : 'overview'}
           label="调整项目面板宽度"
-          storageKey="baton.width.project-panel"
+          storageKey={search.thread ? 'baton.width.project-thread' : 'baton.width.project-overview'}
           defaultWidth={search.thread ? 440 : 320}
           min={280}
           max={800}

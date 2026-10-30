@@ -259,11 +259,13 @@ export class MockStore {
     project.agent.state = 'running'
     project.agent.activity = null
     project.agent.lastSeq = 0
+    project.agent.runId = 'demo-project-run-1'
     project.latestReplySeq = 0
     project.readReplySeq = 0
     this.schedule(1500, () => {
       this.world.projectEntries.push({
         id: 'ent-project-stream-tool',
+        runId: 'demo-project-run-1',
         projectId: project.id,
         kind: 'assistant',
         body: '',
@@ -300,6 +302,7 @@ export class MockStore {
       this.world.projectEntries.push({
         ...first,
         id: 'ent-project-stream-opened',
+        runId: 'demo-project-run-1',
         body: '',
         process: [],
         createdAt: this.scheduler.now(),
@@ -308,7 +311,7 @@ export class MockStore {
       project.agent.lastSeq = 3
       this.emit('projects', 'threads')
     })
-    const stream = (message: string, start: number, afterSeq: number, id: string) => {
+    const stream = (message: string, start: number, afterSeq: number, id: string, runId: string) => {
       for (let end = 8; end < message.length + 8; end += 8) {
         this.schedule(start + (end / 8) * 200, () => {
           project.agent.preview = { afterSeq, text: message.slice(0, end), truncated: false }
@@ -330,17 +333,20 @@ export class MockStore {
           createdAt: this.scheduler.now(),
           sourceSeq: afterSeq + 1,
           streamAnchor: afterSeq,
+          runId,
         })
         this.emit('projects')
       })
       return savedAt
     }
-    const firstSaved = stream(first.body, 5500, 3, 'ent-project-stream-text')
+    const firstSaved = stream(first.body, 5500, 3, 'ent-project-stream-text', 'demo-project-run-1')
     this.schedule(firstSaved + 2000, () => {
       thread.status = 'idle'
+      project.agent.runId = 'demo-project-run-2'
       this.world.projectEntries.push({
         ...second,
         id: 'ent-project-stream-replies',
+        runId: 'demo-project-run-2',
         body: '',
         createdAt: this.scheduler.now(),
         sourceSeq: 5,
@@ -348,7 +354,7 @@ export class MockStore {
       project.agent.lastSeq = 5
       this.emit('projects', 'threads')
     })
-    const secondSaved = stream(second.body, firstSaved + 2500, 5, 'ent-project-stream-final')
+    const secondSaved = stream(second.body, firstSaved + 2500, 5, 'ent-project-stream-final', 'demo-project-run-2')
     this.schedule(secondSaved + 500, () => {
       project.agent.state = 'idle'
       this.emit('projects')

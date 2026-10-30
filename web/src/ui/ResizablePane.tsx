@@ -5,14 +5,18 @@ import { colors, radius, size } from '../theme/tokens.stylex'
 const styles = stylex.create({
   pane: { position: 'relative', flexShrink: 0, height: '100%', minWidth: 0 },
   animatedWidth: {
-    transition: 'width 220ms cubic-bezier(0.32, 0.72, 0, 1)',
+    transition: 'width 260ms cubic-bezier(0.16, 1, 0.3, 1)',
     '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
   },
   draggingWidth: { transition: 'none' },
   floating: {
     position: 'absolute',
-    top: 0,
-    right: 0,
+    top: '56px',
+    right: '8px',
+    height: 'auto',
+    maxHeight: 'calc(100% - 64px)',
+    display: 'flex',
+    flexDirection: 'column',
     zIndex: 2,
     pointerEvents: 'none',
     opacity: 1,
@@ -135,11 +139,15 @@ export function ResizablePane({
     const parent = element?.parentElement
     if (!element || !parent) return
     const update = () => {
-      const available = parent.clientWidth
-        ? Math.max(Math.min(min, parent.clientWidth), parent.clientWidth - reserve)
+      const parentWidth = parent.clientWidth
+      const narrow = floating && parentWidth > 0 && parentWidth <= 480
+      const available = parentWidth
+        ? floating
+          ? Math.min(Math.max(0, parentWidth - 16), narrow ? parentWidth : Math.max(min, parentWidth * 0.4))
+          : Math.max(Math.min(min, parentWidth), parentWidth - reserve)
         : max
       const upper = Math.min(max, available)
-      const lower = Math.min(min, upper)
+      const lower = narrow ? upper : Math.min(min, upper)
       const next = collapsed ? 52 : Math.max(lower, Math.min(preferred, upper))
       element.style.width = `${next}px`
       if (floating) parent.style.setProperty('--project-panel-width', `${next}px`)
@@ -158,9 +166,7 @@ export function ResizablePane({
   }, [collapsed, floating, max, min, preferred, reserve])
 
   function change(value: number) {
-    const parentWidth = pane.current?.parentElement?.clientWidth ?? 0
-    const upper = Math.min(max, parentWidth ? Math.max(Math.min(min, parentWidth), parentWidth - reserve) : max)
-    const next = Math.round(Math.max(Math.min(min, upper), Math.min(value, upper)))
+    const next = Math.max(bounds.min, Math.min(Math.round(value), bounds.max))
     setPreferred(next)
     try {
       localStorage.setItem(storageKey, String(next))
@@ -258,7 +264,7 @@ export function ResizablePane({
             aria-hidden="true"
             {...stylex.props(
               styles.line,
-              acrossGutter && styles.lineInset,
+              (acrossGutter || floating) && styles.lineInset,
               (hovered || dragging) && styles.lineVisible,
             )}
           >

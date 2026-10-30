@@ -27,7 +27,6 @@ const styles = stylex.create({
     paddingInline: space.sm,
     paddingBottom: space.sm,
   },
-  sidebarCollapsed: { width: '52px' },
   header: {
     display: 'flex',
     alignItems: 'center',
@@ -36,18 +35,13 @@ const styles = stylex.create({
     height: size.header,
     paddingInline: space.xs,
   },
-  headerCollapsed: {
-    flexDirection: 'column',
-    alignItems: 'flex-start',
-    height: '76px',
-    paddingTop: '10px',
-  },
-  nav: { display: 'flex', flexDirection: 'column', gap: space.xxs, marginTop: space.md },
+  brand: { flexGrow: 1, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', color: colors.text },
+  nav: { display: 'flex', flexDirection: 'column', flexShrink: 0, gap: space.xs, marginTop: space.xs },
   row: {
     display: 'flex',
     alignItems: 'center',
     gap: space.sm,
-    height: size.row,
+    height: '36px',
     paddingInline: space.sm,
     paddingLeft: '9px',
     borderRadius: radius.sm,
@@ -66,7 +60,13 @@ const styles = stylex.create({
     fontWeight: weight.medium,
   },
   rowIcon: { color: colors.muted },
-  rowLabel: { flexGrow: 1 },
+  rowLabel: { flexGrow: 1, minWidth: 0 },
+  label: {
+    opacity: 1,
+    transition: 'opacity 160ms ease',
+    '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+  },
+  labelHidden: { opacity: 0, pointerEvents: 'none' },
   sectionHead: {
     display: 'flex',
     alignItems: 'center',
@@ -92,7 +92,26 @@ const styles = stylex.create({
     '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
   },
   addProjectVisible: { opacity: 1 },
-  spacer: { flexGrow: 1 },
+  projectArea: {
+    display: 'flex',
+    flexDirection: 'column',
+    flexGrow: 1,
+    minHeight: 0,
+    overflow: 'hidden',
+    opacity: 1,
+    visibility: 'visible',
+    transform: 'translateX(0)',
+    transition: 'opacity 160ms ease, transform 240ms cubic-bezier(0.16, 1, 0.3, 1), visibility 0s',
+    '@media (prefers-reduced-motion: reduce)': { transition: 'none', transform: 'none' },
+  },
+  projectAreaHidden: {
+    opacity: 0,
+    visibility: 'hidden',
+    transform: 'translateX(-6px)',
+    transition: 'opacity 100ms ease, transform 180ms ease, visibility 0s 100ms',
+    '@media (prefers-reduced-motion: reduce)': { transition: 'none', transform: 'none' },
+  },
+  footer: { flexShrink: 0, marginTop: space.sm },
   projects: {
     display: 'flex',
     flexDirection: 'column',
@@ -107,20 +126,19 @@ const styles = stylex.create({
   account: {
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    justifyContent: 'flex-start',
     gap: space.sm,
-    flexGrow: 1,
+    width: '100%',
     minWidth: 0,
-    height: size.row,
+    height: '40px',
     paddingInline: space.xs,
-    paddingLeft: '2px',
+    paddingLeft: '6px',
     borderWidth: 0,
     borderRadius: radius.sm,
-    backgroundColor: 'transparent',
+    backgroundColor: { default: 'transparent', ':hover': colors.hover },
     color: colors.text,
     textAlign: 'start',
   },
-  accountCollapsed: { flexGrow: 0, width: '28px' },
   accountMenu: {
     display: 'flex',
     flexDirection: 'column',
@@ -128,8 +146,8 @@ const styles = stylex.create({
     padding: space.xs,
   },
   accountName: { display: 'flex', flexDirection: 'column' },
-  accountLabel: { minWidth: 0, fontWeight: 550, lineHeight: '23px', letterSpacing: '-0.1px' },
-  accountCaret: { color: colors.faint },
+  accountLabel: { flexGrow: 1, minWidth: 0, fontWeight: 550, lineHeight: '23px', letterSpacing: '-0.1px' },
+  accountCaret: { color: colors.faint, transform: 'rotate(180deg)' },
 })
 
 // 收起时只留图标，名称放进 aria-label 和悬停提示。
@@ -157,7 +175,12 @@ function NavRow({
       {...stylex.props(text.small, styles.row, active && styles.active, focusRing.ring)}
     >
       <Icon name={icon} size={18} style={styles.rowIcon} />
-      {!collapsed && <span {...stylex.props(styles.rowLabel)}>{label}</span>}
+      <span
+        aria-hidden={collapsed || undefined}
+        {...stylex.props(styles.rowLabel, styles.label, collapsed && styles.labelHidden)}
+      >
+        {label}
+      </span>
       {!collapsed && trailing}
     </Link>
   )
@@ -203,8 +226,9 @@ export function Sidebar() {
   const visibleProjects = (projects.data ?? []).filter((item) => item.status !== 'archived')
 
   return (
-    <nav aria-label="工作区" {...stylex.props(styles.sidebar, collapsed && styles.sidebarCollapsed)}>
-      <div {...stylex.props(styles.header, collapsed && styles.headerCollapsed)}>
+    <nav aria-label="工作区" {...stylex.props(styles.sidebar)}>
+      <div {...stylex.props(styles.header)}>
+        {!collapsed && <span {...stylex.props(text.label, styles.brand)}>Baton</span>}
         <IconButton
           icon="sidebar"
           iconSize={18}
@@ -212,19 +236,43 @@ export function Sidebar() {
           aria-expanded={!collapsed}
           onClick={toggleSidebar}
         />
+      </div>
+      <div {...stylex.props(styles.nav)}>
+        <NavRow
+          to="/threads"
+          icon="threads"
+          label="对话"
+          collapsed={collapsed}
+          trailing={unread > 0 && <Count value={unread} label={`${unread} 条未读`} />}
+        />
+        <NavRow to="/devices" icon="laptop" label="设备" collapsed={collapsed} />
+      </div>
+      <div
+        inert={collapsed || undefined}
+        aria-hidden={collapsed || undefined}
+        {...stylex.props(styles.projectArea, collapsed && styles.projectAreaHidden)}
+      >
+        <ProjectList projects={visibleProjects} loaded={projects.data !== undefined} unavailable={projects.isError} />
+      </div>
+      <div {...stylex.props(styles.footer)}>
         {account && (
           <Menu
             narrow
-            side="bottom"
+            side="top"
             trigger={
               <button
                 type="button"
-                aria-label={collapsed ? account.name : undefined}
+                aria-label={account.name}
                 title={collapsed ? account.name : undefined}
-                {...stylex.props(text.small, styles.account, collapsed && styles.accountCollapsed, focusRing.ring)}
+                {...stylex.props(text.small, styles.account, focusRing.ring)}
               >
                 <PersonAvatar name={account.name} />
-                {!collapsed && <span {...stylex.props(text.truncate, styles.accountLabel)}>{account.name}</span>}
+                <span
+                  aria-hidden={collapsed || undefined}
+                  {...stylex.props(text.truncate, styles.accountLabel, styles.label, collapsed && styles.labelHidden)}
+                >
+                  {account.name}
+                </span>
                 {!collapsed && <Icon name="chevron-down" size={12} style={styles.accountCaret} />}
               </button>
             }
@@ -250,22 +298,6 @@ export function Sidebar() {
           </Menu>
         )}
       </div>
-      <div {...stylex.props(styles.nav)}>
-        <NavRow
-          to="/threads"
-          icon="threads"
-          label="对话"
-          collapsed={collapsed}
-          trailing={unread > 0 && <Count value={unread} label={`${unread} 条未读`} />}
-        />
-        <NavRow to="/devices" icon="laptop" label="设备" collapsed={collapsed} />
-      </div>
-
-      {collapsed ? (
-        <div {...stylex.props(styles.spacer)} />
-      ) : (
-        <ProjectList projects={visibleProjects} loaded={projects.data !== undefined} unavailable={projects.isError} />
-      )}
     </nav>
   )
 }

@@ -337,6 +337,7 @@ export async function mapProjectEntries(
             entries.push({
               ...inputBase,
               kind: 'assistant',
+              runId: event.run_id ?? undefined,
               body: typeof input.payload.content === 'string' ? input.payload.content : '',
               process: input.payload.command_result
                 ? [{ kind: 'note', body: JSON.stringify(input.payload.command_result) }]
@@ -397,6 +398,7 @@ export async function mapProjectEntries(
             ...base,
             kind: 'assistant',
             body: '',
+            runId: call.entry.runId,
             process: [],
             threads: { action, threadIds: [result.thread_id] },
           })

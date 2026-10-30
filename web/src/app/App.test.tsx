@@ -268,7 +268,7 @@ describe('app', () => {
 
     await user.click(screen.getByRole('button', { name: '收起侧栏' }))
     expect(screen.getByRole('button', { name: '展开侧栏' })).toBeInTheDocument()
-    expect(within(sidebar).queryByText('项目')).not.toBeInTheDocument()
+    expect(within(sidebar).queryByRole('link', { name: /Baton/ })).not.toBeInTheDocument()
     expect(within(sidebar).getByRole('link', { name: '对话' })).toHaveAttribute('aria-current', 'page')
     expect(within(sidebar).queryByRole('button', { name: 'New thread' })).not.toBeInTheDocument()
     expect(within(sidebar).getByRole('button', { name: 'Kaken He' })).toBeInTheDocument()
@@ -449,6 +449,27 @@ describe('projects', () => {
     expect(screen.getByText(/Opened a thread on Windows Desktop/)).toBeInTheDocument()
     await user.click(command)
     expect(screen.queryByText('4f2c9e1 Add drive letter cases to path tests')).not.toBeInTheDocument()
+  })
+
+  it('keeps one expanded process per project run as tools, threads and replies arrive', async () => {
+    const user = userEvent.setup()
+    const { scheduler } = renderApp('/projects/prj-compat', 'streamingProject')
+    await screen.findByRole('heading', { name: /Compatibility/ })
+    await advance(scheduler, 1800)
+    const process = await screen.findByRole('button', { name: '正在处理' })
+    await user.click(process)
+    await advance(scheduler, 3200)
+    await waitFor(() => expect(screen.getAllByRole('button', { name: '执行过程' })).toHaveLength(1))
+    expect(process).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('region', { name: '已新建 1 个对话' })).toBeInTheDocument()
+    expect(screen.getByText(/Compat suite is in/)).toBeInTheDocument()
+    await advance(scheduler, 30000)
+    await waitFor(() =>
+      expect(screen.getByRole('region', { name: '对话' })).toHaveTextContent('The suite finished with 2 failures'),
+    )
+    expect(screen.getAllByRole('button', { name: '执行过程' })).toHaveLength(2)
+    expect(process).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('region', { name: '对话' })).toHaveTextContent('Opened a thread on Windows Desktop')
   })
 
   it('streams a project preview and replaces it when the saved reply arrives before status refresh', async () => {
