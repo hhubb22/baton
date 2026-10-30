@@ -5,6 +5,8 @@ set -euo pipefail
 version=${1:?release version required}
 staging=${2:?staging directory required}
 image=${3:?image digest required}
+reset_data=${4:-false}
+[[ "$reset_data" = true || "$reset_data" = false ]] || exit 2
 [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]] || exit 2
 [[ "$staging" =~ ^/tmp/baton-deploy-[A-Za-z0-9-]+$ ]] || exit 2
 [[ "$image" =~ ^ghcr\.io/hhubb22/baton@sha256:[a-f0-9]{64}$ ]] || exit 2
@@ -44,10 +46,20 @@ deployment_failed() {
 }
 trap deployment_failed ERR
 "${compose[@]}" exec -T postgres pg_dump -U postgres -d baton -Fc > "$backup/database.dump"
+if [[ "$reset_data" = true ]]; then
+  "${compose[@]}" exec -T postgres pg_dump -U postgres -d baton --data-only --column-inserts --table public.employees > "$backup/employees.sql"
+fi
 tar -czf "$backup/server.tar.gz" -C data server
 # JSON 是 Compose 支持的 YAML 子集；参数在上方限制为发布标识和摘要。
 printf '{"services":{"baton-server":{"image":"%s","volumes":["%s:/opt/baton/releases:ro"]}}}\n' "$image" "$target" > compose.release.json.next
 mv compose.release.json.next compose.release.json
+if [[ "$reset_data" = true ]]; then
+  docker compose -f compose.yaml exec -T postgres dropdb -U postgres --force baton
+  docker compose -f compose.yaml exec -T postgres createdb -U postgres --owner=baton baton
+  docker compose -f compose.yaml exec -T postgres psql -U postgres -d baton -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION vector'
+  docker compose -f compose.yaml -f compose.release.json run --rm --no-deps baton-server migrate
+  docker compose -f compose.yaml exec -T postgres psql -U postgres -d baton -v ON_ERROR_STOP=1 < "$backup/employees.sql"
+fi
 docker compose -f compose.yaml -f compose.release.json up -d --no-build --no-deps --wait --wait-timeout 120 baton-server
 docker compose -f compose.yaml -f compose.release.json exec -T baton-server node -e \
   'fetch("http://127.0.0.1:8080/api/v1/release").then(r=>r.json()).then(r=>{if(r.version!==process.argv[1]||r.commit!==process.argv[2])process.exit(1)}).catch(()=>process.exit(1))' "$version" "$image_commit"

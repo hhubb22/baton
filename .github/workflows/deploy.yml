@@ -7,6 +7,11 @@ on:
         description: Published release tag
         required: true
         type: string
+      reset_data:
+        description: Rebuild experimental data, preserving login accounts
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -51,6 +56,7 @@ jobs:
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           GH_TOKEN: ${{ github.token }}
           GH_ACTOR: ${{ github.actor }}
+          RESET_DATA: ${{ inputs.reset_data }}
         run: |
           install -d -m 0700 ~/.ssh
           printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ed25519
@@ -64,4 +70,4 @@ jobs:
           scp -r "$RUNNER_TEMP/baton-assets/." "ops@2.29.124.38:$staging/assets/"
           scp tools/deploy-edge.sh "ops@2.29.124.38:$staging/deploy.sh"
           printf '%s' "$GH_TOKEN" | ssh -o BatchMode=yes ops@2.29.124.38 "sudo -n docker --config '$staging/docker-auth' login ghcr.io -u '$GH_ACTOR' --password-stdin"
-          ssh -o BatchMode=yes ops@2.29.124.38 "sudo -n env DOCKER_CONFIG='$staging/docker-auth' bash '$staging/deploy.sh' '$RELEASE_VERSION' '$staging' '$image'"
+          ssh -o BatchMode=yes ops@2.29.124.38 "sudo -n env DOCKER_CONFIG='$staging/docker-auth' bash '$staging/deploy.sh' '$RELEASE_VERSION' '$staging' '$image' '$RESET_DATA'"

@@ -27,6 +27,8 @@ sudo docker compose -f compose.yaml -f compose.release.json ps
 sudo docker compose -f compose.yaml -f compose.release.json logs --tail 100 baton-server
 ```
 
-新版本启动失败时中心保持停止。迁移可能已经写入数据库，不能只切回旧镜像；管理员检查备份和迁移结果后，选择修复后向前部署，或在中心停止期间恢复数据库、身份目录及上一份 Compose 配置。部署不自动删除旧实验数据；首次建立正式基线时，可由管理员明确重建 Baton 数据库和设备身份，再重新接入设备。
+新版本启动失败时中心保持停止。迁移可能已经写入数据库，不能只切回旧镜像；管理员检查备份和迁移结果后，选择修复后向前部署，或在中心停止期间恢复数据库、身份目录及上一份 Compose 配置。
+
+首次建立发布基线时，管理员可以明确将 `reset_data` 设为 `true`。脚本先备份完整旧数据库，再重建数据库并执行当前迁移，恢复原登录账号和口令哈希后才启动中心。旧 Project、Thread、设备和会话不会恢复，设备须重新接入。普通升级保持此选项为 `false`。
 
 macOS 正式自动更新需 Developer ID 签名；没有证书时可完成 CLI 和中心发布、本地更新测试，桌面正式签名安装仍需单独验证。
