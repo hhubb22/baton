@@ -9,7 +9,7 @@
 - 仓库变量 `BATON_UPDATE_PUBLIC_KEYS`：与安装包内置公钥一致的 JSON 公钥列表。
 - `production` secret `DEPLOY_KEY`：允许以 `ops` 登录 `2.29.124.38` 的 SSH 私钥。
 - `production` secret `DEPLOY_KNOWN_HOSTS`：经管理员独立核对的 SSH 主机公钥记录。
-- GHCR 中的 `ghcr.io/hhubb22/baton` 镜像须公开可拉取，或服务器已配置只读拉取凭据。
+- 部署任务通过自身具有 `packages: read` 权限的临时 `GITHUB_TOKEN` 拉取 GHCR 镜像。凭据存入本次部署的私有临时目录，任务退出后删除；服务器无需保存个人 GitHub Token。
 
 服务器沿用 `/opt/services/baton/compose.yaml`、`.env`、`data/server` 和 `data/postgres`，部署用户须可通过 `sudo -n` 执行部署脚本。网关、域名、数据库用户和私密配置由服务器维护。工作流不修改其他服务。
 
