@@ -134,6 +134,7 @@ export interface GatewayOptions {
   pollMs?: number
   maxConnections?: number
   authenticationTimeoutMs?: number
+  telemetryAdmission?: (queued: number) => boolean
   rpc?: {
     readonly readConcurrency?: number
     readonly managementConcurrency?: number
@@ -401,7 +402,12 @@ export class Gateway {
         frame.envelope.body.type === 'telemetry.export'
       ) {
         const current = connection
-        if (!current.synced || queued || this.nodes.get(current.source.node_id) !== current) return
+        if (
+          !current.synced ||
+          !(this.options.telemetryAdmission?.(queued) ?? queued === 0) ||
+          this.nodes.get(current.source.node_id) !== current
+        )
+          return
         const envelope = Schema.decodeUnknownOption(Envelope)(frame.envelope)
         if (envelope._tag === 'None' || envelope.value.route.to !== 'control') return
         const body = Schema.decodeUnknownOption(TelemetryExport)(envelope.value.body)

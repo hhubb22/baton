@@ -8,6 +8,11 @@ import { runWatchdogCommand } from '@baton/batond/platform/process'
 import { telemetryLayer } from '@baton/telemetry'
 
 async function main() {
+  if (process.env.BATON_TELEMETRY_LOCAL_RELAY === '1') {
+    process.env.OTEL_BSP_SCHEDULE_DELAY = '30'
+    process.env.OTEL_LOGS_EXPORTER = 'none'
+    process.env.OTEL_METRICS_EXPORTER = 'none'
+  }
   const entry = process.argv[1]
   if (!entry) throw new Error('Replay Worker requires its entry path')
   const command = process.argv[2]

@@ -133,6 +133,47 @@ test('丢弃处理失败的遥测并继续处理心跳', async () => {
   expect(ws.readyState).toBe(WebSocket.OPEN)
 })
 
+test.each([false, true])('telemetry admission during queued business work: override=%s', async (override) => {
+  const entered = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  const telemetry = vi.fn()
+  const f = await fixture(
+    {
+      telemetry,
+      handle: async (_source, input) => {
+        if ((input.body as { type: string }).type === 'thread.report') {
+          entered.resolve()
+          await release.promise
+          return undefined
+        }
+        return { type: 'node.sync_result', ok: true }
+      },
+    },
+    undefined,
+    override ? { telemetryAdmission: () => true } : {},
+  )
+  cleanups.push(async () => release.resolve())
+  const { ws } = await f.connect()
+  ws.send(
+    JSON.stringify(
+      envelope({
+        type: 'thread.report',
+        thread_id: randomUUID(),
+        event_id: randomUUID(),
+        worker_seq: 1,
+        kind: 'thread.opened',
+      }),
+    ),
+  )
+  await entered.promise
+  ws.send(JSON.stringify(envelope({ type: 'telemetry.export', signal: 'logs', payload: {} })))
+  const pong = once(ws, 'pong')
+  ws.ping()
+  await pong
+  expect(telemetry).toHaveBeenCalledTimes(override ? 1 : 0)
+  release.resolve()
+})
+
 test('propagates the actual WSS enqueue span independently of command content', async () => {
   const spans: Tracer.NativeSpan[] = []
   const tracer = Tracer.make({

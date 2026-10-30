@@ -107,7 +107,16 @@ async function withProviderThread(
   const controller = new AbortController()
   const scope = await Effect.runPromise(Scope.make())
   const syncResults: unknown[] = []
-  const traceDiagnostics = { reportAcks: 0, batondBatchAttempts: 0, batondTraceBatchAttempts: 0 }
+  const traceDiagnostics = {
+    reportAcks: 0,
+    batondBatchAttempts: 0,
+    batondTraceBatchAttempts: 0,
+    agentHostBatchAttempts: 0,
+    agentTurnBatchAttempts: 0,
+    agentTurnTraceIds: [] as string[],
+    workerTurnBatchAttempts: 0,
+    sendFailures: 0,
+  }
   let daemon: Promise<unknown> | undefined
   let threadId: string | undefined
   const tracedRuntime = trace
@@ -227,7 +236,7 @@ async function withProviderThread(
         heartbeatMs: 1000,
         offlineMs: 5000,
         webDirectory: directory,
-        ...(telemetryEnv ? { telemetryEnv } : {}),
+        ...(telemetryEnv ? { telemetryEnv, telemetryAdmission: () => true } : {}),
       }).pipe(Effect.provideService(Scope.Scope, scope)),
     )
     const base = `http://127.0.0.1:${running.port}`
@@ -364,8 +373,21 @@ async function withProviderThread(
                   traceDiagnostics.batondBatchAttempts++
                   if (trace && encoded.includes(trace)) traceDiagnostics.batondTraceBatchAttempts++
                 }
+                if (encoded.includes('baton-agent-host')) traceDiagnostics.agentHostBatchAttempts++
+                if (encoded.includes('"name":"baton.agent.turn"')) {
+                  traceDiagnostics.agentTurnBatchAttempts++
+                  const body = JSON.parse(encoded).envelope?.body?.payload as TraceData | undefined
+                  for (const resource of body?.resourceSpans ?? [])
+                    for (const scope of resource.scopeSpans)
+                      for (const span of scope.spans)
+                        if (span.name === 'baton.agent.turn') traceDiagnostics.agentTurnTraceIds.push(span.traceId)
+                }
+                if (encoded.includes('"name":"baton.turn"')) traceDiagnostics.workerTurnBatchAttempts++
                 // 追踪集成测试验证传播链路；传输拥塞丢弃由 transport 单测覆盖。
-                if (trace) void connection.send(frame).catch(() => {})
+                if (trace)
+                  void connection.send(frame).catch(() => {
+                    traceDiagnostics.sendFailures++
+                  })
                 else connection.tryTelemetry?.(frame)
               },
               frames: {
@@ -545,25 +567,33 @@ test('exports one trace from HTTP through Worker and Pi agent-host', async () =>
         expect(syncResults).toContainEqual({ type: 'node.sync_result', ok: true, telemetry: { forward: true } })
         expect(JSON.stringify(syncResults)).not.toContain('local-test-key')
         await expect.poll(async () => (await replies()).length, { timeout: 15000 }).toBe(1)
-        await expect
-          .poll(
-            () =>
-              spans.some(
-                (span) =>
-                  span.service === 'baton-agent-host' && span.name === 'baton.agent.turn' && span.traceId === trace,
-              ),
-            { timeout: 10000 },
-          )
-          .toBe(true)
-        await expect
-          .poll(
-            () =>
-              spans.some(
-                (span) => span.service === 'baton-worker' && span.name === 'baton.turn' && span.traceId === trace,
-              ),
-            { timeout: 10000 },
-          )
-          .toBe(true)
+        try {
+          await expect
+            .poll(
+              () =>
+                spans.some(
+                  (span) =>
+                    span.service === 'baton-agent-host' && span.name === 'baton.agent.turn' && span.traceId === trace,
+                ),
+              { timeout: 10000 },
+            )
+            .toBe(true)
+        } catch (error) {
+          throw new Error(`Agent host relay diagnostics: ${JSON.stringify(traceDiagnostics)}`, { cause: error })
+        }
+        try {
+          await expect
+            .poll(
+              () =>
+                spans.some(
+                  (span) => span.service === 'baton-worker' && span.name === 'baton.turn' && span.traceId === trace,
+                ),
+              { timeout: 10000 },
+            )
+            .toBe(true)
+        } catch (error) {
+          throw new Error(`Worker relay diagnostics: ${JSON.stringify(traceDiagnostics)}`, { cause: error })
+        }
         const turn = spans.find(
           (span) => span.service === 'baton-worker' && span.name === 'baton.turn' && span.traceId === trace,
         )!

@@ -52,6 +52,7 @@ export interface ServerOptions {
   readonly offlineMs?: number
   readonly controlBudgets?: Partial<ControlBudgets>
   readonly rpc?: GatewayOptions['rpc']
+  readonly telemetryAdmission?: GatewayOptions['telemetryAdmission']
 }
 export interface RunningServer {
   readonly host: string
@@ -307,6 +308,7 @@ export const startServer = (
               tracer,
               authenticationTimeoutMs: 2 * (budgets.authenticate.queueMs + budgets.authenticate.executionMs) + 1000,
               ...(options.rpc ? { rpc: options.rpc } : {}),
+              ...(options.telemetryAdmission ? { telemetryAdmission: options.telemetryAdmission } : {}),
               ...(options.heartbeatMs !== undefined ? { heartbeatMs: options.heartbeatMs } : {}),
               ...(options.offlineMs !== undefined ? { offlineMs: options.offlineMs } : {}),
             },

@@ -24,6 +24,7 @@ test('exports the center placement and real Project Runtime model call in one tr
   const spans: Array<TraceData['resourceSpans'][number]['scopeSpans'][number]['spans'][number] & { service: string }> =
     []
   const authorization: Array<string | undefined> = []
+  const relayDiagnostics = { runtimeBatches: 0, runBatches: 0, chatBatches: 0, sendFailures: 0 }
   const resources: Array<{
     service: string
     attributes: TraceData['resourceSpans'][number]['resource']['attributes']
@@ -75,6 +76,7 @@ test('exports the center placement and real Project Runtime model call in one tr
         telemetryEnv,
         dispatchMs: 20,
         projectDispatchMs: 20,
+        telemetryAdmission: () => true,
         heartbeatMs: 1000,
         offlineMs: 5000,
       }).pipe(Effect.provideService(Scope.Scope, scope)),
@@ -141,11 +143,27 @@ test('exports the center placement and real Project Runtime model call in one tr
               ...connection,
               // 追踪集成测试验证传播链路；传输拥塞丢弃由 transport 单测覆盖。
               tryTelemetry: (frame) => {
-                void connection.send(frame).catch(() => {})
+                const encoded = JSON.stringify(frame)
+                if (encoded.includes('baton-project-runtime')) relayDiagnostics.runtimeBatches++
+                if (encoded.includes('"name":"baton.project.run"')) relayDiagnostics.runBatches++
+                if (encoded.includes('"name":"chat trace-model"')) relayDiagnostics.chatBatches++
+                void connection.send(frame).catch(() => {
+                  relayDiagnostics.sendFailures++
+                })
               },
             }
           },
-          project: { runtimeCommand: { file: process.execPath, args: ['--import', loader, fileURLToPath(entry)] } },
+          project: {
+            runtimeCommand: {
+              file: process.execPath,
+              args: ['--import', loader, fileURLToPath(entry)],
+              env: {
+                OTEL_BSP_SCHEDULE_DELAY: telemetryEnv.OTEL_BSP_SCHEDULE_DELAY,
+                OTEL_LOGS_EXPORTER: telemetryEnv.OTEL_LOGS_EXPORTER,
+                OTEL_METRICS_EXPORTER: telemetryEnv.OTEL_METRICS_EXPORTER,
+              },
+            },
+          },
         }),
       ).pipe(
         Effect.provide(
@@ -185,11 +203,15 @@ test('exports the center placement and real Project Runtime model call in one tr
         )
       ).status,
     ).toBe(202)
-    await expect
-      .poll(() => spans.filter((span) => span.traceId === trace).map(({ service, name }) => ({ service, name })), {
-        timeout: 30000,
-      })
-      .toContainEqual({ service: 'baton-project-runtime', name: 'baton.project.run' })
+    try {
+      await expect
+        .poll(() => spans.filter((span) => span.traceId === trace).map(({ service, name }) => ({ service, name })), {
+          timeout: 30000,
+        })
+        .toContainEqual({ service: 'baton-project-runtime', name: 'baton.project.run' })
+    } catch (error) {
+      throw new Error(`Runtime relay diagnostics: ${JSON.stringify(relayDiagnostics)}`, { cause: error })
+    }
     const run = spans.find(
       (span) => span.service === 'baton-project-runtime' && span.name === 'baton.project.run' && span.traceId === trace,
     )!
@@ -205,6 +227,20 @@ test('exports the center placement and real Project Runtime model call in one tr
       key: 'baton.error.code',
       value: { stringValue: 'model_output_truncated_tools' },
     })
+    try {
+      await expect
+        .poll(
+          () =>
+            spans.some(
+              (span) =>
+                span.service === 'baton-project-runtime' && span.name === 'chat trace-model' && span.traceId === trace,
+            ),
+          { timeout: 30000 },
+        )
+        .toBe(true)
+    } catch (error) {
+      throw new Error(`Runtime relay diagnostics: ${JSON.stringify(relayDiagnostics)}`, { cause: error })
+    }
     const chat = spans.find(
       (span) => span.service === 'baton-project-runtime' && span.name === 'chat trace-model' && span.traceId === trace,
     )!
