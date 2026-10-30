@@ -43,6 +43,7 @@ export const keys = {
     ['projects', 'memorySources', projectId, noteId, version] as const,
   threads: ['threads'] as const,
   threadOrder: ['threadOrder'] as const,
+  executions: (id: ID) => ['executions', id] as const,
   thread: (id: ID) => ['threads', 'detail', id] as const,
   messages: (threadId: ID) => ['messages', threadId] as const,
   activity: ['activity'] as const,
@@ -84,15 +85,18 @@ function refreshListItem<T extends { id: ID }>(
   detailKey: readonly string[],
   id: ID,
   queryFn: () => Promise<T>,
+  include: (entity: T) => boolean = () => true,
 ) {
   if (!queryClient.getQueryData<T[]>(listKey)) return
   void queryClient
     .fetchQuery({ queryKey: detailKey, queryFn })
     .then((entity) => {
       queryClient.setQueryData<T[]>(listKey, (items) =>
-        items?.some((item) => item.id === id)
-          ? items.map((item) => (item.id === id ? entity : item))
-          : items && [...items, entity],
+        !include(entity)
+          ? items?.filter((item) => item.id !== id)
+          : items?.some((item) => item.id === id)
+            ? items.map((item) => (item.id === id ? entity : item))
+            : items && [...items, entity],
       )
     })
     .catch((error: unknown) => {
@@ -129,9 +133,15 @@ function invalidateEntity(client: BatonClient, queryClient: QueryClient, target:
     },
   })
   if (target.type === 'thread') {
-    refreshListItem<Thread>(queryClient, keys.threads, keys.thread(target.id), target.id, () =>
-      client.getThread(target.id),
+    refreshListItem<Thread>(
+      queryClient,
+      keys.threads,
+      keys.thread(target.id),
+      target.id,
+      () => client.getThread(target.id),
+      (thread) => thread.agent !== null,
     )
+    void queryClient.invalidateQueries({ queryKey: ['executions'] })
   } else {
     refreshListItem<Project>(queryClient, keys.projects, keys.project(target.id), target.id, () =>
       client.getProject(target.id),
@@ -159,6 +169,7 @@ export function ClientProvider({ client, children }: { client: BatonClient; chil
         }, 75)
         return
       }
+      if (topics.includes('threads')) void queryClient.invalidateQueries({ queryKey: ['executions'] })
       for (const topic of topics)
         void queryClient.invalidateQueries({
           queryKey: [topic],
@@ -221,6 +232,14 @@ export function useEnrollment(id: ID | null) {
 export function useProjects() {
   const client = useClient()
   return useQuery({ queryKey: keys.projects, queryFn: () => client.listProjects() })
+}
+
+export function useProjectExecutions(projectId: ID) {
+  const client = useClient()
+  return useQuery({
+    queryKey: keys.executions(projectId),
+    queryFn: () => client.listProjectExecutions?.(projectId) ?? Promise.resolve([]),
+  })
 }
 
 export function useProjectEntries(projectId: ID) {

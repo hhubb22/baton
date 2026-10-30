@@ -1146,7 +1146,7 @@ describe('HTTP thread contracts', () => {
         return { ok: true, state: 'running', text: 'shell-output', cursor: 'shell-epoch:12', gap: false }
       return t
     })
-    expect((await api.listThreads())[0]).toMatchObject({ id: threadId, agent: null, status: 'running' })
+    expect(await api.getThread(threadId)).toMatchObject({ id: threadId, agent: null, status: 'running' })
     const reply = (await api.listMessages(threadId)).find((m) => m.role === 'agent')!
     expect(await api.readTrace(reply.id)).toMatchObject({
       state: 'ready',

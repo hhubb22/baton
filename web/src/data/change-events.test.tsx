@@ -318,6 +318,24 @@ describe('entity change notifications', () => {
     expect(list).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps shell executions out of the conversation list after a change event', async () => {
+    let publish!: (event: ChangeEvent) => void
+    const getThread = vi.fn(async () => ({ id: 'shell', agent: null }))
+    const client = {
+      subscribe: (listener: (event: ChangeEvent) => void) => {
+        publish = listener
+        return () => {}
+      },
+      listThreads: async () => [],
+      getThread,
+    } as unknown as BatonClient
+    const { result } = renderHook(() => useThreads(), { wrapper: wrapperFor(client) })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    act(() => publish({ topics: [], target: { type: 'thread', id: 'shell' } }))
+    await waitFor(() => expect(getThread).toHaveBeenCalled())
+    expect(result.current.data).toEqual([])
+  })
+
   it('refreshes connection-dependent topics on nodes.changed and rereads node status', async () => {
     let online = false
     const fetch = vi.fn<typeof globalThis.fetch>(async (input) =>

@@ -357,7 +357,7 @@ batond 通过 Gateway 的控制队列传送 `node.runtime_report`，正文为 `{
 
 **参数。** `node_id`；`command`，交给节点上报的 shell 执行；`working_directory`，必须已经存在并位于该节点登记的目录内；`wait_seconds`，0～600，默认 30；`timeout_seconds`，默认 7200。
 
-**实现为一个 shell Thread。** `call_tool` 的事务里新建一个 `agent_type = shell` 的 Thread，第一条消息就是命令，`client_thread_id` 为 `pa:{conversation_id}:{tool_call_id}`，同一个工具调用最多新建一个 Thread、执行一次命令。目标节点的 `exec.enabled` 为假时直接写 `is_error` 结果。shell Thread 只有一个 Turn，命令退出后 Worker 报告一条回复（合并输出，开头和结尾各保留 16 KiB，附退出码和总字节数）和 `turn.ended`，然后 Thread 进入 `stopped`。它不接受第二条消息，界面上和普通 Thread 一样显示。
+**实现为一个 shell Thread。** `call_tool` 的事务里新建一个 `agent_type = shell` 的 Thread，第一条消息就是命令，`client_thread_id` 为 `pa:{conversation_id}:{tool_call_id}`，同一个工具调用最多新建一个 Thread、执行一次命令。目标节点的 `exec.enabled` 为假时直接写 `is_error` 结果。shell Thread 只有一个 Turn，命令退出后 Worker 报告一条回复（合并输出，开头和结尾各保留 16 KiB，附退出码和总字节数）和 `turn.ended`，然后 Thread 进入 `stopped`。它不接受第二条消息，也不进入普通对话列表及计数。Project 对话的工具调用显示命令和结果，并可打开执行详情查看状态、输出和停止执行。
 
 **等待。** `call_tool` 返回 `{pending:true, thread_id, version, wait_remaining_ms, wait_protocol:1}`，等待截止时间保存在 `threads.exec_wait_until`，Runtime 重启不会延长它。Runtime 通过 batond 本机的 `poll_wake` 等待 Thread 版本变化或最多 25 秒，再调用短 `wait_tool` 查询。`wait_tool` 的 pending 路径用只读快照校验来源、租约、对话、工具调用和 Thread；需要写结果时按锁顺序重新校验：
 

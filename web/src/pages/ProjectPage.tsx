@@ -44,6 +44,7 @@ import {
   useClient,
   useDevices,
   useProjectEntries,
+  useProjectExecutions,
   useProjectHistory,
   useProjectMemory,
   useRetryProject,
@@ -397,7 +398,17 @@ const cardTitles: Record<EntryThreads['action'], (count: number) => string> = {
   replies: (count) => `来自 ${count} 个对话的回复`,
 }
 
-function ProcessItem({ step, devices }: { step: ProcessStep; devices: Device[] }) {
+function ProcessItem({
+  step,
+  devices,
+  executions,
+  onOpen,
+}: {
+  step: ProcessStep
+  devices: Device[]
+  executions: Thread[]
+  onOpen: (id: string) => void
+}) {
   const [open, setOpen] = useState(false)
   if (step.kind === 'note') {
     return (
@@ -422,6 +433,12 @@ function ProcessItem({ step, devices }: { step: ProcessStep; devices: Device[] }
         : null
   const isShell = isCommand || step.name === 'nodes.exec'
   const label = isCommand ? step.command : step.name
+  const execution =
+    !isCommand && isShell && step.toolCallId && step.conversationId
+      ? executions.find(
+          (item) => item.originToolCallId === step.toolCallId && item.originConversationId === step.conversationId,
+        )
+      : undefined
   return (
     <div {...stylex.props(styles.step)}>
       <button
@@ -437,6 +454,17 @@ function ProcessItem({ step, devices }: { step: ProcessStep; devices: Device[] }
       </button>
       {open && (
         <div {...stylex.props(styles.stepDetail)}>
+          {execution && (
+            <button type="button" onClick={() => onOpen(execution.id)}>
+              查看执行详情 ·{' '}
+              {execution.status === 'unknown'
+                ? '结果未知'
+                : threadView(
+                    execution,
+                    devices.find((item) => item.id === execution.deviceId),
+                  ).status.label}
+            </button>
+          )}
           {isCommand && (
             <span {...stylex.props(text.caption, styles.detailLabel)}>
               {devices.find((item) => item.id === step.deviceId)?.name ?? '设备已移除'} · 退出码 {step.exitCode} ·{' '}
@@ -466,7 +494,19 @@ function ProcessItem({ step, devices }: { step: ProcessStep; devices: Device[] }
   )
 }
 
-function ProcessLine({ steps, devices, children }: { steps: ProcessStep[]; devices: Device[]; children?: ReactNode }) {
+function ProcessLine({
+  steps,
+  devices,
+  executions,
+  onOpen,
+  children,
+}: {
+  steps: ProcessStep[]
+  devices: Device[]
+  executions: Thread[]
+  onOpen: (id: string) => void
+  children?: ReactNode
+}) {
   const [open, setOpen] = useState(false)
   const awaiting = steps.filter((step) => step.kind === 'tool' && step.status === 'pending').length
   return (
@@ -483,7 +523,7 @@ function ProcessLine({ steps, devices, children }: { steps: ProcessStep[]; devic
       {open && (
         <div {...stylex.props(styles.steps)}>
           {steps.map((step, index) => (
-            <ProcessItem key={index} step={step} devices={devices} />
+            <ProcessItem key={index} step={step} devices={devices} executions={executions} onOpen={onOpen} />
           ))}
           {children}
         </div>
@@ -618,6 +658,7 @@ function ThreadFailure({
 const Entry = memo(function Entry({
   entry,
   threads,
+  executions,
   devices,
   openThread,
   onOpenThread,
@@ -626,6 +667,7 @@ const Entry = memo(function Entry({
 }: {
   entry: ProjectEntry
   threads: Thread[]
+  executions: Thread[]
   devices: Device[]
   openThread: string | undefined
   onOpenThread: (threadId: string) => void
@@ -649,7 +691,7 @@ const Entry = memo(function Entry({
       return (
         <article aria-label={streaming ? '项目助手正在回复' : '项目助手'} {...stylex.props(styles.assistant)}>
           {(entry.process.length > 0 || entry.threads) && (
-            <ProcessLine steps={entry.process} devices={devices}>
+            <ProcessLine steps={entry.process} devices={devices} executions={executions} onOpen={onOpenThread}>
               {entry.threads && (
                 <ThreadCard
                   threads={entry.threads}
@@ -979,6 +1021,7 @@ export function ProjectPage() {
   const projects = useProjects()
   const devices = useDevices()
   const threads = useThreads()
+  const executions = useProjectExecutions(projectId)
   const entries = useProjectEntries(projectId)
   const history = useProjectHistory(projectId)
   const memory = useProjectMemory(projectId)
@@ -1451,6 +1494,7 @@ export function ProjectPage() {
             <Entry
               entry={entry}
               threads={projectThreads}
+              executions={executions.data ?? []}
               devices={allDevices}
               openThread={search.thread}
               onOpenThread={onOpenThread}

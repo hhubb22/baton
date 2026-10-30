@@ -146,6 +146,9 @@ export interface Thread {
   pendingQuestions?: import('@baton/protocol').ThreadQuestion[]
   questionAnswers?: import('@baton/protocol').ThreadQuestionAnswer[]
   id: ID
+  executionReason?: string
+  originConversationId?: string
+  originToolCallId?: string
   title: string
   deviceId: ID
   folder: string
@@ -305,7 +308,15 @@ export type ProjectPatch = Partial<
 export type ProcessStep =
   | { kind: 'command'; deviceId: ID; command: string; exitCode: number; output: string; durationMs: number }
   | { kind: 'note'; body: string }
-  | { kind: 'tool'; name: string; input: string; output: string | null; status: 'pending' | 'completed' | 'failed' }
+  | {
+      kind: 'tool'
+      name: string
+      conversationId?: string
+      toolCallId?: string
+      input: string
+      output: string | null
+      status: 'pending' | 'completed' | 'failed'
+    }
 
 // 回复里提到的 Thread：本次新开的、发了消息的，或汇报回复的。
 export interface EntryThreads {

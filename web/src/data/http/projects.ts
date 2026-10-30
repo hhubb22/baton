@@ -396,6 +396,7 @@ export async function mapProjectEntries(
         const step: Extract<ProcessStep, { kind: 'tool' }> = {
           kind: 'tool',
           name: block.name || '工具',
+          ...(block.name === 'nodes.exec' ? { toolCallId: block.id, conversationId: event.conversation_id } : {}),
           input: JSON.stringify(block.arguments ?? {}, null, 2),
           output: null,
           status: 'pending',

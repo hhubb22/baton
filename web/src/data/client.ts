@@ -87,6 +87,7 @@ export interface BatonClient {
   listProjectMemory(projectId: ID): Promise<MemoryNote[]>
   getMemoryStatus(projectId: ID): Promise<MemoryWorkStatus>
   listThreads(): Promise<Thread[]>
+  listProjectExecutions?(projectId: ID): Promise<Thread[]>
   getThread(threadId: ID): Promise<Thread>
   listMessages(threadId: ID): Promise<Message[]>
   // 客户端支持已读状态时，在消息显示后清除未读标记。

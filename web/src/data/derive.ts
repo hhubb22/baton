@@ -163,6 +163,8 @@ export function threadView(
   }
   switch (thread.status) {
     case 'stopped':
+      if (thread.agent === null && thread.executionReason === 'completed')
+        return view({ tone: 'neutral', label: '已结束' }, 'idle', null, false)
       return view({ tone: 'danger', label: '已停止' }, 'attention', ...stoppedNotice(thread, name, agent, options))
     case 'unknown':
       return view(
