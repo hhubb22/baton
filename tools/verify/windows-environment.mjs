@@ -10,9 +10,17 @@ const home = await mkdtemp(join(tmpdir(), 'baton-windows-diagnostic-'))
 const executable = join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
 const query = `$p = Get-CimInstance Win32_Process -Filter 'ProcessId = ${process.pid}'; if ($null -ne $p) { $p.CreationDate.ToUniversalTime().Ticks.ToString([Globalization.CultureInfo]::InvariantCulture) }`
 
-async function probe(profile, explicit = false, systemPath = false, startupOnly = false, inherited = false) {
+async function probe(
+  profile,
+  explicit = false,
+  systemPath = false,
+  startupOnly = false,
+  inherited = false,
+  dotnet = false,
+) {
   const start = performance.now()
-  const source = `$ErrorActionPreference = 'Stop'; [Console]::Out.WriteLine('STARTED'); ${explicit ? "Import-Module (Join-Path $PSHOME 'Modules/CimCmdlets/CimCmdlets.psd1'); [Console]::Out.WriteLine('IMPORTED'); " : ''}${startupOnly ? '' : query}`
+  const dotnetQuery = `[Console]::Out.WriteLine([Diagnostics.Process]::GetProcessById(${process.pid}).StartTime.ToUniversalTime().Ticks.ToString([Globalization.CultureInfo]::InvariantCulture))`
+  const source = `$ErrorActionPreference = 'Stop'; [Console]::Out.WriteLine('STARTED'); ${explicit ? "Import-Module (Join-Path $PSHOME 'Modules/CimCmdlets/CimCmdlets.psd1'); [Console]::Out.WriteLine('IMPORTED'); " : ''}${startupOnly ? '' : dotnet ? dotnetQuery : query}`
   const args = ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(source, 'utf16le').toString('base64')]
   const child = spawn(executable, args, {
     env: {
@@ -48,6 +56,7 @@ async function probe(profile, explicit = false, systemPath = false, startupOnly 
       ...result,
       elapsedMs: Math.round(performance.now() - start),
       identityValid: /^\d+$/m.test(stdout),
+      identity: stdout.match(/^\d+$/m)?.[0],
       stages: ['STARTED', 'IMPORTED'].filter((stage) => stdout.includes(stage)),
       stderrCategories,
       stderr: stderr.replaceAll(home, '<temporary-home>').slice(0, 2000),
@@ -69,9 +78,25 @@ try {
     probe(profiles[4], false, true),
   ])
   const inherited = await probe(home, false, false, false, true)
+  const native = await probe(home, false, false, false, false, true)
+  const identityMatches = inherited.identity === native.identity && native.identityValid
+  delete inherited.identity
+  delete native.identity
   console.log(
     JSON.stringify(
-      { emptyPath: true, temporaryHome: true, cold, warm, explicit, concurrent, startup, systemPath, inherited },
+      {
+        emptyPath: true,
+        temporaryHome: true,
+        cold,
+        warm,
+        explicit,
+        concurrent,
+        startup,
+        systemPath,
+        inherited,
+        native,
+        identityMatches,
+      },
       null,
       2,
     ),
