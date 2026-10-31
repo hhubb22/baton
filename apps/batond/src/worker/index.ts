@@ -42,6 +42,7 @@ import { OutputBuffer } from './output.ts'
 import { itemId as displayItemId } from './items.ts'
 import { boundRunningSteps } from './running-steps.ts'
 import { boundReason, displayText, pendingResult } from './reports.ts'
+import { assistantOutputMessages, itemOutputParts, tokenUsageAttributes, userInputMessages } from '../genai.ts'
 import {
   openWorkerLedger,
   WorkerFailure,
@@ -162,11 +163,16 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
   const scope = yield* Scope.make()
   const clock = yield* Clock.Clock
   const tracer = yield* Tracer.Tracer
-  const turns = new Map<string, { span: Tracer.Span; started: number; output: boolean; usage: boolean }>()
+  const turns = new Map<
+    string,
+    { span: Tracer.Span; started: number; output: boolean; usage: boolean; parts: Record<string, unknown>[] }
+  >()
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => {
-      for (const { span } of turns.values()) {
+      for (const { span, parts } of turns.values()) {
         span.attribute('baton.turn.result', 'lost')
+        span.attribute('stop_reason', 'lost')
+        span.attribute('gen_ai.output.messages', assistantOutputMessages(parts, 'lost'))
         span.end(clock.currentTimeNanosUnsafe(), Exit.void)
       }
       turns.clear()
@@ -477,6 +483,10 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
             'baton.node.id': state.config?.node_id ?? '',
             'baton.command.action': 'message',
             'baton.turn.seq': message.turn,
+            'gen_ai.operation.name': 'chat',
+            'gen_ai.agent.name': state.config?.agent_type ?? '',
+            'gen_ai.conversation.id': state.config?.thread_id ?? '',
+            'gen_ai.input.messages': userInputMessages(message.input.text),
             ...(command ? { 'baton.command.id': command.receipt.command_id } : {}),
             ...(message.input.model ? { 'gen_ai.request.model': message.input.model } : {}),
           }
@@ -486,6 +496,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
             started,
             output: false,
             usage: false,
+            parts: [],
           }
           turns.set(message.input.id, turn)
         }
@@ -505,6 +516,9 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
                   ? 'stopped'
                   : 'unknown'
           turn.span.attribute('baton.turn.result', result)
+          turn.span.attribute('stop_reason', result)
+          turn.span.attribute('gen_ai.response.finish_reasons', [result])
+          turn.span.attribute('gen_ai.output.messages', assistantOutputMessages(turn.parts, result))
           if (result === 'failed') turn.span.attribute('baton.error.code', 'turn_failed')
           turn.span.attribute('baton.usage.reported', turn.usage)
           turn.span.end(clock.currentTimeNanosUnsafe(), result === 'failed' ? Exit.fail('turn_failed') : Exit.void)
@@ -617,7 +631,9 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
     const turn = turns.get(message.input.id)
     if (turn && !turn.output && event.text) {
       turn.output = true
-      turn.span.attribute('baton.turn.first_output_ms', Math.max(0, clock.currentTimeMillisUnsafe() - turn.started))
+      const elapsed = Math.max(0, clock.currentTimeMillisUnsafe() - turn.started)
+      turn.span.attribute('baton.turn.first_output_ms', elapsed)
+      turn.span.attribute('ttft_ms', elapsed)
     }
     if (!event.text && event.runningSteps !== undefined && !event.gap) return
     const replyId = event.replyId === undefined ? undefined : safeReplyId(event.replyId)
@@ -856,7 +872,9 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         const turn = turns.get(event.messageId)
         if (turn && !turn.output) {
           turn.output = true
-          turn.span.attribute('baton.turn.first_output_ms', Math.max(0, clock.currentTimeMillisUnsafe() - turn.started))
+          const elapsed = Math.max(0, clock.currentTimeMillisUnsafe() - turn.started)
+          turn.span.attribute('baton.turn.first_output_ms', elapsed)
+          turn.span.attribute('ttft_ms', elapsed)
         }
         if (event.truncated !== undefined || event.original_bytes !== undefined) {
           yield* withTraceSpan(Effect.void, 'baton.output', message.trace_context, {
@@ -874,18 +892,10 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       }
       if (event.type === 'end' && event.tokenUsage !== undefined) {
         const turn = turns.get(event.messageId)
-        if (turn && event.tokenUsage && typeof event.tokenUsage === 'object' && !Array.isArray(event.tokenUsage)) {
-          for (const [source, target] of [
-            ['inputTokens', 'gen_ai.usage.input_tokens'],
-            ['outputTokens', 'gen_ai.usage.output_tokens'],
-            ['cachedInputTokens', 'baton.usage.cached_input_tokens'],
-          ] as const) {
-            const value: unknown = Reflect.get(event.tokenUsage, source)
-            if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
-              turn.usage = true
-              turn.span.attribute(target, value)
-            }
-          }
+        if (turn) {
+          const attributes = tokenUsageAttributes(event.tokenUsage)
+          if (Object.keys(attributes).length) turn.usage = true
+          for (const [key, value] of Object.entries(attributes)) turn.span.attribute(key, value)
         }
       }
       if (event.type === 'end' && state.phase === 'unknown') {
@@ -1006,10 +1016,13 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         }
       })
       if (event.type === 'item') {
+        turns.get(event.messageId)?.parts.push(...itemOutputParts(event.item))
         const id = displayItemId(event.item.id)
         finishedSteps.add(id)
         liveSteps = liveSteps.filter((step) => step.item_id !== id)
       }
+      if (event.type === 'reply')
+        turns.get(event.messageId)?.parts.push({ type: 'text', content: displayText(event.text) })
       if (event.type === 'end' && state.phase === 'stopping' && stopEvidence)
         yield* Deferred.succeed(stopEvidence, undefined)
     })

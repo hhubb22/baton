@@ -4,6 +4,7 @@ import { runtimeModels } from './auth.js'
 import { embed, EmbeddingError } from './embeddings.js'
 import { RuntimeError, type RPC } from './protocol.js'
 import { providerUsage, type RuntimeTelemetry } from './usage.js'
+import { modelInputAttributes, modelOutputAttributes, streamUsageAttributes } from './genai.js'
 
 const Output = Schema.Struct({
   changes: Schema.Array(Schema.Record(Schema.String, Schema.Json)).check(Schema.isMaxLength(16)),
@@ -32,42 +33,46 @@ export async function runMemory(
     const model = models.getModel(boot.provider, boot.model)
     if (!model) throw new RuntimeError('model_not_found')
     calls++
+    const messages = [
+      { role: 'system' as const, content: instruction, timestamp: 0 },
+      { role: 'user' as const, content: JSON.stringify(content), timestamp: 0 },
+    ]
     const produce = async (annotate: (attributes: Record<string, unknown>) => void) => {
+      const started = performance.now()
+      let firstOutput = false
       const stream = models.streamSimple(
         model,
-        {
-          messages: [
-            { role: 'system', content: instruction, timestamp: 0 },
-            { role: 'user', content: JSON.stringify(content), timestamp: 0 },
-          ],
-        },
+        { messages },
         {
           maxTokens: Math.min(maxOutputTokens, model.maxTokens),
           maxRetries: 0,
           signal,
           onProviderStreamEvent: (event, providerModel) => {
             const usage = providerUsage(providerModel.api, event)
-            if (Object.keys(usage).length)
-              annotate({
-                'baton.usage.reported': true,
-                ...(usage.input === undefined ? {} : { 'gen_ai.usage.input_tokens': usage.input }),
-                ...(usage.output === undefined ? {} : { 'gen_ai.usage.output_tokens': usage.output }),
-                ...(usage.cached === undefined ? {} : { 'baton.usage.cached_input_tokens': usage.cached }),
-              })
+            if (Object.keys(usage).length) annotate(streamUsageAttributes(usage))
           },
         },
       )
-      for await (const _event of stream) {
-        /* 完整回复通过中心校验后才提交。 */
+      for await (const event of stream) {
+        if (!firstOutput && ['text_delta', 'thinking_delta', 'toolcall_delta'].includes(event.type)) {
+          firstOutput = true
+          annotate({ ttft_ms: Math.max(0, performance.now() - started) })
+        }
       }
-      return stream.result()
+      const response = await stream.result()
+      annotate(modelOutputAttributes(response))
+      return response
     }
     const response = telemetry
       ? await telemetry.span(
           `chat ${model.id}`,
           {
+            'gen_ai.operation.name': 'chat',
+            'gen_ai.agent.name': 'memory',
+            'gen_ai.conversation.id': boot.job_id,
             'gen_ai.provider.name': model.provider,
             'gen_ai.request.model': model.id,
+            ...modelInputAttributes(messages),
             'baton.usage.reported': false,
           },
           produce,
@@ -98,7 +103,10 @@ export async function runMemory(
         if (!entry || !pending.memory_embedding) break
         calls++
         try {
-          const computed = await embed(pending.memory_embedding, entry.text, signal)
+          const computed = await embed(pending.memory_embedding, entry.text, signal, telemetry, {
+            'gen_ai.agent.name': 'memory',
+            'gen_ai.conversation.id': boot.job_id,
+          })
           await rpc.call({
             operation: 'commit_embedding',
             payload: {

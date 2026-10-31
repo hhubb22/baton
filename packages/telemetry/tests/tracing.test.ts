@@ -3,6 +3,7 @@ import { Effect, Exit, Metric, Option, Tracer } from 'effect'
 import { expect, it, vi } from 'vite-plus/test'
 import * as Statement from 'effect/sql/Statement'
 import { BUILD } from '@baton/protocol/release.mjs'
+import { MaxMessageBytes } from '@baton/protocol/constants'
 import {
   captureTrace,
   decodeTrace,
@@ -12,6 +13,7 @@ import {
   tracePromise,
   withTraceSpan,
 } from '../src/index.ts'
+import { boundAttributeString } from '../src/genai.ts'
 
 it('continues W3C context and sampling across independent runtimes', async () => {
   const spans: Tracer.NativeSpan[] = []
@@ -92,6 +94,9 @@ it('exports to a local OTLP capture endpoint on scope release and redacts automa
                 attributes: {
                   'baton.usage.reported': true,
                   'gen_ai.usage.input_tokens': 0,
+                  'gen_ai.response.finish_reasons': ['completed'],
+                  'gen_ai.input.messages': JSON.stringify([{ role: 'user', parts: [] }]),
+                  'gen_ai.output.messages': JSON.stringify([{ role: 'assistant', parts: [] }]),
                 },
               })
               return yield* Effect.fail(error)
@@ -323,7 +328,7 @@ it('builds child environments from current configuration and preserves local val
       OTEL_EXPORTER_OTLP_ENDPOINT: 'http://127.0.0.1:1234',
       OTEL_EXPORTER_OTLP_HEADERS: 'authorization=local-token',
       BATON_TELEMETRY_LOCAL_RELAY: '1',
-      OTEL_BSP_MAX_EXPORT_BATCH_SIZE: '64',
+      OTEL_BSP_MAX_EXPORT_BATCH_SIZE: '8',
       OTEL_BLRP_MAX_EXPORT_BATCH_SIZE: '64',
     })
     process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://local.invalid'
@@ -340,7 +345,7 @@ it('builds child environments from current configuration and preserves local val
   }
 })
 
-it('drops oversized local relay batches before sending without pausing later exports', async () => {
+it('splits oversized local relay trace batches by encoded bytes without dropping large spans', async () => {
   const bodies: string[] = []
   const server = createServer((request, response) => {
     let body = ''
@@ -357,9 +362,12 @@ it('drops oversized local relay batches before sending without pausing later exp
   try {
     await Effect.runPromise(
       Effect.gen(function* () {
-        yield* withTraceSpan(Effect.void, 'baton.large', undefined, {
-          attributes: { 'gen_ai.request.model': 'x'.repeat(256 * 1024) },
-        })
+        for (let index = 0; index < 2; index++)
+          yield* withTraceSpan(Effect.void, 'baton.large', undefined, {
+            attributes: {
+              'gen_ai.output.messages': JSON.stringify([{ text: 'x'.repeat(900 * 1024) }]),
+            },
+          })
         yield* Effect.sleep('100 millis')
         yield* withTraceSpan(Effect.void, 'baton.small')
         yield* Effect.promise(() =>
@@ -370,17 +378,52 @@ it('drops oversized local relay batches before sending without pausing later exp
           telemetryLayer('batond', {
             OTEL_EXPORTER_OTLP_ENDPOINT: `http://127.0.0.1:${address.port}`,
             BATON_TELEMETRY_LOCAL_RELAY: '1',
-            OTEL_BSP_MAX_EXPORT_BATCH_SIZE: '1',
+            OTEL_BSP_MAX_EXPORT_BATCH_SIZE: '8',
             OTEL_BSP_SCHEDULE_DELAY: '30',
           }),
         ),
       ),
     )
-    expect(bodies.some((body) => body.includes('baton.large'))).toBe(false)
+    const large = bodies.filter((body) => body.includes('baton.large'))
+    expect(large).toHaveLength(2)
+    expect(large.every((body) => body.includes('x'.repeat(900 * 1024)))).toBe(true)
+    expect(bodies.every((body) => Buffer.byteLength(body) <= MaxMessageBytes - 1024)).toBe(true)
   } finally {
     server.closeAllConnections()
     await new Promise<void>((resolve) => server.close(() => resolve()))
   }
+})
+
+it('bounds GenAI content without splitting UTF-8 or JSON and keeps other strings at 256 bytes', () => {
+  const input = JSON.stringify([{ role: 'user', parts: [{ type: 'text', content: `前${'😀'.repeat(128 * 1024)}后` }] }])
+  const output = boundAttributeString('gen_ai.input.messages', input)
+  expect(Buffer.byteLength(output)).toBeLessThanOrEqual(128 * 1024)
+  expect(() => JSON.parse(output)).not.toThrow()
+  expect(output).not.toContain('�')
+  const instructions = boundAttributeString('gen_ai.system_instructions', `前${'😀'.repeat(128 * 1024)}后`)
+  expect(Buffer.byteLength(instructions)).toBeLessThanOrEqual(128 * 1024)
+  expect(instructions).not.toContain('�')
+  const largeOutput = boundAttributeString(
+    'gen_ai.output.messages',
+    JSON.stringify([{ text: `前${'😀'.repeat(1024 * 1024)}后` }]),
+  )
+  expect(Buffer.byteLength(largeOutput)).toBeLessThanOrEqual(1024 * 1024)
+  expect(largeOutput).not.toContain('�')
+  expect(() => JSON.parse(largeOutput)).not.toThrow()
+  const preserved = boundAttributeString(
+    'gen_ai.output.messages',
+    JSON.stringify([
+      {
+        role: 'assistant',
+        parts: [
+          { type: 'reasoning', content: 'x'.repeat(1024 * 1024) },
+          { type: 'text', content: 'final reply' },
+        ],
+      },
+    ]),
+  )
+  expect(JSON.parse(preserved)[0].parts.at(-1)).toEqual({ type: 'text', content: 'final reply' })
+  expect(Buffer.byteLength(boundAttributeString('gen_ai.request.model', '模'.repeat(200)))).toBeLessThanOrEqual(256)
 })
 
 it('shares export capacity and resumes after the pause across signals', async () => {

@@ -2,6 +2,7 @@ import { Schema } from 'effect'
 import { expect, it } from 'vite-plus/test'
 import {
   ControlToNodeBody,
+  MaxMessageBytes,
   NodeBody,
   NodeStatus,
   NodeToControlBody,
@@ -24,7 +25,7 @@ it('遥测消息只接受三种信号且受节点消息容量限制', () => {
   }
   expect(Schema.is(NodeToControlBody)({ type: 'telemetry.export', signal: 'other', payload: {} })).toBe(false)
   expect(
-    Schema.is(NodeToControlBody)({ type: 'telemetry.export', signal: 'logs', payload: 'x'.repeat(256 * 1024) }),
+    Schema.is(NodeToControlBody)({ type: 'telemetry.export', signal: 'logs', payload: 'x'.repeat(MaxMessageBytes) }),
   ).toBe(false)
 })
 

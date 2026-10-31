@@ -223,6 +223,9 @@ test('exports the center placement and real Project Runtime model call in one tr
     ).toHaveLength(1)
     expect(run.attributes).toContainEqual({ key: 'baton.project.id', value: { stringValue: created.body.id } })
     expect(run.attributes).toContainEqual({ key: 'baton.turn.result', value: { stringValue: 'failed' } })
+    expect(run.attributes).toContainEqual({ key: 'gen_ai.operation.name', value: { stringValue: 'invoke_agent' } })
+    expect(run.attributes).toContainEqual({ key: 'gen_ai.agent.name', value: { stringValue: 'project' } })
+    expect(run.attributes.some(({ key }) => key === 'gen_ai.request.model')).toBe(false)
     expect(run.attributes).toContainEqual({
       key: 'baton.error.code',
       value: { stringValue: 'model_output_truncated_tools' },
@@ -247,6 +250,18 @@ test('exports the center placement and real Project Runtime model call in one tr
     expect(chat).toBeDefined()
     expect(chat.attributes).toContainEqual({ key: 'gen_ai.provider.name', value: { stringValue: 'openai-codex' } })
     expect(chat.attributes).toContainEqual({ key: 'gen_ai.request.model', value: { stringValue: 'trace-model' } })
+    expect(chat.attributes).toContainEqual({ key: 'gen_ai.operation.name', value: { stringValue: 'chat' } })
+    expect(chat.attributes).toContainEqual({ key: 'gen_ai.agent.name', value: { stringValue: 'project' } })
+    for (const key of [
+      'gen_ai.system_instructions',
+      'gen_ai.input.messages',
+      'gen_ai.output.messages',
+      'gen_ai.response.model',
+      'gen_ai.response.finish_reasons',
+      'stop_reason',
+    ]) {
+      expect(chat.attributes.some((attribute) => attribute.key === key)).toBe(true)
+    }
     expect(chat.attributes).toContainEqual({ key: 'baton.usage.reported', value: { boolValue: false } })
     expect(
       chat.attributes.some(({ key }) => key === 'gen_ai.usage.input_tokens' || key === 'gen_ai.usage.output_tokens'),
@@ -263,6 +278,7 @@ test('exports the center placement and real Project Runtime model call in one tr
         key: 'baton.employee.id',
         value: { stringValue: identity.employee_id },
       })
+      expect(resource.attributes).toContainEqual({ key: 'user.id', value: { stringValue: identity.employee_id } })
     }
   } finally {
     controller.abort()

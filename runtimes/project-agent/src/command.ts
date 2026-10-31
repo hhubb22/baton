@@ -226,6 +226,9 @@ export async function runProjectRuntimeCLI(args: string[], options?: { models?: 
               'baton.project.run.id': process.env.BATON_PROJECT_RUN_ID ?? '',
               ...(boot.project_id ? { 'baton.project.id': boot.project_id } : {}),
               'baton.memory.job.id': boot.job_id,
+              'gen_ai.operation.name': 'invoke_agent',
+              'gen_ai.agent.name': 'memory',
+              'gen_ai.conversation.id': boot.job_id,
             },
           },
         ).pipe(
@@ -308,7 +311,9 @@ export async function runProjectRuntimeCLI(args: string[], options?: { models?: 
               'baton.project.run.id': process.env.BATON_PROJECT_RUN_ID ?? '',
               ...(boot.project_id ? { 'baton.project.id': boot.project_id } : {}),
               'baton.conversation.id': boot.project.conversation.id,
-              'gen_ai.request.model': boot.project.agent.model,
+              'gen_ai.operation.name': 'invoke_agent',
+              'gen_ai.agent.name': 'project',
+              'gen_ai.conversation.id': boot.project.conversation.id,
             },
           },
         ).pipe(

@@ -1,7 +1,7 @@
 export const ProtocolVersion = 1
 export const NodePath = '/v1/node'
 export const BrowserEventsPath = '/api/v1/events'
-export const MaxMessageBytes = 256 * 1024
+export const MaxMessageBytes = 2 * 1024 * 1024
 export const MaxQueueMessages = 32
 export const MaxQueueBytes = 1024 * 1024
 export const MaxRuntimeReportBytes = 64 * 1024

@@ -10,7 +10,7 @@ Basis: [Baton R-22、R-23](../baton/PRODUCT.md)；[发布 RL-A09](../release/PRO
 
 遥测后端的地址和 key 只在中心配置。设备和网页把数据发给自己已经连着的中心，由中心过滤后转发。安装包和网页构建产物只写入版本和提交，不包含遥测地址或 key。部署者不配置，就没有任何数据离开这套部署。
 
-一条员工消息对应一条完整的 trace：从网页发送开始，经过中心 HTTP、outbox、WSS、batond、认证 IPC、Worker、agent-host 和 provider，到回复报告回中心结束。Project Run 同样从中心放置开始，经过 batond，进入 Runtime 的模型调用和工具调用。每个 Turn 和每次 Run 有一个根 span，记录相关标识、结果与已报告用量，支持按版本、provider、系统和错误码查询。
+一条员工消息对应一条完整的 trace：从网页发送开始，经过中心 HTTP、outbox、WSS、batond、认证 IPC、Worker、agent-host 和 provider，到回复报告回中心结束。Project Run 同样从中心放置开始，经过 batond，进入 Runtime 的模型调用、工具调用和向量化调用。每个 Turn 和每次 Run 有一个根 span，默认按 OpenTelemetry GenAI（`>= 1.37`）语义约定完整记录 Agent 活动（系统指令、输入与输出消息、思考与计划过程、工具调用名称及输入输出、模型与 token 用量、首字耗时与结束原因），供 ClickStack `/llm` 直接展示完整会话抽屉、工具链路与成本分析，并支持按版本、provider、系统和错误码查询。
 
 默认不向后端导出。中心没有配置导出地址时，中心不发起连接，设备不向中心发送遥测，网页不加载导出器；设备进程可能向本机接收端发送后被丢弃。导出或转发失败、超时、达到并发上限时丢弃当前批次，不阻塞业务。
 
@@ -67,14 +67,21 @@ traces、普通 logs 和 metrics 共用 `packages/telemetry` 的字段白名单�
 
 | 键 | 内容 |
 |---|---|
-| `baton.employee.id` | 员工 ID，不带姓名、账号或邮箱 |
+| `baton.employee.id`、`user.id` | 员工 ID，不带姓名、账号或邮箱；中心转发时同步写入 `user.id` 供 ClickStack `/llm` 按用户归因 |
 | `baton.node.id`、`baton.thread.id`、`baton.turn.seq`、`baton.command.id`、`baton.command.action` | 现有标识 |
 | `baton.project.id`、`baton.project.run.id`、`baton.conversation.id` | Project 与 Run 标识 |
 | `baton.memory.job.id`、`baton.memory.attempt`、`baton.memory.batch` | 记忆任务标识；当前记录 job ID，attempt 与 batch 已列入白名单但尚未采集，其余记忆字段见记忆 TECH |
-| `baton.agent` | `codex`、`cursor`、`pi`、`kiro`、`shell`、`project` |
-| `gen_ai.provider.name`、`gen_ai.request.model` | provider 取 adapter 报告的值；模型 ID 原样记录，包括自定义或错误的 ID，未报告 provider 时省略 |
-| `gen_ai.usage.input_tokens`、`gen_ai.usage.output_tokens`、`baton.usage.cached_input_tokens` | 模型报告的用量；没有报告时不写这个键，不写 0 |
-| `baton.usage.reported` | `true` 或 `false`，用来区分用量缺失和用量为 0 |
+| `baton.agent` | `codex`、`cursor`、`pi`、`kiro`、`antigravity`、`shell`、`project` |
+| `gen_ai.operation.name` | `chat`、`invoke_agent`、`execute_tool`、`embeddings` |
+| `gen_ai.agent.name`、`gen_ai.conversation.id` | Agent 标识（`codex`、`cursor`、`pi`、`kiro`、`antigravity`、`project`、`memory`）与会话归组标识（Thread ID、Conversation ID 或 Memory Job ID） |
+| `gen_ai.provider.name`、`gen_ai.request.model`、`gen_ai.response.model` | provider 与请求/响应模型 ID 原样记录，包括自定义或错误的 ID；未报告 provider 时省略 |
+| `gen_ai.response.finish_reasons`、`stop_reason`、`ttft_ms` | 结束原因数组与单值（如 `completed`、`cancelled`、`failed`、`stop`、`toolUse`）及首字耗时毫秒数 |
+| `gen_ai.usage.input_tokens`、`gen_ai.usage.output_tokens`、`baton.usage.cached_input_tokens`、`gen_ai.usage.cache_read.input_tokens`、`gen_ai.usage.cache_creation_input_tokens`、`gen_ai.usage.reasoning.output_tokens` | 模型或 Embedding 报告的用量；未报告时不写对应键，不写 0 |
+| `baton.usage.reported` | `true` 或 `false`，用来区分用量缺失和用量为 0；为 `false` 时剥离全部 token 用量键 |
+| `gen_ai.tool.name`、`gen_ai.tool.call.id` | 工具或步骤名称（如 `command_execution`、`file_change`、具体 `dynamic_tool` 名称、`approval_request`、Project Agent 工具名）与调用 ID |
+| `gen_ai.system_instructions` | 模型调用的系统提示词文本，单字段上限 128 KiB |
+| `gen_ai.input.messages`、`gen_ai.output.messages` | OTel GenAI 1.37 消息数组 JSON 字符串，部件支持 `text`、`reasoning`、`tool_call`、`tool_call_response`；默认直接上报，输入上限 128 KiB，输出上限 1 MiB，以覆盖 OpenAI、Claude 的 128K token 输出及 JSON 包装 |
+| `gen_ai.tool.call.arguments`、`gen_ai.tool.call.result` | 工具调用参数与执行结果（命令与退出码/输出、文件改动 diff、MCP/动态工具输入输出、搜索结果、子任务与审批结果），默认直接上报，单字段上限 128 KiB |
 | `baton.error.code` | 协议和领域里已有的固定错误码，不用原始错误文本 |
 | `error.type` | 现有值 |
 | `baton.web.source.asset`、`code.line.number`、`code.column.number` | 异常对应当前构建主静态资源时，仅保留文件名与有界行列号；无法确认时省略 |
@@ -84,30 +91,31 @@ traces、普通 logs 和 metrics 共用 `packages/telemetry` 的字段白名单�
 | `baton.stop.result` | Worker 停止命令的 `stopped` 或 `unknown`；当前未采集 `already_finished` |
 | `baton.turn.result` | `completed`、`failed`、`stopped`、`lost`、`unknown` |
 | `baton.turn.first_output_ms` | 从 Worker 接收消息到 agent 首个输出的毫秒数 |
-| `baton.tool.kind` | `command`、`file_change`、`mcp`、`web`、`other`；执行 Agent 的工具名不导出 |
+| `baton.tool.kind` | `command`、`file_change`、`file_search`、`mcp`、`web`、`subagent`、`other` |
 | `baton.project.tool` | Project Runtime 工具名，取自 `runtimes/project-agent/src/tools.ts` 的定义集合 |
 | `baton.output.truncated`、`baton.output.bytes` | Agent 报告输出元数据时的截断标记和原始大小；缺少上游报告时省略 |
 
-消息、回复、过程项正文、命令和命令输出、文件路径、工作目录、记忆和证据正文、查询全文、URL、凭据、原始错误信息和堆栈，都不进 span、事件、日志正文或指标标签。日志正文只用固定的事件名，例如 `baton.wait.start`，变化的内容写进白名单属性。
+Agent 的系统提示词、输入消息、思考与计划步骤、工具参数与结果默认通过 `gen_ai.*` 属性上报，每个大文本属性限制在 128 KiB UTF-8 字节以内，输出消息限制在 1 MiB；超出时在完整字符边界截断并保持合法 JSON 结构，输出截断优先删除较早的部件以保留最终回复。密码、令牌、密钥等凭据、员工姓名/邮箱/IP、网页未捕获异常的原始错误信息和堆栈，都不进 span、事件、日志正文或指标标签。普通日志正文只用固定的事件名，例如 `baton.wait.start`，变化的内容写进白名单属性。
 
 ## 4. span
 
-已有的 HTTP、数据库和 `Effect.fn` span 保留。每类工作增加一个根 span，下面挂少量子 span：
+已有的 HTTP、数据库和 `Effect.fn` span 保留。每类工作增加一个根 span，下面挂子 span：
 
 | span | 进程 | 说明 |
 |---|---|---|
-| `baton.turn` | Worker | 从接收消息到回合终态。带 `baton.turn.result`、`baton.turn.first_output_ms`、用量和错误码 |
-| `baton.agent.session` | agent-host | provider 会话的启动或恢复，带 `baton.recovery` |
-| `baton.agent.turn` | agent-host | provider 的一轮执行 |
-| `baton.agent.tool` | agent-host | 一次工具调用，带 `baton.tool.kind` |
-| `baton.agent.approval` | agent-host | 等待审批的时长 |
-| `baton.project.run` | Project Runtime | 一次 Run 从 bootstrap 到结束 |
-| `gen_ai.chat` | Project Runtime | 一次模型调用。span 名按语义约定写成 `chat {model}`，带 provider、模型和用量 |
-| `baton.project.tool` | Project Runtime | 一次工具调用 |
-| `baton.project.compaction` | Project Runtime | 一次压缩 |
+| `baton.turn` | Worker | 从接收消息到回合终态。带 `gen_ai.operation.name = chat`、`gen_ai.agent.name`、`gen_ai.conversation.id`、`gen_ai.input.messages`、`gen_ai.output.messages`（含思考、工具摘要与回复）、`baton.turn.result`、`baton.turn.first_output_ms`、`ttft_ms`、`stop_reason`、用量和错误码 |
+| `baton.agent.session` | agent-host | provider 会话的启动或恢复，带 `baton.recovery`、`gen_ai.agent.name`、`gen_ai.conversation.id` |
+| `baton.agent.turn` | agent-host | provider 的一轮执行，带 `gen_ai.operation.name = invoke_agent`、`gen_ai.agent.name`、`gen_ai.conversation.id`（不重复写 `gen_ai.request.model` 与 token 用量，避免被统计为两次模型调用） |
+| `baton.agent.tool` | agent-host | 一次工具或子任务调用（覆盖 `command_execution`、`file_change`、`dynamic_tool`、`file_search`、`web_search`、`subagent`），带 `gen_ai.operation.name = execute_tool`、`baton.tool.kind`、`gen_ai.tool.name`、`gen_ai.tool.call.id`、`gen_ai.tool.call.arguments`、`gen_ai.tool.call.result` |
+| `baton.agent.approval` | agent-host | 等待审批或用户回答的时长（覆盖 `approval_request` 与 `user_input_request`），带 `gen_ai.operation.name = execute_tool`、`gen_ai.tool.name`、`gen_ai.tool.call.id`、`gen_ai.tool.call.arguments`、`gen_ai.tool.call.result` |
+| `baton.project.run` | Project Runtime | 一次前台 Run 或后台记忆整理从 bootstrap 到结束，带 `gen_ai.operation.name = invoke_agent`、`gen_ai.agent.name`（`project` / `memory`）、`gen_ai.conversation.id` |
+| `gen_ai.chat` | Project Runtime | 一次模型调用（含主对话、上下文压缩与后台记忆整理）。span 名按语义约定写成 `chat {model}`，带 `gen_ai.operation.name = chat`、provider、请求/响应模型、系统指令、输入与输出消息（含 `thinking` 与 `toolCall`）、`ttft_ms`、`stop_reason` 和用量 |
+| `baton.project.tool` | Project Runtime | 一次工具调用，带 `gen_ai.operation.name = execute_tool`、`baton.project.tool`、`gen_ai.tool.name`、`gen_ai.tool.call.id`、`gen_ai.tool.call.arguments`、`gen_ai.tool.call.result` |
+| `baton.project.compaction` | Project Runtime | 一次上下文压缩 |
+| `gen_ai.embeddings` | Project Runtime | 一次向量化调用（记忆条目向量生成与 `memory.recall` 查询向量生成）。span 名写成 `embeddings {model}`，带 `gen_ai.operation.name = embeddings`、`gen_ai.provider.name = openai`、`gen_ai.request.model`、`gen_ai.input.messages` 与 `gen_ai.usage.input_tokens` |
 | `baton.report` | batond | 一批报告从提交到收到中心回执 |
 
-Project Runtime 的 `gen_ai.*` span 也能被只认生成式 AI 语义约定的平台识别，例如 PostHog 的 LLM 分析，以后接入不需要再改埋点。
+Session Agent 与 Project Runtime 的 `gen_ai.*` span 直接对齐 ClickStack `/llm`（OTel GenAI `>= 1.37`）与兼容 GenAI 语义约定的观测平台。
 
 ## 5. 等待与积压
 
@@ -147,7 +155,7 @@ Project Runtime 的 `gen_ai.*` span 也能被只认生成式 AI 语义约定的�
 转发前，中心解码 OTLP JSON；网页回放还接受 gzip 压缩的 OTLP protobuf，压缩请求和解压结果各限 1 MiB。中心再做三件事：
 
 1. 按第 3 节的白名单过滤。回放记录按第 7 节的受限结构校验，不符合的整条丢弃。
-2. 设备数据的 `baton.node.id` 和 `baton.employee.id` 改成该连接认证出的身份，网页数据的 `baton.employee.id` 改成会话身份，网页数据不带 `baton.node.id`。`service.name` 不在第 3 节列出的集合里时，整批丢弃。
+2. 设备数据的 `baton.node.id`、`baton.employee.id` 和 `user.id` 改成该连接认证出的身份，网页数据的 `baton.employee.id` 和 `user.id` 改成会话身份，网页数据不带 `baton.node.id`。`service.name` 不在第 3 节列出的集合里时，整批丢弃。
 3. 重新编码后发给后端。
 
 转发使用独立的导出客户端，和中心自身导出的名额分开，避免设备流量挤掉中心数据。转发最多 4 个并发请求，单次最长三秒；超时、失败或名额用满时丢弃当前批次，失败后暂停六十秒。转发不落库、不重试，也不给发送方回执。
@@ -156,7 +164,7 @@ Project Runtime 的 `gen_ai.*` span 也能被只认生成式 AI 语义约定的�
 
 batond 在本机启动一个 OTLP/HTTP 接收端，只监听 `127.0.0.1` 的随机端口，并要求带上每次启动随机生成的令牌。batond 通过现有的环境变量继承路径，把这个地址和令牌交给 Worker、agent-host 和 Runtime。令牌不写进账本、日志或命令行。
 
-batond 自己的数据和本机接收到的数据，在中心下发 `forward: true` 期间，打包成节点消息 `telemetry.export` 经 WSS 发给中心。消息体为 `{ type, signal, payload }`，`signal` 取 `traces`、`logs`、`metrics`，单条不超过 `MaxMessageBytes`，子进程导出的批次大小按这个上限设置，超过上限的批次丢弃。`telemetry.export` 的优先级最低：节点发送队列有积压、连接断开或没有收到 `forward: true` 时直接丢弃，不进账本、不重发。
+batond 自己的数据和本机接收到的数据，在中心下发 `forward: true` 期间，打包成节点消息 `telemetry.export` 经 WSS 发给中心。消息体为 `{ type, signal, payload }`，`signal` 取 `traces`、`logs`、`metrics`，单条不超过 `MaxMessageBytes`（2 MiB）。子进程向本机接收端导出时默认将 `OTEL_BSP_MAX_EXPORT_BATCH_SIZE` 设为 `8`；序列化结果超过约 1.5 MiB 时按 span 边界拆成多个请求，保持资源与 scope 属性，不拆分 span，日常小批次不重新编码。超过 `MaxMessageBytes` 的单个 span 和其他信号的超大批次直接丢弃。`telemetry.export` 的优先级最低：节点发送队列有积压、连接断开或没有收到 `forward: true` 时直接丢弃，不进账本、不重发。
 
 设备本地设置了 `OTEL_EXPORTER_OTLP_*` 时，batond 和子进程采用本地配置，不经过中心，也不启动本机接收端；本地没有地址时不导出。这种方式用于单机排查，或者在中心不可用时观察设备。daemon 重启后，仍存活的旧 Worker 继续使用旧随机端口和令牌，无法通过新 daemon 转发，直到该 Worker 重启。
 
@@ -197,7 +205,8 @@ batond 自己的数据和本机接收到的数据，在中心下发 `forward: tr
 | Turn 完成率 | `baton.turn` 里 `baton.turn.result = completed` 的比例，分组同上 |
 | 断线恢复耗时 | `baton.wait.end` 里 `baton.wait.reason = device_offline` 的等待毫秒数 |
 | 投递积压 | `baton.outbox.oldest_age_s`、`baton.reports.oldest_age_s` |
-| Project Run 失败率与成本 | `baton.project.run` 的结果分布；`gen_ai.chat` 的用量按 `gen_ai.request.model` 求和，`baton.usage.reported = false` 的单独计数 |
+| Project Run 失败率与成本 | `baton.project.run` 的结果分布；`gen_ai.chat` 与 `gen_ai.embeddings` 的用量按 `gen_ai.request.model` 求和，`baton.usage.reported = false` 的单独计数 |
+| LLM 会话与工具链审查 | ClickStack `/llm` 按 `gen_ai.conversation.id`、`gen_ai.agent.name`、`user.id` 聚合会话，在 Session 抽屉中查看完整提示词、思考过程、工具调用参数与结果及模型回复 |
 | 版本对比 | 上面每一项按 `service.version` 分组，比较发布前后；Worker 与 batond 版本不同的 trace 单独筛出 |
 | 慢查询 | 现有数据库 span 的耗时和 `db.client.connection.wait_time_ms` |
 
@@ -221,8 +230,8 @@ ClickStack 自带 MCP server，Claude Code、Codex 可以直接查 logs、traces
 
 | 需求 | 设置与观察 | 失败条件 | 位置 |
 |---|---|---|---|
-| R-22、R-23 | 向 span 属性、事件、日志正文、日志属性、指标标签、资源属性和错误详情注入正文、路径、凭据标记 | 任何标记出现在序列化后的 OTLP 数据里 | `packages/telemetry/tests/tracing.test.ts` 已通过 |
-| R-23 | 一条消息从中心 HTTP 进入，经 Worker 和 agent-host 回放替身完成；一次 Project Run 经 Runtime 本地模型替身完成。用本地 OTLP 接收替身收集数据 | 链路上的 span 不属于同一 trace；`baton.turn` 缺少必填字段；模型未报告用量时写成 0 | `e2e/src/provider-agents.integration.test.ts`、`e2e/src/project-telemetry.integration.test.ts` 已通过 |
+| R-22、R-23 | 向白名单外的自定义属性、事件、日志正文、日志属性、指标标签、资源属性和错误详情注入敏感标记；向 `gen_ai.*` 写入超过 128 KiB 的消息与工具结果及超过 1 MiB 的输出 | 白名单外标记出现在序列化后的 OTLP 数据里；字段未按各自预算截断、破坏 JSON 结构或丢失可保留的最终回复 | `packages/telemetry/tests/tracing.test.ts` 已通过 |
+| R-23 | 一条消息从中心 HTTP 进入，经 Worker 和 agent-host 回放替身完成；一次 Project Run 经 Runtime 本地模型替身完成。用本地 OTLP 接收替身收集数据 | 链路上的 span 不属于同一 trace；`baton.turn`、`baton.agent.tool`、`chat {model}`、`baton.project.tool`、`embeddings {model}` 缺少必填 `gen_ai.*` 活动或元数据字段；模型未报告用量时写成 0 | `e2e/src/provider-agents.integration.test.ts`、`e2e/src/project-telemetry.integration.test.ts` 已通过 |
 | R-23、RL-A09 | 两个构建版本的 batond 和 Worker 同时运行，产生等待、失败、停止和恢复 | 资源属性的版本不是该进程实际运行的版本 | 待手工验证 |
 | R-23 | 导出端不响应、返回错误、超过并发上限 | 业务结果改变，或关闭等待超过上限 | `packages/telemetry/tests/tracing.test.ts` 已通过 |
 | R-23 | 节点收到或没收到 `forward: true`；同时有本地 `OTEL_*` 环境变量；连接断开；发送队列有积压；批次超过 `MaxMessageBytes` | 没有 `forward: true` 时仍发送；本地配置被覆盖；遥测进入账本、被重发或延迟业务消息 | `apps/batond/src/daemon/{reconnect,transport,telemetry-relay,cli}.test.ts`、`packages/telemetry/tests/tracing.test.ts` 已通过 |

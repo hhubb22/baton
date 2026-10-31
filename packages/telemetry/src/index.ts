@@ -4,6 +4,7 @@ import {
   Headers,
   HttpClient,
   HttpClientError,
+  HttpClientRequest,
   HttpClientResponse,
   HttpTraceContext,
 } from 'effect/http'
@@ -14,9 +15,11 @@ import type { TraceData } from 'effect/observability/OtlpTracer'
 import type { KeyValue } from 'effect/observability/OtlpResource'
 import { TraceContext } from '@baton/protocol/trace'
 import * as Statement from 'effect/sql/Statement'
-import { safeAttributes } from './attributes.js'
+import { safeAttributes, tokenUsageAttributes } from './attributes.js'
+import { boundAttributeString } from './genai.js'
 import { metricNames, metricValues } from './metrics.js'
 import { otlpTimeout, otlpTimeouts } from './otlp-config.js'
+import { splitLocalTraceBatch } from './batch.js'
 
 export type { TraceContext } from '@baton/protocol/trace'
 
@@ -107,13 +110,19 @@ export const tracePromise = async <A>(
 }
 
 /** Keep native spans and timings; redact payload-derived attributes, events and error details at export. */
+const boundAttribute = ({ key, value }: KeyValue): KeyValue => ({
+  key,
+  value: typeof value.stringValue === 'string' ? { stringValue: boundAttributeString(key, value.stringValue) } : value,
+})
 const safeResource = (attributes: KeyValue[], nodeId?: string) =>
-  attributes.filter(
-    ({ key, value }) =>
-      safeAttributes.has(key) &&
-      key !== 'rum.sessionId' &&
-      (key !== 'baton.node.id' || (nodeId !== undefined && value.stringValue === nodeId)),
-  )
+  attributes
+    .filter(
+      ({ key, value }) =>
+        safeAttributes.has(key) &&
+        key !== 'rum.sessionId' &&
+        (key !== 'baton.node.id' || (nodeId !== undefined && value.stringValue === nodeId)),
+    )
+    .map(boundAttribute)
 const redact = (data: TraceData, nodeId?: string): TraceData => {
   for (const resource of data.resourceSpans) {
     resource.resource.attributes = safeResource(resource.resource.attributes, nodeId)
@@ -128,13 +137,9 @@ const redact = (data: TraceData, nodeId?: string): TraceData => {
               ({ key }) =>
                 !span.attributes.some(
                   (attribute) => attribute.key === 'baton.usage.reported' && attribute.value.boolValue === false,
-                ) ||
-                ![
-                  'gen_ai.usage.input_tokens',
-                  'gen_ai.usage.output_tokens',
-                  'baton.usage.cached_input_tokens',
-                ].includes(key),
-            ),
+                ) || !tokenUsageAttributes.includes(key),
+            )
+            .map(boundAttribute),
           events: span.events
             .filter((event) =>
               [
@@ -173,9 +178,9 @@ const privateSerialization = (nodeId?: string) =>
                   )
                   .map((record) => ({
                     ...record,
-                    attributes: record.attributes.filter(
-                      ({ key }) => safeAttributes.has(key) && key !== 'rum.sessionId',
-                    ),
+                    attributes: record.attributes
+                      .filter(({ key }) => safeAttributes.has(key) && key !== 'rum.sessionId')
+                      .map(boundAttribute),
                   }))
             }
           }
@@ -229,7 +234,7 @@ export const telemetryEnvironment = (local?: LocalTelemetry): Record<string, str
     OTEL_EXPORTER_OTLP_HEADERS: local.headers,
     BATON_TELEMETRY_LOCAL_RELAY: '1',
     OTEL_BSP_MAX_EXPORT_BATCH_SIZE: String(
-      Math.max(1, Math.floor(Math.min(64, Number(process.env.OTEL_BSP_MAX_EXPORT_BATCH_SIZE) || 64))),
+      Math.max(1, Math.floor(Math.min(8, Number(process.env.OTEL_BSP_MAX_EXPORT_BATCH_SIZE) || 8))),
     ),
     OTEL_BLRP_MAX_EXPORT_BATCH_SIZE: String(
       Math.max(1, Math.floor(Math.min(64, Number(process.env.OTEL_BLRP_MAX_EXPORT_BATCH_SIZE) || 64))),
@@ -252,23 +257,31 @@ const exportClient = (timeouts: Record<string, number>, localRelay: boolean) =>
             clock.currentTimeMillisUnsafe() < suspendedUntil
               ? Effect.die(new Error('OTLP export paused'))
               : Effect.flatMap(request, (original) => {
-                  if (
-                    localRelay &&
-                    original.body._tag === 'Uint8Array' &&
-                    original.body.body.byteLength > MaxMessageBytes - 1024
-                  )
-                    return Effect.succeed(HttpClientResponse.fromWeb(original, new Response(null, { status: 200 })))
-                  return Effect.scoped(
-                    scoped.postprocess(Effect.succeed(original)).pipe(
-                      Effect.tap((result) => result.arrayBuffer),
-                      Effect.flatMap((result) =>
-                        result.status >= 200 && result.status < 300
-                          ? Effect.succeed(result)
-                          : Effect.die(new Error('OTLP export failed')),
+                  let requests = [original]
+                  if (localRelay && original.body._tag === 'Uint8Array') {
+                    if (original.url.endsWith('/v1/traces')) {
+                      requests = splitLocalTraceBatch(original.body.body, MaxMessageBytes - 1024).map((body) =>
+                        HttpClientRequest.bodyUint8Array(original, body, 'application/json'),
+                      )
+                    } else if (original.body.body.byteLength > MaxMessageBytes - 1024) requests = []
+                  }
+                  const send = (request: HttpClientRequest.HttpClientRequest) =>
+                    Effect.scoped(
+                      scoped.postprocess(Effect.succeed(request)).pipe(
+                        Effect.tap((result) => result.arrayBuffer),
+                        Effect.flatMap((result) =>
+                          result.status >= 200 && result.status < 300
+                            ? Effect.succeed(result)
+                            : Effect.die(new Error('OTLP export failed')),
+                        ),
+                        Effect.catch(() => Effect.die(new Error('OTLP export failed'))),
                       ),
-                      Effect.catch(() => Effect.die(new Error('OTLP export failed'))),
+                    )
+                  return Effect.forEach(requests, send).pipe(
+                    Effect.map(
+                      (responses) =>
+                        responses.at(-1) ?? HttpClientResponse.fromWeb(original, new Response(null, { status: 200 })),
                     ),
-                  ).pipe(
                     Effect.timeout(timeouts[original.url] ?? 3000),
                     // The exporter catches defects and backs off; stalled or excess batches are not queued for retry.
                     Effect.catchTag('TimeoutError', () => Effect.die(new Error('OTLP export request timed out'))),

@@ -76,6 +76,7 @@ export async function setupDaemon(cleanup: Array<() => Promise<unknown>>) {
                 OTEL_BLRP_SCHEDULE_DELAY: '30',
                 OTEL_METRIC_EXPORT_INTERVAL: '300',
                 ...telemetryEnvironment(options.telemetryRelay),
+                OTEL_BSP_MAX_EXPORT_BATCH_SIZE: '64',
               }),
             ),
           )

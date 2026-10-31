@@ -1,5 +1,6 @@
 import { afterEach, expect, it } from 'vite-plus/test'
 import { startTelemetryRelay } from './telemetry-relay.ts'
+import { MaxMessageBytes } from '@baton/protocol'
 
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => {
@@ -21,7 +22,7 @@ it('accepts only the per-process token and drops oversized or disconnected batch
   relay.send = (signal, payload) => received.push({ signal, payload })
   expect((await post('{"resourceSpans":[]}')).status).toBe(200)
   expect(received).toEqual([{ signal: 'traces', payload: { resourceSpans: [] } }])
-  expect((await post(JSON.stringify({ value: 'x'.repeat(256 * 1024) }))).status).toBe(413)
+  expect((await post(JSON.stringify({ value: 'x'.repeat(MaxMessageBytes) }))).status).toBe(413)
   relay.send = undefined
   expect((await post('{}')).status).toBe(200)
   expect(received).toHaveLength(1)

@@ -3,7 +3,14 @@ import type { IncomingMessage, Server } from 'node:http'
 import { Effect, Predicate, Schema, Tracer } from 'effect'
 import { captureTrace, withTraceSpan } from '@baton/telemetry'
 import { WebSocket, WebSocketServer, type RawData } from 'ws'
-import { AuthFrame, BrowserSubscription, Envelope, NodeToControlBody, TelemetryExport } from '@baton/protocol'
+import {
+  AuthFrame,
+  BrowserSubscription,
+  Envelope,
+  MaxMessageBytes,
+  NodeToControlBody,
+  TelemetryExport,
+} from '@baton/protocol'
 import type {
   BrowserEvent,
   SessionResult,
@@ -152,7 +159,7 @@ export class Gateway {
   private readonly sockets = new Set<WebSocket>()
   private readonly retiring = new Map<string, { source: NodeSource; due: number; attempts: number }>()
   private retiringActive = false
-  private readonly wss = new WebSocketServer({ noServer: true, maxPayload: 256 * 1024, perMessageDeflate: false })
+  private readonly wss = new WebSocketServer({ noServer: true, maxPayload: MaxMessageBytes, perMessageDeflate: false })
   private readonly maintenance: ReturnType<typeof setInterval>
   private handshakes = 0
   private closed = false

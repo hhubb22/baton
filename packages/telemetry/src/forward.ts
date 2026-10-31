@@ -1,5 +1,6 @@
 import { Schema } from 'effect'
-import { safeAttributes } from './attributes.js'
+import { safeAttributes, tokenUsageAttributes } from './attributes.js'
+import { boundAttributeString } from './genai.js'
 import { metricNames, metricValues as metricLabels } from './metrics.js'
 import { sanitizeReplay } from './replay.js'
 
@@ -30,9 +31,17 @@ const scalar = (key: string, value: unknown, metric: boolean): unknown => {
       : undefined
   if (typeof value.stringValue === 'string') {
     if (key === 'rum.sessionId' && !/^[0-9a-f]{32}$/i.test(value.stringValue)) return undefined
-    return { stringValue: value.stringValue }
+    return { stringValue: boundAttributeString(key, value.stringValue) }
   }
   if (typeof value.boolValue === 'boolean') return { boolValue: value.boolValue }
+  if (isRecord(value.arrayValue) && Array.isArray(value.arrayValue.values)) {
+    const values = value.arrayValue.values.flatMap((entry) =>
+      isRecord(entry) && typeof entry.stringValue === 'string'
+        ? [{ stringValue: boundAttributeString(key, entry.stringValue) }]
+        : [],
+    )
+    return { arrayValue: { values } }
+  }
   if (numberValue(value.intValue)) return { intValue: value.intValue }
   if (typeof value.doubleValue === 'number' && Number.isFinite(value.doubleValue))
     return { doubleValue: value.doubleValue }
@@ -41,13 +50,20 @@ const scalar = (key: string, value: unknown, metric: boolean): unknown => {
 const attributes = (input: unknown, identity: ForwardIdentity, metric = false) => {
   const out = records(input).flatMap((attribute) => {
     const key = attribute.key
-    if (typeof key !== 'string' || !safeAttributes.has(key) || key === 'baton.employee.id' || key === 'baton.node.id')
+    if (
+      typeof key !== 'string' ||
+      !safeAttributes.has(key) ||
+      key === 'baton.employee.id' ||
+      key === 'user.id' ||
+      key === 'baton.node.id'
+    )
       return []
     const value = scalar(key, attribute.value, metric)
     return value ? [{ key, value }] : []
   })
   if (!metric) {
     out.push({ key: 'baton.employee.id', value: { stringValue: identity.employeeId } })
+    out.push({ key: 'user.id', value: { stringValue: identity.employeeId } })
     if (identity.nodeId) out.push({ key: 'baton.node.id', value: { stringValue: identity.nodeId } })
   }
   return out
@@ -126,6 +142,7 @@ const replayRecords = (input: unknown, identity: ForwardIdentity) => {
         { key: 'rr-web.chunk', value: { intValue: String(part.chunk) } },
         { key: 'rr-web.total-chunks', value: { intValue: String(part.total) } },
         { key: 'baton.employee.id', value: { stringValue: identity.employeeId } },
+        { key: 'user.id', value: { stringValue: identity.employeeId } },
       ],
     }))
   })
@@ -189,14 +206,7 @@ export function filterForward(
                 )
               ) {
                 for (let index = attrs.length - 1; index >= 0; index--) {
-                  if (
-                    [
-                      'gen_ai.usage.input_tokens',
-                      'gen_ai.usage.output_tokens',
-                      'baton.usage.cached_input_tokens',
-                    ].includes(attrs[index]!.key)
-                  )
-                    attrs.splice(index, 1)
+                  if (tokenUsageAttributes.includes(attrs[index]!.key)) attrs.splice(index, 1)
                 }
               }
               const status =

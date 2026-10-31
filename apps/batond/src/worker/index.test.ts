@@ -267,7 +267,13 @@ describe('reliable Worker', () => {
           ...delta(input.client_message_id!, ''),
           type: 'end',
           outcome: 'completed',
-          tokenUsage: { inputTokens: 0, outputTokens: 3 },
+          tokenUsage: {
+            inputTokens: 0,
+            outputTokens: 3,
+            cachedInputTokens: 2,
+            cacheCreationTokens: 1,
+            reasoningTokens: 1,
+          },
         })
         yield* until(reports(worker), (items) => items.some((item) => item.kind === 'turn.ended'))
         expect(turn.status._tag).toBe('Ended')
@@ -276,6 +282,19 @@ describe('reliable Worker', () => {
         expect(turn.attributes.get('baton.turn.first_output_ms')).toEqual(expect.any(Number))
         expect(turn.attributes.get('baton.usage.reported')).toBe(true)
         expect(turn.attributes.get('gen_ai.usage.input_tokens')).toBe(0)
+        expect(turn.attributes.get('gen_ai.usage.cache_read.input_tokens')).toBe(2)
+        expect(turn.attributes.get('gen_ai.usage.cache_creation_input_tokens')).toBe(1)
+        expect(turn.attributes.get('gen_ai.usage.reasoning.output_tokens')).toBe(1)
+        expect(turn.attributes.get('gen_ai.operation.name')).toBe('chat')
+        expect(turn.attributes.get('gen_ai.agent.name')).toBe(cfg.agent_type)
+        expect(turn.attributes.get('gen_ai.conversation.id')).toBe(cfg.thread_id)
+        expect(turn.attributes.get('ttft_ms')).toEqual(expect.any(Number))
+        expect(JSON.parse(String(turn.attributes.get('gen_ai.input.messages')))).toEqual([
+          { role: 'user', parts: [{ type: 'text', content: input.payload }] },
+        ])
+        expect(JSON.parse(String(turn.attributes.get('gen_ai.output.messages')))).toEqual([
+          { role: 'assistant', parts: [{ type: 'text', content: reply.text }], finish_reason: 'completed' },
+        ])
         const output = spans.find((span) => span.name === 'baton.output')!
         expect(output.attributes.get('baton.output.truncated')).toBe(true)
         expect(output.attributes.get('baton.output.bytes')).toBe(512)

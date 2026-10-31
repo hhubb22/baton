@@ -28,6 +28,7 @@ import {
 
 import { queryEmbedding } from './embeddings.js'
 import { providerUsage, type RuntimeTelemetry } from './usage.js'
+import { modelInputAttributes, modelOutputAttributes, streamUsageAttributes } from './genai.js'
 export { modelMessages } from './context.js'
 
 export const IDLE_MS = 180_000
@@ -102,7 +103,10 @@ export class ProjectRuntime {
     const relatedTokens = Math.min(settings.related_tokens, Math.max(0, available - coreTokens))
     const inputSeq = this.events.findLast((e) => e.kind === 'input')?.seq ?? this.boot.input_seq
     const embedding = this.boot.project.memory_embedding
-      ? await queryEmbedding(this.rpc, this.seq, inputSeq, undefined, signal)
+      ? await queryEmbedding(this.rpc, this.seq, inputSeq, undefined, signal, this.telemetry, {
+          'gen_ai.agent.name': 'project',
+          'gen_ai.conversation.id': this.boot.project.conversation.id,
+        })
       : {}
     this.memoryContext = await this.rpc.call({
       operation: 'prepare_context',
@@ -118,6 +122,17 @@ export class ProjectRuntime {
       },
     })
     return [...modelMessages(this.boot, this.events, this.memoryContext), ...suffix]
+  }
+  private chatAttributes(model: { provider: string; id: string }, messages: Message[]) {
+    return {
+      'gen_ai.operation.name': 'chat',
+      'gen_ai.agent.name': 'project',
+      'gen_ai.conversation.id': this.boot.project.conversation.id,
+      'gen_ai.provider.name': model.provider,
+      'gen_ai.request.model': model.id,
+      ...modelInputAttributes(messages),
+      'baton.usage.reported': false,
+    }
   }
   private takeModelCall() {
     if (this.modelCalls >= this.budget.maxModelCalls) throw new RuntimeError('model_call_budget_exhausted')
@@ -266,12 +281,10 @@ export class ProjectRuntime {
         ]
         const response = await this.traced(
           `chat ${model.id}`,
-          {
-            'gen_ai.provider.name': model.provider,
-            'gen_ai.request.model': model.id,
-            'baton.usage.reported': false,
-          },
+          this.chatAttributes(model, summaryMessages),
           async (annotate) => {
+            const started = this.timer.now()
+            let firstOutput = false
             const stream = this.models.streamSimple(model, modelContext({ messages: summaryMessages }), {
               maxTokens: Math.min(this.budget.maxOutputTokens, model.maxTokens, available),
               maxRetries: 0,
@@ -279,20 +292,19 @@ export class ProjectRuntime {
               toolChoice: 'none',
               onProviderStreamEvent: (event, providerModel) => {
                 const usage = providerUsage(providerModel.api, event)
-                if (Object.keys(usage).length)
-                  annotate({
-                    'baton.usage.reported': true,
-                    ...(usage.input === undefined ? {} : { 'gen_ai.usage.input_tokens': usage.input }),
-                    ...(usage.output === undefined ? {} : { 'gen_ai.usage.output_tokens': usage.output }),
-                    ...(usage.cached === undefined ? {} : { 'baton.usage.cached_input_tokens': usage.cached }),
-                  })
+                if (Object.keys(usage).length) annotate(streamUsageAttributes(usage))
               },
               ...(signal ? { signal } : {}),
             })
-            for await (const _ of stream) {
-              /* 等待完整摘要，部分输出不能替换历史。 */
+            for await (const event of stream) {
+              if (!firstOutput && ['text_delta', 'thinking_delta', 'toolcall_delta'].includes(event.type)) {
+                firstOutput = true
+                annotate({ ttft_ms: Math.max(0, this.timer.now() - started) })
+              }
             }
-            return batonMessage(await stream.result())
+            const response = batonMessage(await stream.result())
+            annotate(modelOutputAttributes(response))
+            return response
           },
         )
         payload = {
@@ -370,8 +382,20 @@ export class ProjectRuntime {
   private async execute(call: ToolCall): Promise<ToolResultMessage> {
     return this.traced(
       'baton.project.tool',
-      { 'baton.project.tool': toolDefinitions.some((tool) => tool.name === call.name) ? call.name : 'unknown' },
-      () => this.executeTraced(call),
+      {
+        'gen_ai.operation.name': 'execute_tool',
+        'gen_ai.tool.name': call.name,
+        'gen_ai.tool.call.id': call.id,
+        'gen_ai.tool.call.arguments': JSON.stringify(call.arguments),
+        'baton.project.tool': toolDefinitions.some((tool) => tool.name === call.name) ? call.name : 'unknown',
+      },
+      async (annotate) => {
+        const result = await this.executeTraced(call)
+        annotate({
+          'gen_ai.tool.call.result': JSON.stringify({ content: result.content, details: result.details }),
+        })
+        return result
+      },
     )
   }
   private async executeTraced(call: ToolCall): Promise<ToolResultMessage> {
@@ -385,6 +409,12 @@ export class ProjectRuntime {
             this.seq,
             this.events.findLast((e) => e.kind === 'input')?.seq ?? this.boot.input_seq,
             call.arguments.query,
+            undefined,
+            this.telemetry,
+            {
+              'gen_ai.agent.name': 'project',
+              'gen_ai.conversation.id': this.boot.project.conversation.id,
+            },
           )
         : {}
     let requestStarted = this.timer.now()
@@ -517,12 +547,10 @@ export class ProjectRuntime {
           )
           message = await this.traced(
             `chat ${requestModel.id}`,
-            {
-              'gen_ai.provider.name': requestModel.provider,
-              'gen_ai.request.model': requestModel.id,
-              'baton.usage.reported': false,
-            },
+            this.chatAttributes(requestModel, memoryMessages),
             async (annotate) => {
+              const started = this.timer.now()
+              let firstOutput = false
               const stream = this.models.streamSimple(
                 requestModel,
                 modelContext({ ...requestContext, messages: memoryMessages }),
@@ -530,13 +558,7 @@ export class ProjectRuntime {
                   ...options,
                   onProviderStreamEvent: async (event, providerModel) => {
                     const usage = providerUsage(providerModel.api, event)
-                    if (Object.keys(usage).length)
-                      annotate({
-                        'baton.usage.reported': true,
-                        ...(usage.input === undefined ? {} : { 'gen_ai.usage.input_tokens': usage.input }),
-                        ...(usage.output === undefined ? {} : { 'gen_ai.usage.output_tokens': usage.output }),
-                        ...(usage.cached === undefined ? {} : { 'baton.usage.cached_input_tokens': usage.cached }),
-                      })
+                    if (Object.keys(usage).length) annotate(streamUsageAttributes(usage))
                     await options?.onProviderStreamEvent?.(event, providerModel)
                   },
                   maxTokens: outputTokens,
@@ -563,6 +585,10 @@ export class ProjectRuntime {
                   .catch(() => {})
               }
               for await (const event of stream) {
+                if (!firstOutput && ['text_delta', 'thinking_delta', 'toolcall_delta'].includes(event.type)) {
+                  firstOutput = true
+                  annotate({ ttft_ms: Math.max(0, this.timer.now() - started) })
+                }
                 if (event.type === 'text_delta') {
                   if (Buffer.byteLength(preview) < 32 * 1024 + 4)
                     preview = (preview + event.delta).slice(0, 32 * 1024 + 4)
@@ -572,7 +598,9 @@ export class ProjectRuntime {
                   }
                 }
               }
-              return batonMessage(await stream.result())
+              const response = batonMessage(await stream.result())
+              annotate(modelOutputAttributes(response))
+              return response
             },
           )
           if (message.stopReason === 'error' && isContextOverflow(message, requestModel.contextWindow)) {

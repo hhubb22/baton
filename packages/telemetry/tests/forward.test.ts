@@ -28,9 +28,14 @@ it('从认证连接重建 trace 并删除未知内容', () => {
                 endTimeUnixNano: '2',
                 attributes: [
                   attr('baton.employee.id', { stringValue: '33333333-3333-4333-8333-333333333333' }),
+                  attr('user.id', { stringValue: '33333333-3333-4333-8333-333333333333' }),
                   attr('baton.usage.reported', { boolValue: false }),
                   attr('gen_ai.usage.input_tokens', { intValue: '0' }),
                   attr('gen_ai.request.model', { stringValue: 'custom model' }),
+                  attr('gen_ai.response.finish_reasons', { arrayValue: { values: [{ stringValue: 'stop' }] } }),
+                  attr('gen_ai.input.messages', {
+                    stringValue: JSON.stringify([{ text: '😀'.repeat(128 * 1024) }]),
+                  }),
                   attr('private', { stringValue: 'private' }),
                 ],
                 status: { code: 2, message: 'private' },
@@ -51,6 +56,16 @@ it('从认证连接重建 trace 并删除未知内容', () => {
   expect(encoded).toContain(employeeId)
   expect(encoded).toContain(nodeId)
   expect(encoded).toContain('custom model')
+  expect(encoded).toContain('gen_ai.response.finish_reasons')
+  const forwarded = (
+    result!.resourceSpans as Array<{
+      scopeSpans: Array<{ spans: Array<{ attributes: Array<{ key: string; value: { stringValue?: string } }> }> }>
+    }>
+  )[0]!.scopeSpans[0]!.spans[0]!.attributes
+  expect(forwarded.find((item) => item.key === 'user.id')?.value.stringValue).toBe(employeeId)
+  const messages = forwarded.find((item) => item.key === 'gen_ai.input.messages')!.value.stringValue!
+  expect(Buffer.byteLength(messages)).toBeLessThanOrEqual(128 * 1024)
+  expect(() => JSON.parse(messages)).not.toThrow()
   const malformed = {
     resourceSpans: [{ resource: { attributes: [attr('service.name', { stringValue: 'unknown' })] } }],
   }

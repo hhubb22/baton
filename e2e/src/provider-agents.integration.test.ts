@@ -426,6 +426,7 @@ async function withProviderThread(
             ...telemetryEnvironment(relay),
             BATON_TELEMETRY_NODE_ID: identity.node_id,
             OTEL_BSP_SCHEDULE_DELAY: '30',
+            OTEL_BSP_MAX_EXPORT_BATCH_SIZE: '64',
             OTEL_LOGS_EXPORTER: 'none',
             OTEL_METRICS_EXPORTER: 'none',
           }),
@@ -617,6 +618,7 @@ test('exports one trace from HTTP through Worker and Pi agent-host', async () =>
         )) {
           expect(resource.attributes).toContainEqual({ key: 'baton.node.id', value: { stringValue: nodeId } })
           expect(resource.attributes).toContainEqual({ key: 'baton.employee.id', value: { stringValue: employeeId } })
+          expect(resource.attributes).toContainEqual({ key: 'user.id', value: { stringValue: employeeId } })
         }
         expect(authorization.every((value) => value === 'local-test-key')).toBe(true)
         const attributes = Object.fromEntries(turn.attributes.map(({ key, value }) => [key, value]))
@@ -626,13 +628,26 @@ test('exports one trace from HTTP through Worker and Pi agent-host', async () =>
         expect(Number(attributes['baton.turn.seq']?.intValue)).toBeGreaterThan(0)
         expect(attributes['baton.agent']).toEqual({ stringValue: 'pi' })
         expect(attributes['gen_ai.request.model']).toEqual({ stringValue: cases[1]!.model })
+        expect(attributes['gen_ai.operation.name']).toEqual({ stringValue: 'chat' })
+        expect(attributes['gen_ai.agent.name']).toEqual({ stringValue: 'pi' })
+        expect(attributes['gen_ai.conversation.id']).toEqual({ stringValue: threadId })
+        expect(JSON.parse(attributes['gen_ai.input.messages']!.stringValue!)[0].role).toBe('user')
+        expect(JSON.parse(attributes['gen_ai.output.messages']!.stringValue!)[0].parts.length).toBeGreaterThan(0)
         expect(attributes['baton.turn.result']).toEqual({ stringValue: 'completed' })
+        expect(attributes.stop_reason).toEqual({ stringValue: 'completed' })
         expect(
           Number(
             attributes['baton.turn.first_output_ms']?.intValue ?? attributes['baton.turn.first_output_ms']?.doubleValue,
           ),
         ).toBeGreaterThanOrEqual(0)
+        expect(attributes['ttft_ms']).toBeDefined()
         expect(attributes['baton.usage.reported']).toBeDefined()
+        const agentTurn = spans.find(
+          (span) => span.service === 'baton-agent-host' && span.name === 'baton.agent.turn' && span.traceId === trace,
+        )!
+        const agentAttributes = Object.fromEntries(agentTurn.attributes.map(({ key, value }) => [key, value]))
+        expect(agentAttributes['gen_ai.operation.name']).toEqual({ stringValue: 'invoke_agent' })
+        expect(agentAttributes['gen_ai.request.model']).toBeUndefined()
         if (attributes['baton.usage.reported']?.boolValue === false) {
           expect(attributes['gen_ai.usage.input_tokens']).toBeUndefined()
           expect(attributes['gen_ai.usage.output_tokens']).toBeUndefined()

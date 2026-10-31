@@ -10,6 +10,8 @@ import { telemetryLayer } from '@baton/telemetry'
 async function main() {
   if (process.env.BATON_TELEMETRY_LOCAL_RELAY === '1') {
     process.env.OTEL_BSP_SCHEDULE_DELAY = '30'
+    // 完整链路回放使用单批启动 span，避免本地并发触发遥测丢弃。
+    process.env.OTEL_BSP_MAX_EXPORT_BATCH_SIZE = '64'
     process.env.OTEL_LOGS_EXPORTER = 'none'
     process.env.OTEL_METRICS_EXPORTER = 'none'
   }

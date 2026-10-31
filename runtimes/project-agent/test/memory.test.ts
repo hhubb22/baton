@@ -6,6 +6,7 @@ import { createModels, fauxProvider, fauxAssistantMessage } from '@earendil-work
 import { runMemory } from '../src/memory.js'
 import { checkedRPC } from '../src/protocol.js'
 import { queryEmbedding } from '../src/embeddings.js'
+import type { RuntimeTelemetry } from '../src/usage.js'
 
 test('consolidates a source with a local model and generates background and bound query vectors without chat OAuth', async () => {
   const models = createModels()
@@ -186,13 +187,31 @@ test('consolidates a source with a local model and generates background and boun
     }
     return { type: 'project_runtime.result', ok: true, data }
   })
+  const embeddingSpans: Record<string, unknown>[] = []
+  const telemetry: RuntimeTelemetry = {
+    async span(name, attributes, task) {
+      const values = { ...attributes, name }
+      embeddingSpans.push(values)
+      return task((updates) => Object.assign(values, updates))
+    },
+  }
   try {
-    await runMemory(embeddingRPC)
+    await runMemory(embeddingRPC, 32000, undefined, undefined, telemetry)
     assert.ok(vectorCommitted)
-    assert.deepEqual(await queryEmbedding(embeddingRPC, 2, 1), {
+    assert.deepEqual(await queryEmbedding(embeddingRPC, 2, 1, undefined, undefined, telemetry), {
       query_vector: { config_id: 'config', query_hash: 'query-hash', vector: [1, 0, 0] },
     })
     assert.deepEqual(inputs, ['测试入口\n' + source.text, '测试约定'])
+    assert.equal(embeddingSpans.length, 2)
+    for (const span of embeddingSpans) {
+      assert.equal(span.name, 'embeddings local-any-model')
+      assert.equal(span['gen_ai.operation.name'], 'embeddings')
+      assert.equal(span['gen_ai.provider.name'], 'openai')
+      assert.equal(span['gen_ai.request.model'], 'local-any-model')
+      assert.equal(span['gen_ai.response.model'], 'local-any-model')
+      assert.equal(span['gen_ai.usage.input_tokens'], 3)
+      assert.ok(span['gen_ai.input.messages'])
+    }
   } finally {
     server.closeAllConnections()
     await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
