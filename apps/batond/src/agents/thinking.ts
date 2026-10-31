@@ -7,7 +7,11 @@ export function thinkingCapability(capabilities: ModelCapabilities | null | unde
   const descriptor = capabilities?.optionDescriptors?.find(
     (option) =>
       option.type === 'select' &&
-      (option.id === 'thinking' || option.id === 'reasoningEffort' || option.id === 'effortLevel'),
+      (option.id === 'thinking' ||
+        option.id === 'reasoningEffort' ||
+        option.id === 'effortLevel' ||
+        option.id === 'thought_level' ||
+        option.id === 'reasoning_effort'),
   )
   if (!descriptor || descriptor.type !== 'select' || descriptor.options.length === 0) return undefined
   const decoded = Schema.decodeUnknownOption(ThinkingCapability)({

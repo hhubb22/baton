@@ -77,6 +77,7 @@ const agentNames: Record<string, readonly string[]> = {
   codex: ['CODEX_HOME'],
   pi: ['PI_CODING_AGENT_DIR', 'PI_CODING_AGENT_SESSION_DIR'],
   cursor: ['CURSOR_API_KEY'],
+  droid: ['FACTORY_API_KEY'],
 }
 const allowed = (name: string) => common.has(name.toUpperCase()) || /^LC_[A-Z0-9_]+$/i.test(name)
 const forbidden = (name: string) =>

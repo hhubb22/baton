@@ -22,7 +22,7 @@ export const metricValues: Record<string, ReadonlySet<string>> = {
   ]),
   'baton.memory.job.state': new Set(['pending', 'claimed', 'running', 'completed', 'cancelled']),
   'baton.wait.reason': new Set(['device_offline', 'approval', 'credential_missing', 'queue', 'lease', 'backoff']),
-  'baton.agent': new Set(['codex', 'cursor', 'pi', 'kiro', 'antigravity', 'shell', 'project']),
+  'baton.agent': new Set(['codex', 'cursor', 'pi', 'kiro', 'antigravity', 'droid', 'shell', 'project']),
 }
 export const metricNames = new Set([
   'baton.nodes.online',

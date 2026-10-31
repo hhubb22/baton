@@ -63,13 +63,13 @@ up/run 支持 --control-timeout-seconds <秒>，认证与同步各默认等待 3
 
 本地 Thread：
 
-  open --cwd <目录> [--thread-id <UUID>] [--agent <cursor|pi|codex|kiro|antigravity>] [--model <模型>] [--runtime-mode <approval-required|auto-accept-edits|auto|full-access>] [--execution-timeout-seconds <秒>]
+  open --cwd <目录> [--thread-id <UUID>] [--agent <cursor|pi|codex|kiro|antigravity|droid>] [--model <模型>] [--runtime-mode <approval-required|auto-accept-edits|auto|full-access>] [--execution-timeout-seconds <秒>]
   message --thread-id <UUID> --text <正文> [--message-id <ID>] [--mode <queue|steer>] [--model <模型>]
   status | stop | resume | reports --thread-id <UUID>
   command --thread-id <UUID> --command-id <UUID>
   withdraw --thread-id <UUID> --message-id <ID>
   ack --thread-id <UUID> --event-id <UUID> --worker-seq <序号>
-  probe [--agent <cursor|pi|codex|kiro|antigravity>]
+  probe [--agent <cursor|pi|codex|kiro|antigravity|droid>]
 
 设备与 Thread 命令支持 --data-dir <私有目录>，默认 ~/.baton/data。
 订阅凭据目录使用 BATON_PROJECT_RUNTIME_DATA_DIR，默认 ~/.baton/data/credentials。
@@ -536,7 +536,7 @@ export async function runLocalCLI(
   args: string[],
   dependencies: {
     host?: Pick<LocalWorkerHost, 'request'>
-    probeAgent?: (agent: 'cursor' | 'pi' | 'codex' | 'kiro' | 'antigravity') => Promise<RuntimeAgent>
+    probeAgent?: (agent: 'cursor' | 'pi' | 'codex' | 'kiro' | 'antigravity' | 'droid') => Promise<RuntimeAgent>
   } = {},
 ): Promise<void> {
   const action = args[0]
@@ -576,7 +576,7 @@ export async function runLocalCLI(
   }
   if (action === 'probe') {
     const { probeAgents } = await import('./agents/probe.ts')
-    const agent = Schema.decodeUnknownSync(Schema.Literals(['cursor', 'pi', 'codex', 'kiro', 'antigravity']))(
+    const agent = Schema.decodeUnknownSync(Schema.Literals(['cursor', 'pi', 'codex', 'kiro', 'antigravity', 'droid']))(
       values.agent ?? 'cursor',
     )
     const [report] = await probeAgents({ dataDirectory, agentTypes: [agent] })
@@ -601,7 +601,7 @@ export async function runLocalCLI(
     } catch (error) {
       if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error
     }
-    const agent = Schema.decodeUnknownSync(Schema.Literals(['cursor', 'pi', 'codex', 'kiro', 'antigravity']))(
+    const agent = Schema.decodeUnknownSync(Schema.Literals(['cursor', 'pi', 'codex', 'kiro', 'antigravity', 'droid']))(
       values.agent ?? saved?.open_config.agent_type ?? 'cursor',
     )
     const capability = await (dependencies.probeAgent
@@ -674,7 +674,14 @@ export async function runLocalCLI(
       )
       if (status.runtime_mode !== saved.open_config.runtime_mode) throw new Error('runtime_mode_conflict')
       const agent = saved.open_config.agent_type
-      if (agent !== 'cursor' && agent !== 'pi' && agent !== 'codex' && agent !== 'kiro' && agent !== 'antigravity')
+      if (
+        agent !== 'cursor' &&
+        agent !== 'pi' &&
+        agent !== 'codex' &&
+        agent !== 'kiro' &&
+        agent !== 'antigravity' &&
+        agent !== 'droid'
+      )
         throw new Error('agent_unavailable')
       const capability = await (dependencies.probeAgent
         ? dependencies.probeAgent(agent)

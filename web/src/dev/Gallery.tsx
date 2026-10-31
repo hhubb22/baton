@@ -596,6 +596,7 @@ function SettingsScene() {
                   { value: 'pi', label: 'Pi' },
                   { value: 'kiro', label: 'Kiro' },
                   { value: 'antigravity', label: 'Antigravity' },
+                  { value: 'droid', label: 'Droid' },
                 ]}
               />
             )}

@@ -1,12 +1,12 @@
 # t3code 来源与许可
 
-Baton 通过 git submodule `upstream/t3code` 使用 fork [hhubb22/t3code](https://github.com/hhubb22/t3code) 的 `baton` 分支，固定提交 `3aab3a35bcd1bd9683692230387efaea6e274d95`。该提交基于上游 [pingdotgg/t3code](https://github.com/pingdotgg/t3code) 的 `9828cad49f3e1ef4f9e037b3baaca19f4e4928fc`。上游 MIT 许可和 `Copyright (c) 2026 T3 Tools Inc.` 保留在 [LICENSE](LICENSE)。
+Baton 通过 git submodule `upstream/t3code` 使用 fork [hhubb22/t3code](https://github.com/hhubb22/t3code) 的 `baton` 分支，固定提交 `f9011c0473aded7eaa9bb703fd04dd296d02fdf3`。该提交基于上游 [pingdotgg/t3code](https://github.com/pingdotgg/t3code) 的 `9828cad49f3e1ef4f9e037b3baaca19f4e4928fc`。上游 MIT 许可和 `Copyright (c) 2026 T3 Tools Inc.` 保留在 [LICENSE](LICENSE)。
 
-workspace 收录这些包：`provider-core`、`provider-pi`、`provider-acp`、`provider-acp-registry`、`provider-cursor`、`provider-codex`、`provider-testing`、`contracts`、`shared`、`effect-acp`、`effect-codex-app-server`。`effect-acp` 与 `effect-codex-app-server` 使用 fork 里的同名包。Cursor 适配器直接使用 `provider-cursor` 的 `makeCursorAdapterV2`。
+workspace 收录这些包：`provider-core`、`provider-pi`、`provider-acp`、`provider-acp-registry`、`provider-antigravity`、`provider-cursor`、`provider-codex`、`provider-testing`、`contracts`、`shared`、`effect-acp`、`effect-codex-app-server`。`effect-acp` 与 `effect-codex-app-server` 使用 fork 里的同名包。Cursor 适配器直接使用 `provider-cursor` 的 `makeCursorAdapterV2`。
 
 ## 补丁
 
-固定提交包含下表中的适配器拆包、导出和 Kiro ACP 接入补丁。Pi、Codex、Cursor 的协议行为沿用上游实现。`effect-codex-app-server` 里的生成 schema 仍是上游客户端；官方 Codex 协议的 Apache 2.0 许可和署名在 [CODEX-LICENSE](CODEX-LICENSE)、[CODEX-NOTICE](CODEX-NOTICE)。
+固定提交包含下表中的适配器拆包、导出、Kiro / Antigravity / Droid ACP 接入补丁。Pi、Codex、Cursor 的协议行为沿用上游实现。`effect-codex-app-server` 里的生成 schema 仍是上游客户端；官方 Codex 协议的 Apache 2.0 许可和署名在 [CODEX-LICENSE](CODEX-LICENSE)、[CODEX-NOTICE](CODEX-NOTICE)。
 
 | 改动 | 说明 |
 |---|---|
@@ -22,7 +22,9 @@ workspace 收录这些包：`provider-core`、`provider-pi`、`provider-acp`、`
 | `packages/provider-pi` 导出 | `./server` 导出 `makePiAdapterV2` 与 `PiAdapterV2Options`，新增 `./server/status` 导出 `checkPiProviderStatus`，供 agent-host 构造 adapter 和做只读探测 |
 | `packages/provider-codex/src/server/status.ts` | `CodexProvider.ts` 与原有模型、状态检查测试从 `apps/server` 移入该包，新增 `./server/status` 导出；原路径再导出，Baton 的 Codex 探测直接调用 `checkCodexProviderStatus` |
 | Kiro ACP | `provider-acp-registry` 新增 `kiroAcp.ts`、Kiro CLI 2.32.0 离线夹具与转换脚本。具体模型由 `session/new` 的 `_meta.kiro.modelId` 选择；恢复先按会话 ID 和工作目录检查 `session/list`，再 `session/load`，缺失直接失败。禁用插入、会话内换模型和 fork |
-| 共享 ACP 扩展 | 增加可选的 `newSessionMeta`、`beforeLoadSession`、`followAdvertisedModelSwitch`、`followAdvertisedFork` 与 `failClosedOnSessionLoad`；仅 Kiro 配置这些扩展，其他 ACP provider 保持默认行为 |
+| Antigravity ACP | 提取 `packages/provider-antigravity` 为独立包，供 Baton 直接连接本机 `agy acp` |
+| Droid ACP | `provider-acp-registry` 扩展 `droidAcp.ts`，识别 `factory-droid` 与 `droid` CLI，映射运行模式（`spec`、`normal`、`auto-high`），解析 `AskUser` 表单并启用 `failClosedOnSessionLoad` |
+| 共享 ACP 扩展 | 增加可选的 `newSessionMeta`、`beforeLoadSession`、`followAdvertisedModelSwitch`、`followAdvertisedFork`、`failClosedOnSessionLoad`、`extractElicitationForm` 与 `sessionModeForPolicy` |
 | ACP 包导出与回放 | `provider-acp-registry` 的 `./server` 导出 adapter 构造器，`./server/status` 导出只读检查，`./testing/replay` 提供 ACP 回放 spawner 与 runtime；回放执行程序和 Kiro 测试移入包内，应用原路径复用包实现 |
 | fork 类型检查 | 补齐 `CursorAdapterV2.testkit` 再导出，并使 `nodeSqliteClient` 的 driver 参数同时通过 fork 的 Effect 4.0.5 与 Baton 的 4.0.6 类型检查 |
 

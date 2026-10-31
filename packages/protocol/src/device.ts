@@ -224,7 +224,13 @@ export const NodeRevocation = Schema.Struct({
 })
 export type NodeRevocation = typeof NodeRevocation.Type
 
-const ThinkingOptionId = Schema.Literals(['reasoningEffort', 'thinking', 'effortLevel', 'thought_level'])
+const ThinkingOptionId = Schema.Literals([
+  'reasoningEffort',
+  'thinking',
+  'effortLevel',
+  'thought_level',
+  'reasoning_effort',
+])
 
 export const ThinkingCapability = Schema.Struct({
   id: ThinkingOptionId,

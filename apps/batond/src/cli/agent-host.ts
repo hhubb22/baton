@@ -13,6 +13,7 @@ const modules = {
   codex: () => import('../agents/codex/host-module.ts').then((module) => module.codexAgentHostModule),
   kiro: () => import('../agents/kiro/host-module.ts').then((module) => module.kiroAgentHostModule),
   antigravity: () => import('../agents/antigravity/host-module.ts').then((module) => module.antigravityAgentHostModule),
+  droid: () => import('../agents/droid/host-module.ts').then((module) => module.droidAgentHostModule),
 } satisfies Record<HostedAgentType, () => Promise<AgentHostModule>>
 
 export const runAgentHostCommand = Effect.fn('AgentHost.runAgentHostCommand')(function* (

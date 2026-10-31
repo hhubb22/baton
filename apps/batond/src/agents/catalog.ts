@@ -32,6 +32,12 @@ export const agentCatalog = {
     capabilities: { create: true, queue: true, steer: false, stop: true, resume: true, switch_model: true },
     limitation: '上游 adapter 不支持 steer',
   },
+  droid: {
+    kind: 'hosted',
+    name: 'Droid',
+    capabilities: { create: true, queue: true, steer: false, stop: true, resume: true, switch_model: true },
+    limitation: '上游 adapter 不支持 steer',
+  },
 } as const satisfies Record<
   string,
   {

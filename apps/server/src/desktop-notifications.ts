@@ -195,6 +195,7 @@ export const recordThreadNotification = Effect.fnUntraced(function* (
     kiro: 'Kiro',
     grok: 'Grok',
     antigravity: 'Antigravity',
+    droid: 'Droid',
   }[t.agent_type]
   const report = Schema.is(P.ThreadReport)(payload) ? payload : undefined
   const question = report?.question

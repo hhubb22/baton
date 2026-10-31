@@ -474,6 +474,7 @@ export const agentNames: Record<AgentKind, string> = {
   pi: 'Pi',
   cursor: 'Cursor',
   antigravity: 'Antigravity',
+  droid: 'Droid',
 }
 
 const clock = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })

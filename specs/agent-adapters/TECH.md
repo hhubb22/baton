@@ -23,13 +23,14 @@ Coordinator：Thread 命令、报告与历史记录
               └─ Baton 宿主层 + t3code ProviderAdapterV2
                   ├─ provider-pi
                   ├─ provider-codex（fork 中从 apps/server 移出）
-                  ├─ provider-acp + provider-acp-registry（fork 中新增 Kiro）
+                  ├─ provider-acp + provider-acp-registry（Kiro、Droid）
+                  ├─ provider-antigravity + provider-acp
                   └─ provider-cursor → @cursor/sdk
 ```
 
 目录职责与实现入口统一见 [AGENTS.md](../../AGENTS.md#核心架构与目录)。
 
-Worker 通过 `agents/thread-agents.ts` 和纯数据 catalog 装配执行工厂，不加载探测、SDK、provider adapter 或 host driver，保持就绪预算（Windows 10 秒，其余系统 3 秒）。`buildBatond` 检查 Worker 运行时依赖图，覆盖静态导入、再导出和字面量动态加载，禁止绕入 host 实现或不可解析的动态加载。daemon 与普通 CLI 通过 `agents/probe.ts` 探测，Cursor 安装预检只通过 `sdk-inspection.ts` 读取元数据与资产路径。执行 agent-host 由 `cli/agent-host.ts` 按类型动态加载对应模块，Cursor SDK 只在 Cursor host 内执行。安装包的 `agent-host --probe` 会加载五个 Agent 模块以检查完整性。每个执行 Thread 一个 agent-host，它是 POSIX 进程组组长或 Windows Worker 账本登记的根进程。POSIX 的上游独立组由 host 内部 registrar/watchdog 另行管理；Windows registrar 不另行登记上游子进程，回收受下文平台边界约束。探测在 batond 拉起的只读 agent-host 中执行，用同一套平台接口回收。
+Worker 通过 `agents/thread-agents.ts` 和纯数据 catalog 装配执行工厂，不加载探测、SDK、provider adapter 或 host driver，保持就绪预算（Windows 10 秒，其余系统 3 秒）。`buildBatond` 检查 Worker 运行时依赖图，覆盖静态导入、再导出和字面量动态加载，禁止绕入 host 实现或不可解析的动态加载。daemon 与普通 CLI 通过 `agents/probe.ts` 探测，Cursor 安装预检只通过 `sdk-inspection.ts` 读取元数据与资产路径。执行 agent-host 由 `cli/agent-host.ts` 按类型动态加载对应模块，Cursor SDK 只在 Cursor host 内执行。安装包的 `agent-host --probe` 会加载六个 Agent 模块以检查完整性。每个执行 Thread 一个 agent-host，它是 POSIX 进程组组长或 Windows Worker 账本登记的根进程。POSIX 的上游独立组由 host 内部 registrar/watchdog 另行管理；Windows registrar 不另行登记上游子进程，回收受下文平台边界约束。探测在 batond 拉起的只读 agent-host 中执行，用同一套平台接口回收。
 
 ### 宿主层
 
@@ -156,6 +157,7 @@ open 的成功 `ThreadCommandResult` 携带当前 `storage_generation`，中心�
 | Kiro | `provider-acp` 与 `provider-acp-registry` | 已接入注册、配置、探测与 host；fork 的 `kiroAcp.ts` 启动 `kiro-cli acp --agent-engine=v3`，模型经 `session/new` 的 `_meta.kiro.modelId` 传递，`default` 省略；按 initialize 响应协商 v1。恢复先 `session/list` 核对 cwd/ID 再 `session/load`，失败不新建替代；不支持 steer 与换模型。程序已安装且认证 valid/unknown 时开放 create/resume，版本和系统不限 |
 | Cursor | `provider-cursor`（完整 driver 与 adapter） | `makeCursorAdapterV2` 在独立 agent-host 内运行；SDK、生产依赖与平台包通过附带目录分发 |
 | Antigravity | `provider-antigravity`、`provider-acp` | 已接入 host；fork 把上游 `apps/server` 里的协议与 adapter 提取成包，Baton 自建运行时启动原生 `agy acp`，不使用上游的托管运行时与登录流程 |
+| Droid | `provider-acp` 与 `provider-acp-registry` | 已接入注册、配置、探测与 host；fork 的 `droidAcp.ts` 启动 `droid exec --output-format acp`，解析 `AskUser` 表单（`extractDroidElicitationForm`），按 `droidSessionModeForPolicy` 映射运行模式（Supervised / Auto-accept edits 映射 `normal` 交由 `clientPolicy` 裁决，Auto / Full access 映射 `auto-high`），恢复启用 `failClosedOnSessionLoad` 与 `resumeOnOpen`；支持换模型与 `reasoning_effort` 思考档位，不支持 steer |
 | Grok | `provider-grok`、`provider-acp` | 待接入，复用同一宿主层 |
 
 程序、认证、协议与模型发现使用上游 driver 的检查结果，Baton 不另设系统或版本白名单。程序或 SDK 已安装、认证 valid/unknown 时报告 available，未知版本、其他系统、版本探测失败或超时均不阻止创建；缺程序或明确认证 missing 时报告 unavailable。离线回放覆盖的版本和系统范围保留在夹具与验证文档中，缺少验证证据的组合照常开放。
@@ -183,17 +185,18 @@ Thread 历史使用中心已保存的记录：`thread_messages` 保存员工和 
 | Kiro | local settings：`agentId: kiro`、`commandPath: kiro-cli`，从 PATH 查找；profile 为 `homedir()`；模型取 `model ?? adapter_config.model ?? 'default'` | adapter 支持新建、排队、停止、恢复；不支持插入或换模型；程序已安装且认证 valid/unknown 时开放 create/resume，版本和系统不限 |
 | Cursor | 随 batond 分发的 SDK、平台辅助包与本机 shell | 按上游 driver 报告的能力 |
 | Antigravity | PATH 中的 `agy`；原生登录；模型取 `model ?? adapter_config.model`，未指定时用原生默认 | 新建、排队、停止、恢复；Thread 内逐轮换模型；不支持插入 |
+| Droid | local settings：`agentId: factory-droid`、`commandPath: droid`、`commandArgs: ['exec', '--output-format', 'acp']`，从 PATH 查找；原生登录（`~/.factory`）或 `FACTORY_API_KEY`；模型取 `model ?? adapter_config.model` | 新建、排队、停止、恢复；Thread 内逐轮换模型与 `reasoning_effort` 思考档位；不支持插入 |
 | Grok | 接入时确定 | 接入时确定 |
 
-`agents/catalog.ts` 按固定上游 adapter 的能力与 Baton 已实现的执行路径报告：Pi、Codex 支持 steer，Cursor、Kiro、Antigravity 上游不支持；五个 Agent 均支持新建、排队、停止与恢复。Pi、Codex、Cursor、Antigravity 开放 `switch_model`。Worker 在准备输入时解析逐消息模型，省略时取账本中最近 `sent` 的 queue 输入模型或创建配置，并在 intent 中持久保存；失败或撤回的输入不改变继承模型。通用 driver 把该选择同时传入 `startTurn.modelSelection` 和 `appThread.modelSelection`。Pi adapter 在 prompt 前调用 `set_model`，Codex 在每次 `turn/start` 传模型，Cursor 在恢复会话和 SDK send 时传模型；steer 不接受模型。Kiro 的 fork adapter 在 `kiroAcp.ts` 的 `kiroCapabilityOverrides` 中明确关闭 `supportsActiveSteering`、`supportsSteeringByInterruptRestart` 和 `supportsModelSwitchInSession`；Baton 按该固定实现报告能力。该覆盖不证明 Kiro CLI 的所有版本都缺少对应协议方法。catalog 的 `limitation` 将这些原因写入报告。仅存在明确的数据丢失、越权或重复副作用风险时进一步限制已实现能力。
+`agents/catalog.ts` 按固定上游 adapter 的能力与 Baton 已实现的执行路径报告：Pi、Codex 支持 steer，Cursor、Kiro、Antigravity、Droid 上游不支持；六个 Agent 均支持新建、排队、停止与恢复。Pi、Codex、Cursor、Antigravity、Droid 开放 `switch_model`。Worker 在准备输入时解析逐消息模型，省略时取账本中最近 `sent` 的 queue 输入模型或创建配置，并在 intent 中持久保存；失败或撤回的输入不改变继承模型。通用 driver 把该选择同时传入 `startTurn.modelSelection` 和 `appThread.modelSelection`。Pi adapter 在 prompt 前调用 `set_model`，Codex 在每次 `turn/start` 传模型，Cursor 在恢复会话和 SDK send 时传模型；steer 不接受模型。Kiro 的 fork adapter 在 `kiroAcp.ts` 的 `kiroCapabilityOverrides` 中明确关闭 `supportsActiveSteering`、`supportsSteeringByInterruptRestart` 和 `supportsModelSwitchInSession`；Baton 按该固定实现报告能力。该覆盖不证明 Kiro CLI 的所有版本都缺少对应协议方法。catalog 的 `limitation` 将这些原因写入报告。仅存在明确的数据丢失、越权或重复副作用风险时进一步限制已实现能力。
 
-Kiro settings 固定为 `source: local`，不拉取 registry 包；上游 Kiro driver 不读取专有环境变量，host 只继承系统项，不提供 `BATON_KIRO_*` 或 `KIRO_HOME` 配置入口。Pi、Codex 的配置目录分别按各自原生变量传递，不改写系统 HOME。Antigravity 只从 PATH 启动 `agy acp`，没有专有配置入口。原生程序没有 ACP mode，host 在会话不报告 mode 时跳过 `session/set_mode`，运行模式由 ACP 客户端回答 `session/request_permission` 实现，见 [Antigravity 接入](../../apps/batond/src/agents/antigravity/README.md)。
+Kiro settings 固定为 `source: local`，不拉取 registry 包；上游 Kiro driver 不读取专有环境变量，host 只继承系统项，不提供 `BATON_KIRO_*` 或 `KIRO_HOME` 配置入口。Pi、Codex 的配置目录分别按各自原生变量传递，不改写系统 HOME。Antigravity 只从 PATH 启动 `agy acp`，没有专有配置入口。原生程序没有 ACP mode，host 在会话不报告 mode 时跳过 `session/set_mode`，运行模式由 ACP 客户端回答 `session/request_permission` 实现，见 [Antigravity 接入](../../apps/batond/src/agents/antigravity/README.md)。Droid settings 固定为 `source: local`、`agentId: factory-droid`，从 PATH 启动 `droid exec --output-format acp`，支持本机 `~/.factory` 登录及环境中的 `FACTORY_API_KEY`，见 [Droid 接入](../../apps/batond/src/agents/droid/README.md)。
 
 各 Agent 的非敏感程序、模型与状态位置按注册表配置及原生映射保存。逐轮模型保存在 Worker 输入账本，恢复使用最近确认提交的 queue 输入模型，保留创建配置用于 open 幂等校验；Kiro 的模型在 Thread 内固定，`default` 不作为模型 ID 发往原生协议。
 
 Pi 上游 `ProviderAdapterTurnStartError.cause` 为 `PiRpcError(operation: set_model)`，或 Cursor 报 `CursorModelUnavailableError` 时，错误证明 prompt 尚未提交。host 通过本地 RPC 的 `AgentHostError.modelRejected` 传递该事实，Worker 将 intent 持久撤回，清除活动输入并继续队列，不增加已确认发送数。选择超时、传输错误、Codex 的通用提交错误和其他缺少确定证据的失败保留 unknown；恢复只调用只读 `sent` 核对原生历史，不自动重发。若撤回事实尚未持久化就中断，intent 仍按不确定输入恢复。恢复核查 Thread、原生 ID、工作目录和 profile 位置；不保存 API key、token 或凭据内容的摘要。检测到账号无法访问原会话就失败，不换用 ambient 凭据。
 
-Kiro 的 `beforeLoadSession` 先用 `session/list` 检查 ID 与 cwd，再 `session/load`；通用 driver 的可选 `resumeOnOpen` 仅 Kiro 设为 `true`，resume 与 sent 均在 `openSession` 中传入 `initialNativeThreadId`，避免 ACP 先新建空会话。fork 启用 `failClosedOnSessionLoad`，会话缺失或 load 失败不退回 `session/new`。`readThreadSnapshot` 同样走核对与 load，通用 `sent` 仅匹配已确认发送数之后的下一条 user 正文，缺少证据时保持未确认。
+Kiro 的 `beforeLoadSession` 先用 `session/list` 检查 ID 与 cwd，再 `session/load`；通用 driver 的可选 `resumeOnOpen` 对 Kiro 与 Droid 设为 `true`，resume 与 sent 均在 `openSession` 中传入 `initialNativeThreadId`，避免 ACP 先新建空会话。fork 对二者启用 `failClosedOnSessionLoad`，会话缺失或 load 失败不退回 `session/new`。`readThreadSnapshot` 同样走核对与 load，通用 `sent` 仅匹配已确认发送数之后的下一条 user 正文，缺少证据时保持未确认。
 
 节点报告正式采用 `{agent_type, version, status, reason, models, default_model, capabilities}`。`RuntimeAgent.reason` 为可选 UTF-8 摘要，最多 1024 字节，禁止 NUL、控制字符和凭据；协议校验同时计入现有 64 KiB 报告预算。超长或未脱敏的 SDK 原始输出不能直接写入 reason。删除节点私有包装对同名字段的补写，生产与测试统一走正式结构。
 
@@ -209,15 +212,15 @@ Web 的 NodeDTO、DeviceAgent 和 mapDevice 保留 status、create 和 reason，
 
 ### 探测
 
-探测在只读 agent-host 中调用上游 driver 的安装、认证与模型检查，版本按各 Agent 的探测路径取得，返回分开的安装/版本、认证和模型目录结果。探测不发送 prompt、不调用 authenticate/login 或打开登录浏览器，使用临时空工作目录和空 MCP 配置；Kiro 的完整探测仍调用 `checkAcpRegistryProviderStatus` 与 `probeAcpRegistryConfiguration`，由上游建立空的发现会话以读取能力与模型。其余隔离行为以上游实现为准。每个任务最多 30 秒；TS daemon 每轮探测结束后默认间隔 30 秒重新执行，失败结果不会因路径或版本未变而永久缓存，结束或失败后回收进程树。模型目录用于发现与补全，显式 ID 交给原生 Agent 判定，换模型继续受已实现能力限制。
+探测在只读 agent-host 中调用上游 driver 的安装、认证与模型检查，版本按各 Agent 的探测路径取得，返回分开的安装/版本、认证和模型目录结果。探测不发送 prompt、不调用 authenticate/login 或打开登录浏览器，使用临时空工作目录和空 MCP 配置；Kiro 与 Droid 的完整探测仍调用 `checkAcpRegistryProviderStatus` 与 `probeAcpRegistryConfiguration`，由上游建立空的发现会话以读取能力与模型（Droid 直接使用 `session/new` 返回的模型与默认模型的 `configOptions`，不逐模型调用 `session/set_config_option` 枚举思考档位，避免高成本或废弃模型触发系统警告消息与探测阻塞）。其余隔离行为以上游实现为准。每个任务最多 30 秒；TS daemon 每轮探测结束后默认间隔 30 秒重新执行，失败结果不会因路径或版本未变而永久缓存，结束或失败后回收进程树。模型目录用于发现与补全，显式 ID 交给原生 Agent 判定，换模型继续受已实现能力限制。
 
-五个 Agent 在程序或 SDK 已安装、认证 valid/unknown 时报告 available，开放 create/resume；缺程序或明确 missing 时 unavailable。reason 记录版本、系统、认证未知、模型目录问题和未开放能力的原因；版本探测失败或超时不阻止创建。模型目录失败时可按默认模型创建。整次 host 探测失败且安装状态未确认时保持 unverified，避免将探测故障误报成程序缺失。Cursor 在主进程先检查 SDK 资产与平台包版本一致性，host 再检查公共辅助程序与 sandbox。公共依赖失败禁用整个 Agent；sandbox 失败按上游策略只禁用依赖该沙箱的模式，Full access 仍可运行。已确认 SDK 安装完整后，只读 host 探测失败或超时保留诊断并允许创建。
+六个 Agent 在程序或 SDK 已安装、认证 valid/unknown 时报告 available，开放 create/resume；缺程序或明确 missing 时 unavailable。reason 记录版本、系统、认证未知、模型目录问题和未开放能力的原因；版本探测失败或超时不阻止创建。模型目录失败时可按默认模型创建。整次 host 探测失败且安装状态未确认时保持 unverified，避免将探测故障误报成程序缺失。Cursor 在主进程先检查 SDK 资产与平台包版本一致性，host 再检查公共辅助程序与 sandbox。公共依赖失败禁用整个 Agent；sandbox 失败按上游策略只禁用依赖该沙箱的模式，Full access 仍可运行。已确认 SDK 安装完整后，只读 host 探测失败或超时保留诊断并允许创建。
 
-Kiro 在上游 status 之外运行 `kiro-cli --version`。`src/agents/kiro/version.ts` 使用 host 提供的 Node Effect `ChildProcessSpawner`，经包装 spawner 交给 process registrar 管理，Scope 结束或超时后回收进程。版本命令限时 4 秒，stdout/stderr 各最多收集 4096 字节，只返回解析出的版本号；原始输出与诊断留在 host 内，不进入能力报告。命令超时、失败、输出超限或不可解析时，版本为 `unknown` 并记录原因；已安装时仍为 available。缺少程序时为 `unavailable`。
+Kiro 与 Droid 在上游 status 之外分别运行 `kiro-cli --version`、`droid --version`。版本探测使用 host 提供的 Node Effect `ChildProcessSpawner`，经包装 spawner 交给 process registrar 管理，Scope 结束或超时后回收进程。版本命令限时 4 秒，stdout/stderr 各最多收集 4096 字节，只返回解析出的版本号；原始输出与诊断留在 host 内，不进入能力报告。命令超时、失败、输出超限或不可解析时，版本为 `unknown` 并记录原因；已安装时仍为 available。缺少程序时为 `unavailable`。
 
-`hostedAgentReport` 对 Cursor、Pi、Codex、Kiro 共用安装与认证规则：已安装且认证为 valid 或 unknown 时报告 `available`、`create: true`、`resume: true`。版本与系统写入 reason，认证 unknown 提示首次执行由原生程序检查；明确 missing 则为 `unavailable` 并拒绝。网页按节点报告开放新建与恢复，不符合准入条件的新建请求返回 HTTP 422、`agent_unavailable`。本地 CLI 的 `open --agent cursor|pi|codex|kiro` 默认 Cursor，支持显式模型与每轮执行时限；`message --mode queue|steer` 默认排队，Worker 按实际能力校验。
+`hostedAgentReport` 对六个 hosted Agent 共用安装与认证规则：已安装且认证为 valid 或 unknown 时报告 `available`、`create: true`、`resume: true`。版本与系统写入 reason，认证 unknown 提示首次执行由原生程序检查；明确 missing 则为 `unavailable` 并拒绝。网页按节点报告开放新建与恢复，不符合准入条件的新建请求返回 HTTP 422、`agent_unavailable`。本地 CLI 的 `open --agent cursor|pi|codex|kiro|antigravity|droid` 默认 Cursor，支持显式模型与每轮执行时限；`message --mode queue|steer` 默认排队，Worker 按实际能力校验。
 
-Kiro 的 `turnFailure` 回调处理真实回合的 provider failure：明确认证失败映射为“Sign in to Kiro CLI and try again.”，其他 provider 错误映射为“Check Kiro CLI on this device and try again.”。其他 Agent 的失败原因固定为 `Send your message again or check <Agent> on this device.`。通用 driver 将安全原因随失败结束事件交给 Worker，保存到 `turn.ended.content`；不透传原始错误，不自动登录，不重发输入。
+Kiro 与 Droid 的 `turnFailure` 回调处理真实回合的 provider failure：Kiro 明确认证失败映射为“Sign in to Kiro CLI and try again.”，其他 provider 错误映射为“Check Kiro CLI on this device and try again.”；Droid 明确认证失败映射为“Sign in to the Factory Droid CLI and try again.”，其他 provider 错误映射为“Check the Factory Droid CLI on this device and try again.”。其他 Agent 的失败原因固定为 `Send your message again or check <Agent> on this device.`。通用 driver 将安全原因随失败结束事件交给 Worker，保存到 `turn.ended.content`；不透传原始错误，不自动登录，不重发输入。
 
 节点处理 open 时读取已完成的探测快照，不在 5 秒命令上下文内同步探测；尚在探测时返回明确的不可用原因，探测完成后重新上报。
 
@@ -299,17 +302,17 @@ batond bundle 直接打包用到的 `@t3tools/*` 包及其纯 JS 依赖。原生
 
 Kiro host 回放使用上述授权转换的夹具，验证范围包括真实 adapter 的新建、两轮、停止（含工具运行中）、恢复、`restore_missing` 失败和 `sent` 的确认与未确认；工具中断夹具中的权限请求经真实 adapter 返回 `allow_once`。进程回收用真实 Kiro adapter 与本地 ACP 协议替身，确认 ACP 独立进程组及同组 grandchild 在正常关闭和 host SIGKILL 后均退出，强杀路径由 registrar watchdog 回收。`e2e/src/provider-agents.integration.test.ts` 通过注入已验证 capability 驱动真实 Kiro adapter，覆盖网页 API 发送、回复、中心 idle、停止与恢复；此注入验证自动化行为，不能证明真实账号授权有效；生产报告按节点探测到的安装与认证状态决定，版本和系统保留为诊断信息。
 
-版本探测测试使用本地可执行替身，验证 stdout/stderr 版本解析、预发布后缀保留、诊断不外传、非零退出、缺程序和超时后进程退出，不启动真实 CLI。现有五个 Agent 的注册表测试核对未知版本、其他系统、认证 unknown 和版本超时均放行，缺程序与明确 missing 拒绝；Cursor 探测的模式区分按 R-11 验证。认证失败场景由 `provider_error` 派生夹具驱动真实 adapter、agent-host 与 Worker；该夹具和原始 provider 错误场景分别接上 `simple` 的成功回合，来源记录在 metadata。测试核对失败原因持久化、原始错误不外传、输入保持 sent、排队消息继续执行、最终 idle，以及原生会话和进程保留。跨 app e2e 核对中心读取失败原因和 idle 后，再发消息能收到回复。
+版本探测测试使用本地可执行替身，验证 stdout/stderr 版本解析、预发布后缀保留、诊断不外传、非零退出、缺程序和超时后进程退出，不启动真实 CLI。现有六个 Agent 的注册表测试核对未知版本、其他系统、认证 unknown 和版本超时均放行，缺程序与明确 missing 拒绝；Cursor 探测的模式区分按 R-11 验证。认证失败场景由 `provider_error` 派生夹具驱动真实 adapter、agent-host 与 Worker；该夹具和原始 provider 错误场景分别接上 `simple` 的成功回合，来源记录在 metadata。测试核对失败原因持久化、原始错误不外传、输入保持 sent、排队消息继续执行、最终 idle，以及原生会话和进程保留。跨 app e2e 核对中心读取失败原因和 idle 后，再发消息能收到回复。
 
 | 范围 | 验证 | 层次 |
 |---|---|---|
-| fork 中用到的包 | 运行各包上游测试；Codex 拆包与 `kiroAcp` 的新增测试 | 上游模块测试 |
+| fork 中用到的包 | 运行各包上游测试；Codex 拆包与 `kiroAcp`、`droidAcp` 的新增测试 | 上游模块测试 |
 | 宿主层 | 各 service 的路径、凭据、环境白名单；spawner 登记进程组 | 包内单测 |
 | 事件映射 | 用上游 testkit 替身驱动真实 adapter，核对 reply、end、uncertain 与 `sent` 判定 | 确定性回放 |
 | Worker 保证 | 接收、intent、unknown、停止裁决与回收测试，使用可控 ThreadAgent 替身并补真实 host 回放 | Worker 集成 |
-| 主链路 | Cursor、Pi、Codex、Kiro 经真实 provider host 回放验证网页 API 发送、回复、停止与恢复；remote/Project 复杂场景使用本地 ThreadAgent 替身 | e2e |
+| 主链路 | Cursor、Pi、Codex、Kiro、Antigravity、Droid 经真实 provider host 回放验证网页 API 发送、回复、停止与恢复；remote/Project 复杂场景使用本地 ThreadAgent 替身 | e2e |
 | 历史 | 网页与 `threads.read` 读取同一份中心 Thread 记录，分页与权限正确 | 中心集成与 Web 契约 |
-| 探测与 reason | 五个 Agent 已安装且认证 valid/unknown 时 available；未知版本、其他系统、版本失败或超时只记入诊断。缺程序、明确认证缺失或 Cursor 公共依赖失败时 unavailable，sandbox 故障按 R-11 区分模式；整次探测未确认安装时 unverified；未开放能力写明原因 | 包内与本地可执行替身 |
+| 探测与 reason | 六个 Agent 已安装且认证 valid/unknown 时 available；未知版本、其他系统、版本失败或超时只记入诊断。缺程序、明确认证缺失或 Cursor 公共依赖失败时 unavailable，sandbox 故障按 R-11 区分模式；整次探测未确认安装时 unverified；未开放能力写明原因 | 包内与本地可执行替身 |
 | Kiro 回合失败 | `provider_error` 与派生认证失败经真实 host/Worker 保存失败原因，输入保持 sent，后续排队消息执行并收到回复、原生会话与进程保留；中心时间线可读原因、空队列时 idle，网页在对应回合显示失败 | 确定性回放、Worker 集成、跨 app e2e 与网页数据层 |
 | Thread 执行权限 | API、CLI、Project 创建与默认值、模式幂等、持久恢复、按模式准入；Full access 通过真实 adapter 本地替身链路 | 中心与 Worker 包内集成、host 离线回放及跨 app 本地替身；真实系统沙箱隔离未验证 |
 | 安装包 | 脱离源码运行 SEA，加载 t3code 依赖与附带目录 | 打包检查 |
@@ -338,6 +341,7 @@ Kiro host 回放使用上述授权转换的夹具，验证范围包括真实 ada
 | agent-host 冷启动 | 加载 t3code 依赖后的启动耗时未测 | 不计入 Worker 3 秒预算；open 仍受 30 秒原生预算约束，按目标系统单独测量 |
 | t3code 依赖打包 | 已有四模块与 keyring 加载检查，原生依赖放在 SEA 旁；Windows 的 Worker/私有文件仍有验证缺口 | 安装包布局、检查入口和各系统结果见 [发布设计](../release/TECH.md) |
 | Antigravity | macOS arm64 上 `agy` 1.4.12 已验证新建、审批、停止与恢复；未登录报错、Windows 和 Linux 未验证 | 不阻塞开放，范围写入诊断 |
+| Droid | macOS arm64 上 `droid` 1.1.0 已验证 ACP 协议交互与离线回放；Windows 和 Linux 未验证 | 不阻塞开放，范围写入诊断 |
 | Grok | 待接入，安装、认证与恢复证据未核查 | 只阻塞自身交付 |
 
 各组合的验证范围由测试、转录和发布检查记录，未知系统或版本仍按安装与认证结果开放。

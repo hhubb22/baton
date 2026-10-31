@@ -24,6 +24,10 @@ vi.mock('../agents/antigravity/host-module.ts', () => {
   loaded.add('antigravity')
   return { antigravityAgentHostModule: { driver: vi.fn() } }
 })
+vi.mock('../agents/droid/host-module.ts', () => {
+  loaded.add('droid')
+  return { droidAgentHostModule: { driver: vi.fn() } }
+})
 
 beforeEach(() => {
   vi.resetModules()

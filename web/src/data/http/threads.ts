@@ -215,7 +215,8 @@ function mapThread(t: ThreadDTO, events: EventDTO[]): Thread {
     t.agent_type !== 'codex' &&
     t.agent_type !== 'kiro' &&
     t.agent_type !== 'cursor' &&
-    t.agent_type !== 'antigravity'
+    t.agent_type !== 'antigravity' &&
+    t.agent_type !== 'droid'
   ) {
     throw new ClientError('invalid', `Unsupported thread agent: ${t.agent_type}`)
   }

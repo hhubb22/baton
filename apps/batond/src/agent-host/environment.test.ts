@@ -45,7 +45,7 @@ it('passes certificate and proxy variables unchanged to every Agent', () => {
     delete (expected as Partial<typeof expected>).ALL_PROXY
     delete (expected as Partial<typeof expected>).NO_PROXY
   }
-  for (const agent of ['cursor', 'pi', 'codex', 'kiro', 'antigravity']) {
+  for (const agent of ['cursor', 'pi', 'codex', 'kiro', 'antigravity', 'droid']) {
     expect(
       agentEnvironment(agent, { ...network, OPENAI_API_KEY: 'secret', NODE_TLS_REJECT_UNAUTHORIZED: '0' }),
     ).toEqual(expected)
@@ -78,5 +78,24 @@ it('passes the account directory only to the Agent that reads it', () => {
     LOGNAME: 'employee',
     SHELL: '/bin/zsh',
     CODEX_HOME: '/codex',
+  })
+})
+
+it('passes the Factory API key only to Droid', () => {
+  const source = {
+    PATH: '/usr/bin',
+    HOME: '/home/employee',
+    FACTORY_API_KEY: 'factory-key',
+    CURSOR_API_KEY: 'cursor-key',
+  }
+  expect(agentEnvironment('droid', source)).toEqual({
+    PATH: '/usr/bin',
+    HOME: '/home/employee',
+    FACTORY_API_KEY: 'factory-key',
+  })
+  expect(agentEnvironment('cursor', source)).toEqual({
+    PATH: '/usr/bin',
+    HOME: '/home/employee',
+    CURSOR_API_KEY: 'cursor-key',
   })
 })

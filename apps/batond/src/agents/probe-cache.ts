@@ -38,7 +38,9 @@ export function makeAgentProbe(options: {
                   ]
                 : type === 'antigravity'
                   ? [join(home, '.gemini', 'jetski-standalone-oauth-token')]
-                  : []
+                  : type === 'droid'
+                    ? [join(home, '.factory', 'settings.json'), join(home, '.factory', 'auth.v2.loginkeychain')]
+                    : []
         const binary = type === 'kiro' ? 'kiro-cli' : type === 'antigravity' ? 'agy' : type
         const extensions = process.platform === 'win32' ? ['', '.exe', '.cmd', '.bat'] : ['']
         const paths = [

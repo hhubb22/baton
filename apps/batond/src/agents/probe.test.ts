@@ -14,7 +14,7 @@ import { agentCatalog, type HostedAgentType } from './catalog.ts'
 import { probeAgents, probeInternals } from './probe.ts'
 
 const directories: string[] = []
-const providers = ['cursor', 'pi', 'codex', 'kiro', 'antigravity'] as const
+const providers = ['cursor', 'pi', 'codex', 'kiro', 'antigravity', 'droid'] as const
 const result: ProbeResult = { authenticated: 'unknown', models: [], details: { installed: true } }
 const record = { pid: 12345, creationTime: 'probe-fixture-created', role: 'kiro-host' }
 const deferred = <A = void>() => Promise.withResolvers<A>()
@@ -140,7 +140,7 @@ describe.each(providers)('%s report', (agentType) => {
           { id: 'example', name: 'example' },
           { id: 'second', name: 'second' },
         ],
-        default_model: agentType === 'cursor' ? 'default' : 'example',
+        default_model: agentType === 'cursor' ? 'default' : agentType === 'droid' ? 'auto' : 'example',
         capabilities: agentCatalog[agentType].capabilities,
       })
       expect(report.reason).toContain(`${version} / ${platform}`)
@@ -173,7 +173,7 @@ describe.each(providers)('%s report', (agentType) => {
     })
     expect(report).toMatchObject({
       status: 'available',
-      default_model: agentType === 'codex' ? DEFAULT_MODEL : 'default',
+      default_model: agentType === 'codex' ? DEFAULT_MODEL : agentType === 'droid' ? 'auto' : 'default',
       capabilities: agentCatalog[agentType].capabilities,
     })
     expect(report.reason).toContain('版本探测超时')

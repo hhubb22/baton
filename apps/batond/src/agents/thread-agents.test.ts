@@ -14,7 +14,7 @@ it('constructs hosted agents without filesystem or process work and rejects inva
     working_directory: '/missing-baton-workspace',
     adapter_config: { state_path: '/missing-baton-private/native.json' },
   } as WorkerOpenConfig
-  for (const agent_type of ['cursor', 'pi', 'codex', 'kiro', 'antigravity'] as const) {
+  for (const agent_type of ['cursor', 'pi', 'codex', 'kiro', 'antigravity', 'droid'] as const) {
     expect(factory({ ...config, agent_type }).open).toBeTypeOf('function')
   }
   for (const agent_type of ['unknown', 'constructor', '__proto__']) {

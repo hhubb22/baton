@@ -1,8 +1,8 @@
 # TypeScript 节点与 Thread
 
-`@baton/batond` 通过出站 WSS 连接 [TypeScript 开发中心](../server/README.md)，提供 Cursor、Pi、Codex、Kiro、Antigravity 远程 Thread、Project Runtime、设备目录和订阅管理。节点守护进程保存设备身份、命令与报告账本，网页可发送排队消息、撤回、停止、恢复并读取实时输出。每个 Thread 使用独立 Worker，每个执行中的 Agent Thread 独占一个 agent-host；Worker 管理 SQLite、Turn、回复和报告，agent-host 用 fork 的完整 adapter 执行本机 Agent。本地调用方也可直接通过认证 IPC 使用 Worker。
+`@baton/batond` 通过出站 WSS 连接 [TypeScript 开发中心](../server/README.md)，提供 Cursor、Pi、Codex、Kiro、Antigravity、Droid 远程 Thread、Project Runtime、设备目录和订阅管理。节点守护进程保存设备身份、命令与报告账本，网页可发送排队消息、撤回、停止、恢复并读取实时输出。每个 Thread 使用独立 Worker，每个执行中的 Agent Thread 独占一个 agent-host；Worker 管理 SQLite、Turn、回复和报告，agent-host 用 fork 的完整 adapter 执行本机 Agent。本地调用方也可直接通过认证 IPC 使用 Worker。
 
-设备安装包使用单一 Node SEA 可执行文件，附带 `node_modules/` 提供 Cursor SDK、Project Runtime 模型库与原生依赖。设备无需安装 Node 或 pnpm。TS 提供 Cursor、Pi、Codex、Kiro、Antigravity 远程 Thread、Project 协同和受限 shell；五个 Agent 在程序或 SDK 已安装且认证为 valid 或 unknown 时报告 `available`，开放网页新建与恢复。缺程序或明确 `missing` 时报告 `unavailable`；系统与版本不设白名单，未知版本、其他系统和认证 unknown 保留在 reason 中。配置、恢复和离线验证范围见 [Kiro 文档](src/agents/kiro/README.md)和 [Antigravity 文档](src/agents/antigravity/README.md)；Pi、Codex、Kiro、Cursor 的能力及中心历史读取范围见 [中心能力表](../server/README.md#当前能力范围)。
+设备安装包使用单一 Node SEA 可执行文件，附带 `node_modules/` 提供 Cursor SDK、Project Runtime 模型库与原生依赖。设备无需安装 Node 或 pnpm。TS 提供 Cursor、Pi、Codex、Kiro、Antigravity、Droid 远程 Thread、Project 协同和受限 shell；六个 Agent 在程序或 SDK 已安装且认证为 valid 或 unknown 时报告 `available`，开放网页新建与恢复。缺程序或明确 `missing` 时报告 `unavailable`；系统与版本不设白名单，未知版本、其他系统和认证 unknown 保留在 reason 中。配置、恢复和离线验证范围见 [Kiro 文档](src/agents/kiro/README.md)、[Antigravity 文档](src/agents/antigravity/README.md)和 [Droid 文档](src/agents/droid/README.md)；Pi、Codex、Kiro、Cursor 的能力及中心历史读取范围见 [中心能力表](../server/README.md#当前能力范围)。
 
 ## 开发入口
 
@@ -64,7 +64,7 @@ daemon 在连接变化时原子写入私有的 `daemon-status.json`，包含 `pi
 
 发布构建可内置受信公钥；自托管安装者可在数据目录的私有 `update-trust.json` 显式配置 key ID 到 Ed25519 SPKI 公钥 PEM 的 JSON 对象。更新不会从下载响应导入公钥。新程序通过固定入口及独立版本目录启动，迁移前持锁保存一致备份；业务恢复前的失败可核验备份并回切，恢复后不自动恢复旧数据。
 
-节点连接和能力探测分别进行。Cursor、Pi、Codex、Kiro、Antigravity 探测完成前上报 `unverified`，创建 Thread 需等待 `available` 且 `capabilities.create: true`；Kiro 另以限时 4 秒、stdout/stderr 各最多 4096 字节的 `kiro-cli --version` 获取版本，只上报版本号，诊断不外传，超时或不可解析记入 reason，已安装时仍允许新建，缺程序报告 `unavailable`。五个 Agent 认证 unknown 均允许新建；整次 host 探测失败且安装状态未确认时报告 `unverified`。Pi、Codex 支持 steer，Cursor、Kiro、Antigravity 上游不支持；Pi、Codex、Cursor、Antigravity 支持 Thread 内逐轮换模型，插入消息沿用活动回合的模型；Kiro 上游不支持换模型，原因写入报告。设备进程需显式配置 `CURSOR_API_KEY`。节点退出不结束独立 Worker，重启后从账本重新发现存活 Worker；未确认命令继续使用原 ID，已接收输入不会因为重连再次发送。
+节点连接和能力探测分别进行。Cursor、Pi、Codex、Kiro、Antigravity、Droid 探测完成前上报 `unverified`，创建 Thread 需等待 `available` 且 `capabilities.create: true`；Kiro 与 Droid 另以限时 4 秒、stdout/stderr 各最多 4096 字节的 `--version` 获取版本，只上报版本号，诊断不外传，超时或不可解析记入 reason，已安装时仍允许新建，缺程序报告 `unavailable`。六个 Agent 认证 unknown 均允许新建；整次 host 探测失败且安装状态未确认时报告 `unverified`。Pi、Codex 支持 steer，Cursor、Kiro、Antigravity、Droid 上游不支持；Pi、Codex、Cursor、Antigravity、Droid 支持 Thread 内逐轮换模型，插入消息沿用活动回合的模型；Kiro 上游不支持换模型，原因写入报告。设备进程需显式配置 `CURSOR_API_KEY`。节点退出不结束独立 Worker，重启后从账本重新发现存活 Worker；未确认命令继续使用原 ID，已接收输入不会因为重连再次发送。
 
 ## 设备目录与模型订阅
 

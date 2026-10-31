@@ -102,7 +102,11 @@ function hostedAgentReport(agentType: HostedAgentType, result: ProbeResult): Run
     ...base,
     status: 'available',
     default_model:
-      agentType === 'cursor' ? 'default' : models[0]?.id || (agentType === 'codex' ? DEFAULT_MODEL : 'default'),
+      agentType === 'cursor'
+        ? 'default'
+        : agentType === 'droid'
+          ? 'auto'
+          : models[0]?.id || (agentType === 'codex' ? DEFAULT_MODEL : 'default'),
     capabilities: entry.capabilities,
     reason,
   }

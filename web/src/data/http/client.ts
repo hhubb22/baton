@@ -148,7 +148,7 @@ export function mapDevice(node: NodeDTO): Device {
     lastSeenAt: timestamp(node.last_contact_at ?? node.registered_at),
     registeredAt: timestamp(node.registered_at),
     agents: (report?.agents ?? [])
-      .filter((agent) => ['codex', 'kiro', 'pi', 'cursor', 'antigravity'].includes(agent.agent_type))
+      .filter((agent) => ['codex', 'kiro', 'pi', 'cursor', 'antigravity', 'droid'].includes(agent.agent_type))
       .map((agent) => ({
         kind: agent.agent_type as AgentKind,
         status: agent.status,

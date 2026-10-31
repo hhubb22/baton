@@ -328,7 +328,7 @@ Kiro 只提供排队。需要打断时，员工先停止这一轮再发消息。
 
 Baton 采用上游 `RuntimeMode` 与 `DEFAULT_RUNTIME_MODE`，当前默认 `full-access`。`POST /threads`、本地 `open` 与 Project `threads.create` 接受可选 `runtime_mode`；创建后在 Thread、outbox、节点/Worker 配置和原生映射保存实际值，后续回合与恢复继续使用。模式列表、按模式准入、上游 native policy、待审批请求转交和错误契约统一见 [Agent 适配设计](../agent-adapters/TECH.md#thread-执行权限r-11)，不在中心重复维护映射。
 
-五个 Agent 将持久模式交给上游 adapter 生成原生策略。上游已作出的自动决策继续沿用，实际 pending 请求复用 Thread 问题/回答链路交给员工，审批选项和范围按原生请求保存并校验。
+六个 Agent 将持久模式交给上游 adapter 生成原生策略。上游已作出的自动决策继续沿用，实际 pending 请求复用 Thread 问题/回答链路交给员工，审批选项和范围按原生请求保存并校验。
 
 ### 能力上报
 

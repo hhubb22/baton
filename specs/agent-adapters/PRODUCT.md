@@ -7,13 +7,14 @@ Thread 创建、持久恢复和审批使用上游执行模式，设备按模式�
 
 ## 概述与范围
 
-员工和 Project Agent 通过现有 Thread 功能使用 Pi、Codex、Kiro、Cursor、Grok 和 Antigravity。Agent 接入使用 t3code fork 的 provider，沿用各 Agent 的原生会话、认证和模型，提供新建、排队、停止和恢复；插入和换模型按上游报告的能力提供。协议层的重试、重连、插入归属和回合结束判断以上游实现为准，Baton 负责持久接收、不重发未知输入和停止回收。
+员工和 Project Agent 通过现有 Thread 功能使用 Pi、Codex、Kiro、Cursor、Grok、Antigravity 和 Droid。Agent 接入使用 t3code fork 的 provider，沿用各 Agent 的原生会话、认证和模型，提供新建、排队、停止和恢复；插入和换模型按上游报告的能力提供。协议层的重试、重连、插入归属和回合结束判断以上游实现为准，Baton 负责持久接收、不重发未知输入和停止回收。
 
 | Agent | 本期工作 |
 |---|---|
 | Pi、Codex、Cursor | 通过 t3code 的完整 provider 与节点 agent-host 接入 |
 | Kiro | 已接入 fork 的 ACP provider 与节点 agent-host；程序已安装且认证为 valid 或 unknown 时开放网页新建与恢复，版本和系统不设白名单 |
 | Antigravity | 已接入 fork 的 provider 与节点 agent-host，使用设备上 `agy` 已有的登录；不支持插入，Thread 内可换模型，审批由 Baton 逐次询问，不提供系统隔离 |
+| Droid | 已接入 fork 的 ACP provider 与节点 agent-host，使用设备上 `droid` 已有的登录或 `FACTORY_API_KEY`；不支持插入，支持恢复、Thread 内换模型、思考档位（`reasoning_effort`）、`AskUser` 表单与权限审批 |
 | Grok | 切换后接入，使用设备上已经安装、配置并完成认证的原生程序 |
 
 Claude、OpenCode、Muse、通用 ACP Agent 目录接入均不在本期。Project Agent 的一次性命令由独立 Execution 运行。原生 fork、rollback、计划卡片、独立子 Agent 界面、自动续跑、多账号选择，以及 Agent 安装更新和登录托管均不在本期。
@@ -26,19 +27,19 @@ Claude、OpenCode、Muse、通用 ACP Agent 目录接入均不在本期。Projec
 
 设备分别报告各 Agent 的版本、模型、可用状态、操作能力及诊断原因。网页与 Project Agent 读取中心保存的同一份设备报告；原因在节点上报、中心保存和查询中保留，缺少程序、运行依赖、认证或配置时显示具体缺项。只有状态为可用且明确支持新建的 Agent 才能选择创建，未验证也属于不可创建状态。
 
-五个 Agent 在程序或 SDK 已安装、认证有效或 unknown 时报告可用，按上游 adapter 与已实现的执行路径开放能力。版本未知、版本探测失败或超时、系统组合缺少验证证据只记录到诊断，不阻止新建。缺程序或明确缺少认证时报告不可用；整次探测无法确认安装时报告未验证。Cursor 保留公共安装完整性检查，原生 sandbox 的明确失败仅影响需要该沙箱的执行模式，按 R-11 报告；公共运行依赖或认证明确失败影响整个 Agent。诊断原因变化后，消费端能读取到更新后的原因。原因只包含有限长度的脱敏摘要，不携带凭据或原始诊断输出。创建前再次检查执行条件；检查失败时返回原因，不切换 Agent、账号或设备。新接入 Agent 的交付验证必须覆盖发送、停止及恢复，单次对话成功不能代替这些验证。
+六个 Agent 在程序或 SDK 已安装、认证有效或 unknown 时报告可用，按上游 adapter 与已实现的执行路径开放能力。版本未知、版本探测失败或超时、系统组合缺少验证证据只记录到诊断，不阻止新建。缺程序或明确缺少认证时报告不可用；整次探测无法确认安装时报告未验证。Cursor 保留公共安装完整性检查，原生 sandbox 的明确失败仅影响需要该沙箱的执行模式，按 R-11 报告；公共运行依赖或认证明确失败影响整个 Agent。诊断原因变化后，消费端能读取到更新后的原因。原因只包含有限长度的脱敏摘要，不携带凭据或原始诊断输出。创建前再次检查执行条件；检查失败时返回原因，不切换 Agent、账号或设备。新接入 Agent 的交付验证必须覆盖发送、停止及恢复，单次对话成功不能代替这些验证。
 
 ### R-02｜探测与准备
 
-后台版本和可用性检查使用上游 driver 的检查；Kiro 另在上游 status 之外执行 `kiro-cli --version`。探测不发送 prompt，不调用 authenticate/login 或打开登录浏览器，只使用临时工作目录，不连接员工正在执行的会话。Kiro 的完整探测仍通过上游建立空的发现会话，读取能力与模型。
+后台版本和可用性检查使用上游 driver 的检查；Kiro 与 Droid 另在上游 status 之外分别执行 `kiro-cli --version`、`droid --version`。探测不发送 prompt，不调用 authenticate/login 或打开登录浏览器，只使用临时工作目录，不连接员工正在执行的会话。Kiro 与 Droid 的完整探测仍通过上游建立空的发现会话，读取能力与模型；Droid 直接使用 `session/new` 返回的模型与默认模型的 `configOptions`，不在探测期逐模型切换。
 
-安装状态无法确认时报告未验证并说明缺项。五个 Agent 的认证状态未知时均允许创建，reason 提示首次执行由原生程序检查；明确认证缺失时拒绝。认证与模型目录分别判断：缓存目录或公开模型列表不能证明账号有效；通过认证准入但模型目录读取失败时，允许使用原生默认模型，并显示相应原因。
+安装状态无法确认时报告未验证并说明缺项。六个 Agent 的认证状态未知时均允许创建，reason 提示首次执行由原生程序检查；明确认证缺失时拒绝。认证与模型目录分别判断：缓存目录或公开模型列表不能证明账号有效；通过认证准入但模型目录读取失败时，允许使用原生默认模型，并显示相应原因。
 
 员工修复本机安装、认证或配置后，重启 batond 会重新探测。探测建立的进程、会话临时数据和后台任务有明确期限并被回收；探测失败不影响既有 Thread 的执行。
 
-Cursor 缺少随设备分发的运行依赖时显示安装不完整；设备使用时不临时联网安装依赖。Grok、Antigravity 缺少原生运行环境时提供本机配置指引。
+Cursor 缺少随设备分发的运行依赖时显示安装不完整；设备使用时不临时联网安装依赖。Grok、Antigravity、Droid 缺少原生运行环境时提供本机配置指引。
 
-Kiro 的独立版本命令限时 4 秒，stdout/stderr 各最多收集 4096 字节，只返回版本号，诊断不外传。程序已安装且认证为有效或 `unknown` 时，节点报告 `available`、`create: true`、`resume: true`，网页开放新建与恢复。reason 记录版本、系统、认证未知和版本探测问题。系统或版本（含预发布、构建后缀）、版本超时或不可解析不限制创建；缺程序或明确认证 `missing` 为 `unavailable`；不满足准入条件的新建请求返回 HTTP 422、`agent_unavailable`。本地 CLI 的 `open --agent cursor|pi|codex|kiro` 支持五个 Agent，默认 Cursor。Kiro 2.32.0 的离线回放和注入已验证 capability 的 e2e 验证自动化行为，不能证明真实账号授权有效。
+Kiro 与 Droid 的独立版本命令限时 4 秒，stdout/stderr 各最多收集 4096 字节，只返回版本号，诊断不外传。程序已安装且认证为有效或 `unknown` 时，节点报告 `available`、`create: true`、`resume: true`，网页开放新建与恢复。reason 记录版本、系统、认证未知和版本探测问题。系统或版本（含预发布、构建后缀）、版本超时或不可解析不限制创建；缺程序或明确认证 `missing` 为 `unavailable`；不满足准入条件的新建请求返回 HTTP 422、`agent_unavailable`。本地 CLI 的 `open --agent cursor|pi|codex|kiro|antigravity|droid` 支持六个 Agent，默认 Cursor。Kiro 2.32.0 的离线回放和注入已验证 capability 的 e2e 验证自动化行为，不能证明真实账号授权有效。
 
 ### R-03｜认证与会话归属
 
@@ -48,7 +49,7 @@ Kiro 的独立版本命令限时 4 秒，stdout/stderr 各最多收集 4096 字�
 
 Kiro 从 PATH 查找 `kiro-cli`，沿用设备用户的原生认证配置；节点不提供 `BATON_KIRO_*` 或 `KIRO_HOME` 配置入口，profile 关联保存用户主目录 `homedir()`。
 
-认证失效、配置位置变化或账号不能访问原会话时，停止创建或恢复并说明原因，不能新建空会话来冒充恢复。Kiro 实际回合中发生明确认证失败时，向 Thread 返回固定文案“Sign in to Kiro CLI and try again.”；其他 provider 错误返回“Check Kiro CLI on this device and try again.”。Baton 不自动登录、不透传原始错误、不重发输入。
+认证失效、配置位置变化或账号不能访问原会话时，停止创建或恢复并说明原因，不能新建空会话来冒充恢复。Kiro 实际回合中发生明确认证失败时，向 Thread 返回固定文案“Sign in to Kiro CLI and try again.”；其他 provider 错误返回“Check Kiro CLI on this device and try again.”。Droid 实际回合中发生明确认证失败时返回“Sign in to the Factory Droid CLI and try again.”，其他 provider 错误返回“Check the Factory Droid CLI on this device and try again.”。Baton 不自动登录、不透传原始错误、不重发输入。
 
 ### R-04｜新建与恢复
 
@@ -58,7 +59,7 @@ Kiro 从 PATH 查找 `kiro-cli`，沿用设备用户的原生认证配置；节�
 
 首次创建 Thread 时，原生会话归属必须先保存，再发送第一条消息。恢复时核对原生会话与工作目录，Thread ID 保持不变，历史中的工具调用不再次执行。
 
-Kiro 的恢复与发送核对从打开 adapter 起就指定既有原生会话，先以 `session/list` 核对会话 ID 与 cwd，再 `session/load`；缺失或 load 失败时明确失败，整个路径不创建替代会话。
+Kiro 的恢复与发送核对从打开 adapter 起就指定既有原生会话，先以 `session/list` 核对会话 ID 与 cwd，再 `session/load`；缺失或 load 失败时明确失败，整个路径不创建替代会话。Droid 同样从打开 adapter 起传入既有原生会话 ID 并执行 `session/load`，失败时直接失败，不回退到新建会话。
 
 原生会话或本地映射缺失、历史不匹配时，返回历史缺失或不可用原因。网页仍能查看中心已经保存的回复；员工可以自行新建 Thread。
 
@@ -111,7 +112,7 @@ Thread 创建时直接选择上游 `RuntimeMode`，网页、本地 CLI 与 Proje
 
 各 Agent 的可选模式沿用上游明确声明的支持范围和实际 driver 行为。上游没有缩窄支持范围时，沿用公共模式契约。内部 shell 仍只由 `nodes.exec` 创建，以设备用户权限运行，不增加模式选择。
 
-模式表达上游的审批与执行策略，具体文件隔离、网络访问与自动审查按 provider 实际实现。Pi、Kiro 的非 Full access 模式可以提供审批行为，但不因此具有系统沙箱。Cursor 在 Windows 上的审批与文件隔离也按 SDK 的真实能力说明，界面不能把所有非 Full access 模式统一标成 Sandbox。
+模式表达上游的审批与执行策略，具体文件隔离、网络访问与自动审查按 provider 实际实现。Pi、Kiro、Antigravity、Droid 的非 Full access 模式可以提供审批行为，但不因此具有系统沙箱。Cursor 在 Windows 上的审批与文件隔离也按 SDK 的真实能力说明，界面不能把所有非 Full access 模式统一标成 Sandbox。
 
 设备报告上游模式列表、每个模式的可用性和原因，以及上游默认值；网页与 Project Agent 使用同一份报告。明确属于某个模式的原生 sandbox 故障只影响依赖该沙箱的模式，公共依赖或认证失败影响整个 Agent。默认模式明确不可用时，省略模式的创建返回原因，不自动改选其他模式。缺少某系统或版本的验证证据不新增白名单限制。
 
@@ -135,7 +136,7 @@ adapter 已按原生策略自动处理的操作继续沿用上游。上游实际
 
 | 编号 | 场景 | 可观察结果 | 验证状态 |
 |---|---|---|---|
-| A-01 | 五个 Agent 的安装、认证、未知版本与其他系统；版本探测失败或超时 | 已安装且认证 valid/unknown 时 available、开放 create/resume；版本与系统只记入诊断。缺程序或明确 missing 时 unavailable；安装状态未确认时 unverified；Cursor 公共依赖或认证明确失败时拒绝；sandbox 失败只影响对应模式，见 A-20 | planned |
+| A-01 | 六个 Agent 的安装、认证、未知版本与其他系统；版本探测失败或超时 | 已安装且认证 valid/unknown 时 available、开放 create/resume；版本与系统只记入诊断。缺程序或明确 missing 时 unavailable；安装状态未确认时 unverified；Cursor 公共依赖或认证明确失败时拒绝；sandbox 失败只影响对应模式，见 A-20 | planned |
 | A-02 | 后台检查 | 不发送 prompt、不打开登录，检查结束后清理进程和临时数据 | planned |
 | A-03 | Pi、Codex、Kiro、Cursor 分别新建并完成两轮对话 | 同一原生会话、回复和模型正确，排队顺序正确 | planned |
 | A-04 | 已接收输入但确认丢失；发送中断并重启 Worker | 查原生会话确认或显示未知，Baton 不重发 | planned |
@@ -164,6 +165,7 @@ adapter 已按原生策略自动处理的操作继续沿用上游。上游实际
 | Cursor 认证 | 使用设备显式配置的 `CURSOR_API_KEY`，不读取 ambient 账号或 keyring | 按本机安装、依赖与认证结果开放 |
 | Kiro | 离线夹具与本地替身验证自动化行为，真实账号授权由原生程序在实际执行时检查 | 程序已安装且认证 valid/unknown 时开放新建与恢复，版本和系统不限；上游不支持 steer 和换模型 |
 | Antigravity | 未登录时的实际报错，Windows 和 Linux 上的行为 | 程序已安装且认证 valid/unknown 时开放新建与恢复，版本和系统不限；上游不支持 steer |
+| Droid | Windows 和 Linux 上的行为 | 程序已安装且认证 valid/unknown 时开放新建与恢复，版本和系统不限；上游不支持 steer |
 | Grok | 安装、认证与恢复行为 | 自身交付 |
 | 系统矩阵 | Windows、macOS、Linux 上的原生程序和进程树回收验证范围不同 | 如实记录验证范围，缺少证据的系统组合仍按安装与认证结果开放 |
 

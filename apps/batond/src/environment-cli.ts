@@ -75,8 +75,8 @@ export async function runEnvironmentCLI(args: string[]): Promise<void> {
   if ((action === 'list' || action === 'doctor') && !name) {
     const config = await loadEnvironment(directory)
     const scope = values.scope!
-    const match = /^project:(.+?)(?::agent:(cursor|pi|codex|kiro|antigravity))?$/.exec(scope)
-    const agent = match?.[2] ?? /^agent:(cursor|pi|codex|kiro|antigravity)$/.exec(scope)?.[1]
+    const match = /^project:(.+?)(?::agent:(cursor|pi|codex|kiro|antigravity|droid))?$/.exec(scope)
+    const agent = match?.[2] ?? /^agent:(cursor|pi|codex|kiro|antigravity|droid)$/.exec(scope)?.[1]
     if (scope !== 'device' && !match && !agent) throw new Error('环境作用范围无效')
     const options = { ...(match?.[1] ? { project: match[1] } : {}), ...(agent ? { agent } : {}) }
     const result = resolveEnvironment(config, process.env, options)
@@ -112,7 +112,7 @@ export async function runEnvironmentCLI(args: string[]): Promise<void> {
         )
     }
     const executables: Record<string, boolean> = {}
-    for (const executable of ['codex', 'pi', 'cursor', 'kiro-cli', 'agy']) {
+    for (const executable of ['codex', 'pi', 'cursor', 'kiro-cli', 'agy', 'droid']) {
       executables[executable] =
         (await Effect.runPromise(
           resolveCommandPath(executable, { env: result.env }).pipe(Effect.provide(NodeServices.layer)),
@@ -159,7 +159,7 @@ export async function runEnvironmentCLI(args: string[]): Promise<void> {
       /^(NODE_OPTIONS|NODE_TLS_REJECT_UNAUTHORIZED|LD_PRELOAD|DYLD_.*|BASH_ENV|BATON_.*|OTEL_.*)$/i.test(name)
     )
       throw new Error('环境变量名称无效或受禁止')
-    if (!/^(device|agent:(cursor|pi|codex|kiro|antigravity)|project:.+)$/.test(values.scope!))
+    if (!/^(device|agent:(cursor|pi|codex|kiro|antigravity|droid)|project:.+)$/.test(values.scope!))
       throw new Error('环境作用范围无效')
     let input = ''
     if (action === 'set')
