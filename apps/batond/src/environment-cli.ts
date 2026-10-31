@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { readdir, stat } from 'node:fs/promises'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { defaultDataDirectory } from './platform/layout.ts'
 import { parseArgs } from 'node:util'
 import { Effect, Schema } from 'effect'
 import * as NodeServices from '@effect/platform-node/NodeServices'
@@ -22,7 +22,7 @@ export async function runEnvironmentCLI(args: string[]): Promise<void> {
     args,
     allowPositionals: true,
     options: {
-      'data-dir': { type: 'string', default: join(homedir(), '.baton-ts') },
+      'data-dir': { type: 'string', default: defaultDataDirectory() },
       scope: { type: 'string', default: 'device' },
       shell: { type: 'boolean' },
     },

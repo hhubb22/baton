@@ -12,6 +12,7 @@ import {
   bootstrapInstallation,
   installVersion,
   installationPaths,
+  pruneInstalledVersions,
   readCurrentInstallation,
 } from './update-install.ts'
 import {
@@ -449,6 +450,8 @@ export async function runUpdateWorker(directory: string) {
         const upgrade = await readUpgradeState(directory)
         if (upgrade?.operation_id === state.operation_id && upgrade.phase === 'completed') {
           await advance('completed')
+          // 更新已经成功，清理失败只多占磁盘，下次更新会再清理。
+          await pruneInstalledVersions(directory, state.previous_directory, state.operation_id).catch(() => undefined)
           return
         }
         if (upgrade?.phase === 'failed') throw new Error('更新迁移或同步失败')

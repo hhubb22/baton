@@ -102,7 +102,7 @@ it('失败不向网页返回子进程原始输出或注册凭据', async () => {
 
 it('引导持久入口后通过同一入口运行和查询更新', async () => {
   const calls: Array<{ file: string; args: string[] }> = []
-  const launcher = join('/data', 'installation', 'launcher', process.platform === 'win32' ? 'batond.exe' : 'batond')
+  const launcher = join('/program', 'launcher', process.platform === 'win32' ? 'batond.exe' : 'batond')
   const prefix = ['dispatch', '--data-dir', '/data', '--']
   const batond = new Batond('/resources', '/data', (file, args) => {
     calls.push({ file, args })

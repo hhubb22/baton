@@ -84,7 +84,7 @@ node apps/batond/dist/batond.cjs files add --id repo --path /你的代码目录
 node apps/batond/dist/batond.cjs run
 ```
 
-注册将规范化的中心 HTTPS 地址保存为 `identity.json` 的 `coordinator_url`，`run` 据此推导 WSS 地址；`--relay` 可显式指定。默认数据目录为 `~/.baton-ts`，所有命令使用相同的 `--data-dir`。注册凭据也可用 `--enrollment-file` 从私有文件读取。SEA 安装包首次执行 `up` 或 `register` 时，中心地址与 CA 可来自安装目录的 `deployment.json`，显式 `--coordinator` 和 `--ca-file` 优先；源码和 bundle 入口仍需指定中心地址。注册或重新认证成功后，CA 保存为数据目录的私有文件 `coordinator-ca.pem`，后续 `up`、`run`、`reauth` 与设备更新默认使用它，`--ca-file` 可覆盖。已有身份不读取安装包的部署配置。`batond identity` 输出注册状态、中心地址与公开身份，不含凭据。更多本地命令和恢复语义见 [节点文档](apps/batond/README.md)。
+注册将规范化的中心 HTTPS 地址保存为 `identity.json` 的 `coordinator_url`，`run` 据此推导 WSS 地址；`--relay` 可显式指定。默认数据目录为 `~/.baton/data`，所有命令使用相同的 `--data-dir`。注册凭据也可用 `--enrollment-file` 从私有文件读取。SEA 安装包首次执行 `up` 或 `register` 时，中心地址与 CA 可来自安装目录的 `deployment.json`，显式 `--coordinator` 和 `--ca-file` 优先；源码和 bundle 入口仍需指定中心地址。注册或重新认证成功后，CA 保存为数据目录的私有文件 `coordinator-ca.pem`，后续 `up`、`run`、`reauth` 与设备更新默认使用它，`--ca-file` 可覆盖。已有身份不读取安装包的部署配置。`batond identity` 输出注册状态、中心地址与公开身份，不含凭据。更多本地命令和恢复语义见 [节点文档](apps/batond/README.md)。
 
 macOS 与 Linux 可以将已注册设备安装为当前用户的后台服务；先停止前台运行的 daemon，再执行：
 
@@ -94,7 +94,13 @@ node apps/batond/dist/batond.cjs service status
 node apps/batond/dist/batond.cjs service uninstall
 ```
 
-安装包直接使用 `./batond service install|status|uninstall`。命令支持 `--data-dir`，默认 `~/.baton-ts`。每个系统用户只有一个服务，重复安装会改用当前程序路径和指定的数据目录并重启；升级后在目标安装目录再次执行 `service install` 即可切换入口。服务在登录后启动，异常退出后自动重启，日志写入数据目录下的 `logs/batond.log`。卸载停止服务并移除服务定义，保留身份、日志和其他本地数据。`status` 输出是否安装、是否运行、程序路径和日志路径，不要求传入安装时的数据目录。
+安装包直接使用 `batond service install|status|uninstall`。命令支持 `--data-dir`，默认 `~/.baton/data`。每个系统用户只有一个服务，重复安装会改用当前程序路径和指定的数据目录并重启；升级后在目标安装目录再次执行 `service install` 即可切换入口。服务在登录后启动，异常退出后自动重启，日志写入数据目录下的 `logs/batond.log`。卸载停止服务并移除服务定义，保留身份、日志和其他本地数据。`status` 输出是否安装、是否运行、程序路径和日志路径，不要求传入安装时的数据目录。
+
+macOS 与 Linux 的安装包解压后运行一次 `./batond install`，之后可以删除解压目录，在任意位置使用 `batond`。安装后的文件都在 `~/.baton`：`data/` 放身份、Thread 数据和订阅凭据，`program/` 放程序，`backups/` 放升级备份；命令入口是 `~/.local/bin/batond`，该目录不在 PATH 时命令会提示。每次更新完成后只保留当前版本和用于回滚的上一版。
+
+`batond doctor` 输出版本、各目录位置和占用空间、服务状态，并提示旧目录和数据目录不一致等问题。`batond uninstall` 停止服务并删除程序和命令入口，保留数据和备份；加 `--purge` 同时删除数据（含订阅凭据）和备份。
+
+指定 `--data-dir` 时，程序放在该目录的 `installation/`，备份放在同级的 `<目录>.upgrade-backups`，一台机器上可以这样运行多份互不影响的安装。
 
 Linux 需要有效的 `XDG_RUNTIME_DIR` 和 systemd 用户实例；`status` 还显示 linger 状态，未开启时提示管理员为需要注销后保持运行的用户开启 linger。Windows 使用桌面客户端，不支持 CLI 用户服务。
 
@@ -106,7 +112,7 @@ Linux 需要有效的 `XDG_RUNTIME_DIR` 和 systemd 用户实例；`status` 还�
 
 `apps/desktop` 提供 macOS arm64 和 Windows x64 客户端，内置 batond。首次启动显示本地说明页，收到 `baton://connect` 接入链接后显示中心地址与 CA 指纹，经确认才保存并打开中心页面。已有同一中心的 CLI 身份直接沿用，已有外部 daemon 时显示由外部服务运行。
 
-客户端关闭窗口后留在托盘，默认登录启动，可从托盘关闭该选项或退出。数据目录与 CLI 共用 `~/.baton-ts`，替换应用保留身份与配置。Devices 页面的「Open in desktop app」生成接入链接；客户端桥接、构建和验证范围见 [桌面客户端文档](apps/desktop/README.md)，DMG/NSIS 打包见 [工具说明](tools/README.md#桌面客户端)。
+客户端关闭窗口后留在托盘，默认登录启动，可从托盘关闭该选项或退出。数据目录与 CLI 共用 `~/.baton/data`，替换应用保留身份与配置。Devices 页面的「Open in desktop app」生成接入链接；客户端桥接、构建和验证范围见 [桌面客户端文档](apps/desktop/README.md)，DMG/NSIS 打包见 [工具说明](tools/README.md#桌面客户端)。
 
 ### 设备升级
 
@@ -157,7 +163,7 @@ node apps/batond/dist/batond.cjs project-runtime connection-key <连接 ID> < ke
 | `BATON_HEARTBEAT_INTERVAL` | 中心 | 连接检查间隔，默认 `10s`，范围 100 ms 至 2 分钟 |
 | `BATON_OFFLINE_AFTER` | 中心 | 设备离线期限，默认 `30s`，范围 200 ms 至 10 分钟，须大于心跳间隔 |
 | `BATON_ENROLLMENT_TOKEN` | 节点注册 / 重新认证 | 一次性凭据，也可用 `--enrollment-file` |
-| `BATON_PROJECT_RUNTIME_DATA_DIR` | 节点 / Runtime | 模型凭据目录，默认 `~/.baton/project-runtime` |
+| `BATON_PROJECT_RUNTIME_DATA_DIR` | 节点 / Runtime | 模型凭据目录，默认 `~/.baton/data/credentials` |
 
 控制操作预算、临时 RPC 名额和 OTLP 追踪配置见 [中心文档](apps/server/README.md)。遥测后端地址和 key 配置在中心，节点与网页经中心转发；设备本地可单独配置 OTLP 用于排查。
 

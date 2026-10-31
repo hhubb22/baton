@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import type { Stats } from 'node:fs'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { hasCode } from './errors.ts'
+import { isDefaultDataDirectory } from './layout.ts'
 
 /** Windows 上目标文件被其他句柄打开时 rename 返回 EPERM、EACCES 或 EBUSY，句柄通常很快关闭，按递增间隔重试约 1 秒。 */
 async function replaceFile(from: string, to: string): Promise<void> {
@@ -60,7 +61,8 @@ export async function ensurePrivateDirectory(path: string): Promise<void> {
 
 async function createPrivateDirectory(path: string): Promise<void> {
   try {
-    await mkdir(path, { mode: 0o700 })
+    // 默认数据目录是唯一多一层上级（~/.baton）的目录，其他路径的上级缺失仍然报错。
+    await mkdir(path, { mode: 0o700, recursive: isDefaultDataDirectory(path) })
   } catch (error) {
     if (!hasCode(error, 'EEXIST')) throw error
   }

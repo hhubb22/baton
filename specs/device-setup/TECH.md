@@ -217,7 +217,7 @@ Devices 页读取 `status()` 并订阅 `onStatus()`，卸载时取消订阅，�
 - **已注册且 `coordinator_url` 等于保存的源：** 直接启动监管。
 - **已注册但源不同：** 显示冲突，不启动，也不改保存的配置。
 
-数据目录使用 batond 默认的 `~/.baton-ts`，与 CLI 共用。
+数据目录使用 batond 默认的 `~/.baton/data`，与 CLI 共用。
 
 **打包布局**
 

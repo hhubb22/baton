@@ -1,6 +1,6 @@
 # Baton 桌面客户端
 
-Electron 客户端加载一个 Baton 中心，使用内置 batond 管理本机连接。支持 macOS arm64 与 Windows x64，数据目录沿用 CLI 的 `~/.baton-ts`。中心网页通过受限桥接接入和重新认证本机；已有同一中心的 CLI 身份可直接沿用。
+Electron 客户端加载一个 Baton 中心，使用内置 batond 管理本机连接。支持 macOS arm64 与 Windows x64，数据目录沿用 CLI 的 `~/.baton/data`，程序在 `~/.baton/program`。中心网页通过受限桥接接入和重新认证本机；已有同一中心的 CLI 身份可直接沿用。
 
 ## 构建与验证
 
@@ -27,7 +27,7 @@ node --test tools/package-desktop.test.mjs
 
 客户端运行 `batond identity` 判断身份；未注册时等待接入，同一中心的身份启动监管，其他中心的身份显示冲突。监管运行 `batond run --exit-with-stdin`，合并进程状态和经过 PID、`daemon.lock` 核查的状态文件，每秒推送托盘与网页。版本不兼容时显示原因，并打开原生更新对话框。
 
-异常退出从 1 秒指数退避，最长 30 秒；60 秒内连续失败 5 次停止重启。退出码 78、凭据拒绝、版本不兼容或无效部署配置停止重启。客户端仍在运行时，daemon 的其他退出（含正常退出）都会重新拉起；主动退出客户端时停止监管。`daemon_running` 表示外部服务占用，每 30 秒重试接管，不停止外部进程。运行日志为 `~/.baton-ts/logs/desktop-batond.log`，超过 10MB 轮转一份。
+异常退出从 1 秒指数退避，最长 30 秒；60 秒内连续失败 5 次停止重启。退出码 78、凭据拒绝、版本不兼容或无效部署配置停止重启。客户端仍在运行时，daemon 的其他退出（含正常退出）都会重新拉起；主动退出客户端时停止监管。`daemon_running` 表示外部服务占用，每 30 秒重试接管，不停止外部进程。运行日志为 `~/.baton/data/logs/desktop-batond.log`，超过 10MB 轮转一份。
 
 关闭窗口隐藏到托盘。托盘可打开窗口、重启 batond、打开日志目录、切换登录启动或退出。登录启动默认开启，以登录项启动时隐藏窗口；选择保存在 userData 的 `login-start.json`。退出时关闭 batond stdin 并等待最多 15 秒，超时只终止客户端自己启动的进程。替换应用保留 userData 与设备数据；升级期间不强制结束独立 Worker 或外部服务。
 

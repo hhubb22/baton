@@ -3,6 +3,7 @@ import { createReadStream } from 'node:fs'
 import { basename, join } from 'node:path'
 import { MacUpdater, NsisUpdater } from 'electron-updater'
 import type { SignedUpdateManifest } from '@baton/protocol/update-manifest'
+import { programRoot } from './layout.ts'
 import { verifyDesktopDownload } from './update-download.ts'
 
 type Artifact = {
@@ -92,7 +93,7 @@ export async function prepareDesktopInstaller(options: {
       item.sha256 !== original.sha256 ||
       item.platform !== original.platform ||
       item.arch !== original.arch ||
-      item.path !== join(dataDirectory, 'installation', 'desktop', `${item.sha256}${extension}`)
+      item.path !== join(programRoot(dataDirectory), 'desktop', `${item.sha256}${extension}`)
     )
       throw new Error('更新文件与签名清单不一致')
     await verifyDesktopDownload(item, item.path)

@@ -38,8 +38,8 @@ SEA 安装包首次执行 `up` 或 `register` 时读取可执行文件旁的 `de
 员工在网页为原设备领取一次性重新认证凭据后，在设备本地执行：
 
 ```sh
-./batond reauth --data-dir ~/.baton-ts --enrollment-file /私有目录/重新认证凭据
-./batond up --data-dir ~/.baton-ts
+batond reauth --enrollment-file /私有目录/重新认证凭据
+batond up
 ```
 
 重新认证凭据也可通过 `BATON_ENROLLMENT_TOKEN` 提供；更换自定义 CA 时向 `reauth` 传 `--ca-file`，成功后后续连接使用新 CA。`reauth` 使用 `identity.json` 保存的中心地址，忽略 `--coordinator`，保留设备 ID、注册顺序、Thread 和目录配置，保存本次 CA 与新身份，不启动连接。缺少本地身份或已保存中心地址时返回 `identity_recovery_required`，保留现有数据，不自动注册。
@@ -48,7 +48,7 @@ SEA 安装包首次执行 `up` 或 `register` 时读取可执行文件旁的 `de
 
 `up` 和 `run` 支持 `--control-timeout-seconds <秒>`，取 1～3600 秒的整数，默认 370 秒。认证等待从 WSS 连接建立起计算；认证成功后，同步另有完整的同等预算。到期后断开并按原身份重连。中心默认 15 秒裁决认证握手，其可配置最大期限为 361 秒；节点默认的 370 秒作为等待兜底。
 
-所有节点命令支持 `--data-dir`，默认 `~/.baton-ts`。仅在授权配置不存在时登记用户主目录，已有配置包括空列表都会保留；`--workspace` 在连接前按真实绝对路径幂等登记工作目录。网页设备详情与本地 `files` 命令可以增删授权根；目录选择与附件预览使用同一真实路径边界。节点锁、身份与报告恢复细节见 [远程节点模块](src/daemon/README.md)，实时输出的游标和缓冲规则见 [Worker 文档](src/worker/README.md#real-time-output)。
+所有节点命令支持 `--data-dir`，默认 `~/.baton/data`。仅在授权配置不存在时登记用户主目录，已有配置包括空列表都会保留；`--workspace` 在连接前按真实绝对路径幂等登记工作目录。网页设备详情与本地 `files` 命令可以增删授权根；目录选择与附件预览使用同一真实路径边界。节点锁、身份与报告恢复细节见 [远程节点模块](src/daemon/README.md)，实时输出的游标和缓冲规则见 [Worker 文档](src/worker/README.md#real-time-output)。
 
 `batond identity [--data-dir <目录>]` 在已注册时输出 `{ registered: true, coordinator_url, node_id, employee_id, display_name, system }`，未注册时输出 `{ registered: false }`，不含凭据，也不创建数据目录。
 
@@ -82,7 +82,7 @@ pnpm --filter @baton/batond dev project-exec --enabled=false
 
 命令执行默认关闭。开启后，Project Agent 以设备用户身份执行任意命令；Baton 不提供沙箱，目录授权限制命令启动位置。`nodes.exec` 创建独立 Execution，命令进程由 `src/execution` 管理，启动意图、停止标记和报告保存在私有 SQLite 账本。默认执行时限 7200 秒，工具等待时间与命令时限分别计算。完成证据先保存再上报，无法确认结果时标为 `unknown` 且不自动重跑。状态、输出与恢复规则见 [Project Agent 设计](../../specs/project-agent/TECH.md#10-在节点上执行命令)。
 
-订阅凭据使用 `BATON_PROJECT_RUNTIME_DATA_DIR`，默认 `~/.baton/project-runtime`，登录与 daemon 使用相同的系统用户和目录。`subscriptions` 只读取本地凭据和静态模型目录；终端登录接受 provider ID，支持 `openai-codex`、`xai`、`anthropic`，也识别 ChatGPT、xAI、Claude 别名；实际登录方式由 Runtime 注册的实现决定。API key 从 Runtime 的 `login-api-key <provider>` 标准输入配置，支持 xAI 与 Anthropic，命令和私有文件要求见 [Runtime 登录说明](../../runtimes/project-agent/README.md#运行与凭据)。Runtime 不读取环境 API key 或其他 CLI 的凭据，每个 provider 的 API key 与 OAuth 登录互相替换。网页根据设备报告的 `login_methods` 提供设备码登录或设备本地配置命令。已声明 provider 的认证状态为 `unknown` 时允许启动并由实际请求检查；明确 `login_required` 时等待登录。已知凭据权限、属主或路径错误保留具体安全原因，启动失败后可从运行的 `end_reason` 查看。网页设备码登录在取码后继续后台等待，最多 15 分钟，同服务的新请求替换旧登录，退出后刷新能力报告。凭据留在设备。
+订阅凭据使用 `BATON_PROJECT_RUNTIME_DATA_DIR`，默认 `~/.baton/data/credentials`，登录与 daemon 使用相同的系统用户和目录。`subscriptions` 只读取本地凭据和静态模型目录；终端登录接受 provider ID，支持 `openai-codex`、`xai`、`anthropic`，也识别 ChatGPT、xAI、Claude 别名；实际登录方式由 Runtime 注册的实现决定。API key 从 Runtime 的 `login-api-key <provider>` 标准输入配置，支持 xAI 与 Anthropic，命令和私有文件要求见 [Runtime 登录说明](../../runtimes/project-agent/README.md#运行与凭据)。Runtime 不读取环境 API key 或其他 CLI 的凭据，每个 provider 的 API key 与 OAuth 登录互相替换。网页根据设备报告的 `login_methods` 提供设备码登录或设备本地配置命令。已声明 provider 的认证状态为 `unknown` 时允许启动并由实际请求检查；明确 `login_required` 时等待登录。已知凭据权限、属主或路径错误保留具体安全原因，启动失败后可从运行的 `end_reason` 查看。网页设备码登录在取码后继续后台等待，最多 15 分钟，同服务的新请求替换旧登录，退出后刷新能力报告。凭据留在设备。
 
 节点数据目录中的私有文件 `project-runtime.json` 配置 Project 的资源预算，POSIX 权限为 0600。各字段均可省略，修改后在下次探测或启动时生效：
 
@@ -128,7 +128,7 @@ Kiro 的 local settings 使用 `agentId: kiro`、`commandPath: kiro-cli`，从 P
 
 ## 持久化与恢复
 
-默认数据目录为 `~/.baton-ts`，设备和 Thread 命令支持 `--data-dir`。POSIX 目录权限为 0700、文件为 0600；已有权限不符合要求时拒绝使用。UDS 路径超过系统限制时，使用更短的数据目录。Windows 使用令牌认证的命名管道和私有目录 ACL，平台限制见 [platform 文档](src/platform/README.md)。
+默认数据目录为 `~/.baton/data`，设备和 Thread 命令支持 `--data-dir`。安装、卸载和诊断命令见 [发布设计](../../specs/release/TECH.md)。POSIX 目录权限为 0700、文件为 0600；已有权限不符合要求时拒绝使用。UDS 路径超过系统限制时，使用更短的数据目录。Windows 使用令牌认证的命名管道和私有目录 ACL，平台限制见 [platform 文档](src/platform/README.md)。
 
 每个 Thread 的目录包含 Worker 独占锁、IPC 令牌、`thread.db`、原生会话映射和 SDK store。账本使用 WAL 与 `synchronous=FULL`。命令回执与排队状态原子提交；原生发送前把本地准备文档和 intent 原子提交。提交结果无法核查时，Worker 停止执行并关闭本次运行资源。
 

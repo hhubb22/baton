@@ -14,7 +14,7 @@
 
 POSIX 目录和文件须属于当前 UID，文件须为普通文件；权限不是 0700/0600 时直接改回，不因权限不符拒绝访问。打开前后通过 lstat/fstat 核对设备与 inode，使用 O_NOFOLLOW，拒绝符号链接。文件的直接父目录也必须通过私有目录检查。调用方负责从可信父目录创建数据根目录。
 
-Windows 不设置或校验 ACL，私有目录沿用数据目录继承的权限。默认数据目录 `%USERPROFILE%\.baton-ts` 位于用户目录下，Windows 默认只授权当前用户、SYSTEM 与 Administrators。验证只检查目录类型并拒绝符号链接与 junction，文件打开前后同样核对设备与 inode；`protectPrivateDirectory` 在 Windows 上只检查类型，不改权限。Node 没有逐句柄 DACL 与 reparse point 校验。
+Windows 不设置或校验 ACL，私有目录沿用数据目录继承的权限。默认数据目录 `%USERPROFILE%\.baton\data` 位于用户目录下，Windows 默认只授权当前用户、SYSTEM 与 Administrators。验证只检查目录类型并拒绝符号链接与 junction，文件打开前后同样核对设备与 inode；`protectPrivateDirectory` 在 Windows 上只检查类型，不改权限。Node 没有逐句柄 DACL 与 reparse point 校验。
 
 ## 独占锁
 

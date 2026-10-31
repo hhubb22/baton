@@ -3,6 +3,7 @@ import { Schema } from 'effect'
 import { NodeUpdatePhase, PositiveInteger, UUID } from '@baton/protocol'
 import { readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
 import { lstat } from 'node:fs/promises'
+import { programRoot } from '../platform/layout.ts'
 import { isMissing } from './identity.ts'
 
 export const UpdateState = Schema.Struct({
@@ -33,7 +34,7 @@ export type RollbackReceipt = typeof RollbackReceipt.Type
 export async function writeRollbackReceipt(directory: string, receipt: RollbackReceipt): Promise<void> {
   const value = Schema.decodeUnknownSync(RollbackReceipt)(receipt)
   await writePrivateFileAtomic(
-    join(directory, 'installation', `rollback-completed-${value.operation_id}.json`),
+    join(programRoot(directory), `rollback-completed-${value.operation_id}.json`),
     JSON.stringify(value),
   )
 }
@@ -46,7 +47,7 @@ export async function readRollbackReceipt(
   try {
     return Schema.decodeUnknownSync(RollbackReceipt)(
       JSON.parse(
-        (await readPrivateFile(join(directory, 'installation', `rollback-completed-${operationId}.json`))).toString(
+        (await readPrivateFile(join(programRoot(directory), `rollback-completed-${operationId}.json`))).toString(
           'utf8',
         ),
       ),
@@ -77,7 +78,7 @@ export async function saveUpdateState(directory: string, state: UpdateState): Pr
 
 export async function assertNoUpdateRollback(directory: string): Promise<void> {
   try {
-    await lstat(join(directory, 'installation', 'rollback.json'))
+    await lstat(join(programRoot(directory), 'rollback.json'))
   } catch (error) {
     if (isMissing(error)) return
     throw error

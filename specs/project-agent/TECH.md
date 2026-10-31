@@ -74,7 +74,7 @@ bootstrap 顶层的 `local_wait_protocol:1` 表示 batond 支持按 Execution �
 
 `call_tool` 的请求字段为 `tool_call_id`、`tool_name`、`arguments` 和 `last_seq`，成功返回保存的 `tool_result` Event。工具定义见第 7 节，工具状态不存于本地控制目录。
 
-用户在设备上执行 `batond login <provider>` 登录订阅。Runtime 注册 `openai-codex`、`xai`、`anthropic`，使用 pi-ai 的 OAuth 流程。API 连接按稳定 ID 独立保存配置和密钥，使用 pi-ai 的 OpenAI Responses、OpenAI Chat Completions 或 Anthropic Messages 接口。手动模型 ID 默认使用 128,000 上下文窗口和 8,192 最大输出 token。`batond project-runtime connection-key <id>` 从标准输入保存非空单行密钥，最多 16 KiB。Runtime 不读取环境认证或其他 CLI 账号。凭据默认保存在 `~/.baton/project-runtime`，可用 `BATON_PROJECT_RUNTIME_DATA_DIR` 指定；登录和守护进程须使用相同系统用户及目录配置，文件权限和锁沿用私有文件约定。
+用户在设备上执行 `batond login <provider>` 登录订阅。Runtime 注册 `openai-codex`、`xai`、`anthropic`，使用 pi-ai 的 OAuth 流程。API 连接按稳定 ID 独立保存配置和密钥，使用 pi-ai 的 OpenAI Responses、OpenAI Chat Completions 或 Anthropic Messages 接口。手动模型 ID 默认使用 128,000 上下文窗口和 8,192 最大输出 token。`batond project-runtime connection-key <id>` 从标准输入保存非空单行密钥，最多 16 KiB。Runtime 不读取环境认证或其他 CLI 账号。凭据默认保存在 `~/.baton/data/credentials`，可用 `BATON_PROJECT_RUNTIME_DATA_DIR` 指定；登录和守护进程须使用相同系统用户及目录配置，文件权限和锁沿用私有文件约定。
 
 设备设置 API 经 `node.subscription_login` / `node.subscription_login_result` 请求本人在线且已同步设备启动设备码登录。ChatGPT 和 xAI 支持设备码，Anthropic 的 OAuth 使用终端交互；重新登录取消同 provider 的旧登录，退出登录删除订阅凭据。`node.model_connection` 只传连接元数据，桌面主进程核查中心账号与本机设备身份后通过本地子进程的标准输入写入密钥。中心保存 Project 的 provider、模型与可选来源设备 ID，创建和更新时核查设备归属；前台及记忆整理只在来源设备调度 API 连接。设备码进程退出触发能力刷新，控制面用消息关联、操作标识和当前节点连接核对响应。
 

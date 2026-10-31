@@ -1,7 +1,7 @@
 import { lstat, readdir, stat } from 'node:fs/promises'
-import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { defaultCredentialsDirectory } from '../platform/layout.ts'
 import type { ProcessCommand } from '../platform/process.ts'
 import { hasCode } from '../platform/errors.ts'
 
@@ -20,7 +20,7 @@ export async function probeFingerprint(command: ProcessCommand, dataDirectory?: 
     const directory =
       command.env?.BATON_PROJECT_RUNTIME_DATA_DIR ??
       process.env.BATON_PROJECT_RUNTIME_DATA_DIR ??
-      join(homedir(), '.baton', 'project-runtime')
+      defaultCredentialsDirectory()
     const files = await readdir(directory).catch((error: unknown) => {
       if (hasCode(error, 'ENOENT')) return []
       throw error

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { readFile, unlink } from 'node:fs/promises'
 import { request } from 'node:https'
-import { homedir, hostname } from 'node:os'
+import { hostname } from 'node:os'
 import { join } from 'node:path'
 import { Schema } from 'effect'
 import { NodeIdentity, ReauthNodeInput, RegisterNodeInput } from '@baton/protocol'
@@ -56,7 +56,7 @@ export function relayURL(raw: string): string {
   return url.toString()
 }
 
-export const defaultDataDirectory = () => join(homedir(), '.baton-ts')
+export { defaultDataDirectory } from '../platform/layout.ts'
 export const nodeSystem = (): NodeIdentity['system'] => {
   if (process.platform === 'darwin') return 'macos'
   if (process.platform === 'linux') return 'linux'

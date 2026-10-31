@@ -140,12 +140,20 @@ SQLite 在只读连接中核对格式元数据和迁移记录，通过后才打�
 | 中心数据库 | `BATON_DATABASE_URL` 指向的 PostgreSQL 数据库，Baton schema 由 `BATON_DB_SCHEMA` 指定、默认 `public`。包含账号、设备与默认选择、Project、记忆与修订、Thread 历史、命令与报告证据，以及 `schema_migrations`。备份须包含恢复所需的 pgvector 扩展及 schema 依赖 |
 | 中心签名密钥 | `BATON_NODE_SIGNING_KEY` 指定的原文件，默认中心工作目录的 `node-signing.key`。与数据库配套保存，恢复原权限和所有者；缺失或无效时停止恢复后处理 |
 | 中心部署配置 | 实际服务管理器、容器或启动脚本中的环境变量与配置文件，包括数据库与 schema、密钥路径、公开 Origin、监听地址、TLS 证书和私钥、反向代理配置及使用的程序版本。恢复数据库不恢复这些文件 |
-| 设备私有数据 | `--data-dir`，默认 `~/.baton-ts`，Windows 为 `%USERPROFILE%\.baton-ts`。整体保留 `identity.json`、`reauth-pending.json`（存在时）、目录和执行授权配置、`node.db`、`project-runtime.db`、`threads/<Thread ID>/thread.db`、`executions/<Execution ID>/execution.db`、执行完成证据、原生映射和 SDK 状态、`full-output/`，以及存在的 SQLite WAL。不能只复制主数据库文件或只保存身份文件 |
-| Project 模型凭据 | `BATON_PROJECT_RUNTIME_DATA_DIR`，默认 `~/.baton/project-runtime`；保存订阅 OAuth、按连接 ID 隔离的 API 配置和密钥及 `embeddings/` 中的 Embedding 凭据。它不在默认设备数据目录内，须单独保护和恢复 |
+| 设备私有数据 | `--data-dir`，默认 `~/.baton/data`，Windows 为 `%USERPROFILE%\.baton\data`。整体保留 `identity.json`、`reauth-pending.json`（存在时）、目录和执行授权配置、`node.db`、`project-runtime.db`、`threads/<Thread ID>/thread.db`、`executions/<Execution ID>/execution.db`、执行完成证据、原生映射和 SDK 状态、`full-output/`，以及存在的 SQLite WAL。不能只复制主数据库文件或只保存身份文件 |
+| Project 模型凭据 | `BATON_PROJECT_RUNTIME_DATA_DIR`，默认 `~/.baton/data/credentials`；保存订阅 OAuth、按连接 ID 隔离的 API 配置和密钥及 `embeddings/` 中的 Embedding 凭据。随设备数据目录一起保护和恢复，但升级备份跳过它：令牌会在后台刷新，回滚不恢复旧令牌 |
 | Pi 原生会话与认证 | 默认 `~/.pi/agent`，配置了 `PI_CODING_AGENT_DIR` 时使用该目录；会话默认在其 `sessions/`，`PI_CODING_AGENT_SESSION_DIR` 可单独指定会话目录。目录与外部会话目录一并保留 |
 | Codex 原生会话与认证 | `CODEX_HOME`，默认 `~/.codex`；包括 `sessions/`、`archived_sessions/`、SQLite 状态、`auth.json` 等。只恢复 Baton 的原生会话 ID 不能恢复这些内容 |
 | Cursor、Kiro 及其他外部配置 | 保存启动用户的 `HOME`（Windows 为 `%USERPROFILE%`）及原生 CLI/SDK 配置明确指定的外部存储。Baton 未固定 Cursor SDK、Kiro CLI 的全部内部目录，须在实际备份清单中列出；不能确定子目录时保留完整用户配置目录和系统凭据库。Cursor 的 `CURSOR_API_KEY` 来自设备启动配置，须按秘密单独保管；跨系统不能直接复制的认证材料需要重新登录 |
 | 工作目录与外部副作用 | 仓库、工作文件和外部系统由各自备份恢复，中心数据库不保存它们。恢复中心历史不会回滚已经执行的命令、文件变更或外部请求 |
+
+设备文件布局由 `apps/batond/src/platform/layout.ts` 决定。默认数据目录 `~/.baton/data` 的程序在 `~/.baton/program`，升级备份在 `~/.baton/backups`，恢复设备数据时不需要这两个目录。显式指定的数据目录保持自包含：程序在 `<目录>/installation`，备份在同级的 `<目录>.upgrade-backups`。桌面客户端固定使用默认目录。
+
+`batond install` 只能从 SEA 安装包运行，不支持 Windows：把当前安装包复制进程序目录，再写入 `~/.local/bin/batond`。该入口是转发到启动器的 shell 脚本，SEA 通过可执行文件所在目录查找旁置 `node_modules`，脚本入口不影响这个查找。同路径已有其他程序时报错，不覆盖。
+
+更新进入 `completed` 后清理程序目录：保留当前版本、启动器所在版本和状态中的上一版，删除其他版本目录及其他操作的启动器回滚记录。清理失败不影响更新结果，下次更新再做。升级备份不随版本清理。
+
+`batond uninstall` 不支持 Windows，等 daemon 和存活的 Worker 退出后才删除文件，否则报错并保持原样。默认只删除服务定义、程序和自己写入的入口；`--purge` 同时删除数据和备份，指定目录时要求其中存在 `identity.json` 或 `node.db`。服务属于其他数据目录时不动服务。`batond doctor` 只读，服务状态不可用时对应字段为 `null`。
 
 设备更新进程在独占锁下生成并校验数据目录备份，范围与位置见「设备准备与切换」。人工保存或恢复设备数据前，须停止 daemon、所有 Worker、agent-host、watchdog、前后台 Runtime 及其他共享原生存储的写入者，确认它们退出，再整体复制数据与存在的 WAL。停止 daemon 不代表其他进程已退出；不满足这些条件的设备副本不能宣称为一致备份。私有目录和凭据保持原权限，Windows 的 ACL 边界见平台说明。
 
@@ -213,7 +221,7 @@ Windows Server 2022 本机通过四个 Agent 与原生模块加载，以及 Curs
 
 ## Windows 待修与待验证
 
-Windows 私有目录不设置或校验 ACL，沿用数据目录继承的权限。默认数据目录 `%USERPROFILE%\.baton-ts` 和临时目录都在用户目录下，Windows 默认只授权当前用户、SYSTEM 与 Administrators；把数据目录放到其他用户可读的位置时，由设备用户自行负责权限。Worker 准备因此不再启动 PowerShell 或 `icacls`，Project Runtime 读写凭据也不再启动子进程。
+Windows 私有目录不设置或校验 ACL，沿用数据目录继承的权限。默认数据目录 `%USERPROFILE%\.baton\data` 和临时目录都在用户目录下，Windows 默认只授权当前用户、SYSTEM 与 Administrators；把数据目录放到其他用户可读的位置时，由设备用户自行负责权限。Worker 准备因此不再启动 PowerShell 或 `icacls`，Project Runtime 读写凭据也不再启动子进程。
 
 Windows 本机上节点、中心与 Runtime 测试全部通过，统一构建（含 SEA）成功。测试配置在 Windows 上把超时放大 4 倍、同时运行的测试文件限为 2 个；4 个靠重命名仍被打开的目录来构造祖先替换的测试在 Windows 上跳过，因为系统拒绝这种重命名。全量运行时 Worker 的一个 TestClock 竞争测试偶发失败，单独运行通过。完整安装包检查、冷启动与 FULL 测量和 Windows 进程检查（`Grandchild missing before taskkill`）待验证；Windows Server 2025、普通本地用户的完整 workspace 测试与实际 PID 复用也待验证。
 

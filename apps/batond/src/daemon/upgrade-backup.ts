@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream, constants } from 'node:fs'
 import { access, copyFile, lstat, mkdir, readdir, realpath, rm, statfs } from 'node:fs/promises'
-import { basename, dirname, join, sep } from 'node:path'
+import { dirname, join, sep } from 'node:path'
 import { Schema } from 'effect'
+import { backupRoot } from '../platform/layout.ts'
 import { ensurePrivateDirectory, readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
 import { IPCError } from './ipc.ts'
 
@@ -19,6 +20,8 @@ export async function dataEntries(directory: string) {
         (root &&
           (name === 'ipc' ||
             name === 'installation' ||
+            // 订阅凭据会在后台刷新，回滚时恢复旧令牌反而会让登录失效。
+            name === 'credentials' ||
             [
               'daemon.lock',
               'identity.lock',
@@ -95,7 +98,7 @@ const BackupRecord = Schema.Struct({
 
 export async function createUpgradeBackup(directory: string, operationId: string) {
   await backupSpace(directory)
-  const parent = join(dirname(directory), `${basename(directory)}.upgrade-backups`)
+  const parent = backupRoot(directory)
   await ensurePrivateDirectory(parent)
   const backup_path = join(parent, `${operationId}-${randomUUID()}`)
   await ensurePrivateDirectory(backup_path)

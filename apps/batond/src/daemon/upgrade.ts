@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { Schema } from 'effect'
 import { UUID } from '@baton/protocol'
 import { readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
+import { programRoot } from '../platform/layout.ts'
 import { processLockIsHeld } from '../platform/lock.ts'
 import { readProcessIdentity } from '../platform/identity.ts'
 import { isMissing } from './identity.ts'
@@ -80,7 +81,7 @@ export function readUpgradeState(dataDirectory: string): Promise<UpgradeState | 
 export async function upgradePaused(dataDirectory?: string): Promise<boolean> {
   if (!dataDirectory) return false
   try {
-    await lstat(join(dataDirectory, 'installation', 'rollback.json'))
+    await lstat(join(programRoot(dataDirectory), 'rollback.json'))
     return true
   } catch (error) {
     if (!isMissing(error)) throw error

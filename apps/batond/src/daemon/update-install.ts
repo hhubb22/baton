@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { cp, lstat, realpath, rename, rm } from 'node:fs/promises'
+import { cp, lstat, readdir, realpath, rename, rm } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
 import { isSea } from 'node:sea'
 import { Schema } from 'effect'
 import { ReleaseMetadata } from '@baton/protocol/release'
+import { programRoot } from '../platform/layout.ts'
 import { acquireProcessLock, readProcessLock, type ProcessLock } from '../platform/lock.ts'
 import { ensurePrivateDirectory, readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
 import { readUpgradePackage } from './upgrade-check.ts'
@@ -18,7 +19,7 @@ type InstalledRelease = typeof ReleaseMetadata.Type
 const Installation = Schema.Struct({ directory: Schema.String, release: ReleaseMetadata })
 
 export function installationPaths(dataDirectory: string) {
-  const root = join(dataDirectory, 'installation')
+  const root = programRoot(dataDirectory)
   const binary = process.platform === 'win32' ? 'batond.exe' : 'batond'
   return {
     root,
@@ -202,6 +203,29 @@ export async function restoreInstallation(
       paths.current,
       JSON.stringify({ directory: previousDirectory, release: previous.release }),
     )
+  } finally {
+    await release()
+  }
+}
+
+/** 更新完成后只留当前版本和回滚用的上一版；其余版本已没有进程在用。 */
+export async function pruneInstalledVersions(
+  dataDirectory: string,
+  previousDirectory: string | undefined,
+  operationId: string,
+) {
+  const paths = installationPaths(dataDirectory)
+  const release = await acquireProcessLock(paths.lock)
+  try {
+    const current = await readCurrentInstallation(dataDirectory)
+    const launcher = await readLauncherInstallation(dataDirectory)
+    const keep = new Set([current.directory, launcher.directory, ...(previousDirectory ? [previousDirectory] : [])])
+    for (const name of await readdir(paths.versions))
+      if (/^[a-f0-9]{64}$/.test(name) && !keep.has(name))
+        await rm(join(paths.versions, name), { recursive: true, force: true })
+    for (const name of await readdir(paths.root))
+      if (name.startsWith('launcher-previous-') && name !== `launcher-previous-${operationId}.json`)
+        await rm(join(paths.root, name), { force: true })
   } finally {
     await release()
   }

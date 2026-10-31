@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import type { Writable } from 'node:stream'
 import { realpath, lstat } from 'node:fs/promises'
-import { homedir } from 'node:os'
 import { basename, isAbsolute, join, relative } from 'node:path'
 import { parseArgs } from 'node:util'
 import { isSea } from 'node:sea'
@@ -26,6 +25,7 @@ import { ProcessLockBusy } from './platform/lock.ts'
 import { StorageFormatError } from './storage-format.ts'
 import { readUpgradeState, upgradeOffline } from './daemon/upgrade.ts'
 import { readPrivateFile, writePrivateFileAtomic } from './platform/private.ts'
+import { defaultDataDirectory } from './platform/layout.ts'
 
 const usage = `Baton 节点
 
@@ -46,6 +46,9 @@ up/run 支持 --control-timeout-seconds <秒>，认证与同步各默认等待 3
 
 设备管理：
 
+  install
+  uninstall [--purge]
+  doctor
   service install|uninstall|status
   env import [--shell] | list | doctor | set|unset|reset <名称> [--scope <范围>]
   update
@@ -68,8 +71,8 @@ up/run 支持 --control-timeout-seconds <秒>，认证与同步各默认等待 3
   ack --thread-id <UUID> --event-id <UUID> --worker-seq <序号>
   probe [--agent <cursor|pi|codex|kiro|antigravity>]
 
-设备与 Thread 命令支持 --data-dir <私有目录>，默认 ~/.baton-ts。
-订阅凭据目录使用 BATON_PROJECT_RUNTIME_DATA_DIR，默认 ~/.baton/project-runtime。
+设备与 Thread 命令支持 --data-dir <私有目录>，默认 ~/.baton/data。
+订阅凭据目录使用 BATON_PROJECT_RUNTIME_DATA_DIR，默认 ~/.baton/data/credentials。
 执行命令支持 --command-id <UUID>；重试时使用同一个 ID。
 open 返回持久接收回执，实际结果通过 command 或 reports 查询。`
 
@@ -79,6 +82,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
     isSea() &&
     action &&
     ![
+      'install',
       'dispatch',
       'versioned-dispatch',
       'update-worker',
@@ -96,7 +100,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
     const index = argv.findIndex((arg) => arg === '--data-dir' || arg.startsWith('--data-dir='))
     const directory =
       index < 0
-        ? join(homedir(), '.baton-ts')
+        ? defaultDataDirectory()
         : argv[index] === '--data-dir'
           ? argv[index + 1]
           : argv[index]!.slice('--data-dir='.length)
@@ -126,6 +130,30 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
       }
     }
   }
+  if (action === 'install') {
+    if (!isSea()) throw new Error('只有 SEA 安装包可以运行 install')
+    const { installBatond } = await import('./daemon/install.ts')
+    console.log(JSON.stringify(await installBatond()))
+    return
+  }
+  if (action === 'doctor' || action === 'uninstall') {
+    const { values } = parseArgs({
+      args,
+      options: {
+        'data-dir': { type: 'string', default: defaultDataDirectory() },
+        ...(action === 'uninstall' ? { purge: { type: 'boolean' as const, default: false } } : {}),
+      },
+    })
+    const { diagnoseInstallation, uninstallBatond } = await import('./daemon/install.ts')
+    console.log(
+      JSON.stringify(
+        action === 'doctor'
+          ? await diagnoseInstallation(values['data-dir']!)
+          : await uninstallBatond(values['data-dir']!, { purge: values.purge === true }),
+      ),
+    )
+    return
+  }
   if (action === 'env') {
     const { runEnvironmentCLI } = await import('./environment-cli.ts')
     await runEnvironmentCLI(args)
@@ -135,7 +163,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
     const index = argv.findIndex((arg) => arg === '--data-dir' || arg.startsWith('--data-dir='))
     const directory =
       index < 0
-        ? join(homedir(), '.baton-ts')
+        ? defaultDataDirectory()
         : argv[index] === '--data-dir'
           ? argv[index + 1]
           : argv[index]!.slice('--data-dir='.length)
@@ -216,7 +244,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
     const { positionals, values } = parseArgs({
       args,
       allowPositionals: true,
-      options: { 'data-dir': { type: 'string', default: join(homedir(), '.baton-ts') } },
+      options: { 'data-dir': { type: 'string', default: defaultDataDirectory() } },
     })
     const command = positionals[0]
     if (positionals.length !== 1 || (command !== 'install' && command !== 'uninstall' && command !== 'status'))
@@ -240,7 +268,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
   if (action === 'update' && args[0] === 'bootstrap') {
     const { values } = parseArgs({
       args: args.slice(1),
-      options: { 'data-dir': { type: 'string', default: join(homedir(), '.baton-ts') } },
+      options: { 'data-dir': { type: 'string', default: defaultDataDirectory() } },
     })
     const { bootstrapInstallation } = await import('./daemon/update-install.ts')
     console.log(JSON.stringify(await bootstrapInstallation(values['data-dir']!)))
@@ -249,7 +277,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
   if (action === 'update' && args[0] === 'status') {
     const { values } = parseArgs({
       args: args.slice(1),
-      options: { 'data-dir': { type: 'string', default: join(homedir(), '.baton-ts') } },
+      options: { 'data-dir': { type: 'string', default: defaultDataDirectory() } },
     })
     const { readUpdateState } = await import('./daemon/update-state.ts')
     console.log(JSON.stringify({ state: (await readUpdateState(values['data-dir']!)) ?? null }))
@@ -258,7 +286,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
   if (action === 'update' && args[0] === 'manifest') {
     const { values } = parseArgs({
       args: args.slice(1),
-      options: { 'data-dir': { type: 'string', default: join(homedir(), '.baton-ts') } },
+      options: { 'data-dir': { type: 'string', default: defaultDataDirectory() } },
     })
     const { fetchUpdateManifest } = await import('./daemon/update-network.ts')
     console.log(JSON.stringify({ manifest: await fetchUpdateManifest(values['data-dir']!) }))
@@ -268,7 +296,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
     const { values } = parseArgs({
       args: args.slice(1),
       options: {
-        'data-dir': { type: 'string', default: join(homedir(), '.baton-ts') },
+        'data-dir': { type: 'string', default: defaultDataDirectory() },
         'operation-id': { type: 'string' },
         attempt: { type: 'string' },
       },
@@ -285,7 +313,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
     const { values, positionals } = parseArgs({
       args: args.slice(1),
       allowPositionals: true,
-      options: { 'data-dir': { type: 'string', default: join(homedir(), '.baton-ts') } },
+      options: { 'data-dir': { type: 'string', default: defaultDataDirectory() } },
     })
     if (positionals.length > 1 || (positionals[0] !== undefined && !['manual', 'idle'].includes(positionals[0])))
       throw new Error('update policy [manual|idle]')
@@ -300,7 +328,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
     const { values } = parseArgs({
       args: args.slice(1),
       options: {
-        'data-dir': { type: 'string', default: join(homedir(), '.baton-ts') },
+        'data-dir': { type: 'string', default: defaultDataDirectory() },
         'operation-id': { type: 'string' },
         attempt: { type: 'string' },
       },
@@ -319,7 +347,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
     const subcommand = args[0] === 'cancel' || args[0] === 'start' ? args[0] : 'start'
     const { values } = parseArgs({
       args: subcommand === args[0] ? args.slice(1) : args,
-      options: { 'data-dir': { type: 'string', default: join(homedir(), '.baton-ts') } },
+      options: { 'data-dir': { type: 'string', default: defaultDataDirectory() } },
     })
     const update = await import('./daemon/update-orchestrator.ts')
     console.log(
@@ -354,7 +382,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
   }
   if (action === 'files' || action === 'project-exec') {
     const { runDeviceCLI } = await import('./devices/cli.ts')
-    await runDeviceCLI(action, args, join(homedir(), '.baton-ts'))
+    await runDeviceCLI(action, args, defaultDataDirectory())
     return
   }
   if (action === 'login' || action === 'subscriptions') {
@@ -519,7 +547,7 @@ export async function runLocalCLI(
   const { values } = parseArgs({
     args: args.slice(1),
     options: {
-      'data-dir': { type: 'string', default: join(homedir(), '.baton-ts') },
+      'data-dir': { type: 'string', default: defaultDataDirectory() },
       'thread-id': { type: 'string' },
       'command-id': { type: 'string' },
       'message-id': { type: 'string' },

@@ -82,7 +82,7 @@ else {
 async function start() {
   const userData = app.getPath('userData')
   await mkdir(userData, { recursive: true, mode: 0o700 })
-  const requestedDataDirectory = join(homedir(), '.baton-ts')
+  const requestedDataDirectory = join(homedir(), '.baton', 'data')
   await mkdir(join(requestedDataDirectory, 'logs'), { recursive: true, mode: 0o700 })
   const dataDirectory = await realpath(requestedDataDirectory)
   const batond = new Batond(process.resourcesPath, dataDirectory)

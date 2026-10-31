@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { Schema } from 'effect'
 import { SignedUpdateManifest } from '@baton/protocol/update-manifest'
 import type { DeploymentConfig } from './deployment.ts'
+import { programRoot } from './layout.ts'
 import { PublicIdentity } from './status.ts'
 import { lastFailure } from './supervisor.ts'
 import { ThreadDirectory } from './local.ts'
@@ -99,8 +100,7 @@ export class Batond {
       Schema.Struct({ executable: Schema.String, args: Schema.Array(Schema.String) }),
     )(JSON.parse(await this.execute(['update', 'bootstrap'], undefined, true, undefined, true)))
     const expected = join(
-      this.dataDirectory,
-      'installation',
+      programRoot(this.dataDirectory),
       'launcher',
       process.platform === 'win32' ? 'batond.exe' : 'batond',
     )

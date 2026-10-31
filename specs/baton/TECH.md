@@ -533,7 +533,7 @@ trace 从网页贯穿到 agent-host 和 Project Runtime。每个 Turn 和每次 
 
 签名密钥路径由 `BATON_NODE_SIGNING_KEY` 指定，默认工作目录下的 `node-signing.key`；仅在 `lstat` 确认不存在时生成 Ed25519 私钥并原子写入 `0600` 文件，已有文件校验权限、类型、所有者和内容；Windows 不校验权限位和所有者，依赖目录继承的 ACL，也不对目录句柄执行 fsync。升级的迁移、备份和进程处理按 [release TECH](../release/TECH.md#升级执行与恢复)实施；普通中心重启继续按 R-19 恢复。中心默认监听 `127.0.0.1:8080`，通过 HTTPS 反向代理公开；也可直接配置证书提供 HTTPS/WSS。容器与设备 SEA 的发布布局见 [发布设计](../release/TECH.md#打包与发布)。
 
-节点 bundle 为 `apps/batond/dist/batond.cjs`，命令使用 `node apps/batond/dist/batond.cjs <命令>`。`register` 使用 Node 的平台标识推导系统名，显示名由主机名清理而来。注册在 `identity.json` 保存规范化 HTTPS 中心地址，`run` 优先使用显式 `--relay`，否则推导 WSS 地址。`up` 复用注册和运行逻辑，在没有身份时要求中心地址和凭据；workspace 在连接前幂等登记。默认设备数据目录为 `~/.baton-ts`。
+节点 bundle 为 `apps/batond/dist/batond.cjs`，命令使用 `node apps/batond/dist/batond.cjs <命令>`。`register` 使用 Node 的平台标识推导系统名，显示名由主机名清理而来。注册在 `identity.json` 保存规范化 HTTPS 中心地址，`run` 优先使用显式 `--relay`，否则推导 WSS 地址。`up` 复用注册和运行逻辑，在没有身份时要求中心地址和凭据；workspace 在连接前幂等登记。默认设备数据目录为 `~/.baton/data`。
 
 设备进程使用员工账号运行。开发 bundle 的 Project Runtime 从 `runtimes/project-agent/src/cli.ts` 与已安装依赖启动，宿主负责 stdio、订阅登录和租约；SEA 使用 [发布设计](../release/TECH.md#打包与发布) 中的子命令形态。
 

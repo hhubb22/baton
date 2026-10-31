@@ -21,7 +21,9 @@ export function registeredProvider(id: string) {
   return registration
 }
 export function credentials() {
-  return new FileCredentials(process.env.BATON_PROJECT_RUNTIME_DATA_DIR ?? join(homedir(), '.baton', 'project-runtime'))
+  return new FileCredentials(
+    process.env.BATON_PROJECT_RUNTIME_DATA_DIR ?? join(homedir(), '.baton', 'data', 'credentials'),
+  )
 }
 const credentialErrors = new Set([
   'credential_permissions_invalid',
