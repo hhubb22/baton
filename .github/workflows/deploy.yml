@@ -71,3 +71,24 @@ jobs:
           scp tools/deploy-edge.sh "ops@2.29.124.38:$staging/deploy.sh"
           printf '%s' "$GH_TOKEN" | ssh -o BatchMode=yes ops@2.29.124.38 "sudo -n docker --config '$staging/docker-auth' login ghcr.io -u '$GH_ACTOR' --password-stdin"
           ssh -o BatchMode=yes ops@2.29.124.38 "sudo -n env DOCKER_CONFIG='$staging/docker-auth' bash '$staging/deploy.sh' '$RELEASE_VERSION' '$staging' '$image' '$RESET_DATA'"
+      - name: Verify public entrypoint
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          # 经 Cloudflare 和 Traefik 从外部连续访问，发现只影响部分连接的问题
+          passed=0
+          for _ in $(seq 1 180); do
+            status=$(curl --silent --max-time 10 --output response.json --write-out '%{http_code}' https://baton.suupa.dev/api/v1/release || true)
+            if [[ "$status" = 200 ]] && jq -e --arg version "$RELEASE_VERSION" '.version == $version' response.json > /dev/null; then
+              passed=$((passed + 1))
+              if [[ "$passed" -eq 30 ]]; then
+                exit 0
+              fi
+            else
+              echo "Public entrypoint returned HTTP $status after $passed consecutive successes"
+              passed=0
+            fi
+            sleep 1
+          done
+          echo '::error::Public entrypoint did not return 30 consecutive successes within 180 attempts'
+          exit 1
