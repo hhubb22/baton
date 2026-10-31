@@ -8,6 +8,7 @@ import { text } from '../theme/text'
 import { semantic } from '../theme/semantic.stylex'
 import { radius, space } from '../theme/tokens.stylex'
 import { Button, focusRing } from '../ui/Button'
+import { Disclosure, DisclosureChevron, DisclosurePanel, DisclosureTrigger } from '../ui/Disclosure'
 import { Icon } from '../ui/Icon'
 import { StatusDot } from '../ui/Status'
 import { copyText } from './SelectionMenu'
@@ -171,22 +172,19 @@ export function ActivityTrace({
   }
 
   return (
-    <div {...stylex.props(styles.trace)}>
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        {...stylex.props(text.caption, styles.toggle, focusRing.ring)}
-      >
-        <Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} />
+    <Disclosure open={open} onOpenChange={setOpen} {...stylex.props(styles.trace)}>
+      <DisclosureTrigger {...stylex.props(text.caption, styles.toggle, focusRing.ring)}>
+        <DisclosureChevron open={open} />
         {message.activity
           ? activityLine(message.activity)
           : command
             ? '命令输出'
             : `执行过程 · ${message.traceItemCount} 个步骤`}
-      </button>
-      {open && <div {...stylex.props(styles.steps)}>{content}</div>}
-    </div>
+      </DisclosureTrigger>
+      <DisclosurePanel>
+        <div {...stylex.props(styles.steps)}>{content}</div>
+      </DisclosurePanel>
+    </Disclosure>
   )
 }
 
@@ -210,6 +208,17 @@ export function TurnActivityTrace({
   runningStepsTruncated?: boolean
 }) {
   const [open, setOpen] = useState(live)
+  // 运行中默认展开，这一轮结束后自动收起；用户动过开关后以用户的选择为准。
+  const [touched, setTouched] = useState(false)
+  const [settling, setSettling] = useState(false)
+  const [previousLive, setPreviousLive] = useState(live)
+  if (previousLive !== live) {
+    setPreviousLive(live)
+    if (!touched) {
+      setOpen(live)
+      setSettling(!live)
+    }
+  }
   const client = useClient()
   const turnTrace = useLiveTrace(threadId, turnSeq, (live || open) && !!client.readTurnTrace, live)
   const savedTrace = useTrace(messageId ?? '', !client.readTurnTrace && open && !!messageId)
@@ -227,22 +236,23 @@ export function TurnActivityTrace({
     .sort((a, b) => a.ordinal - b.ordinal)
   if (steps.length === 0 && activeSteps.length === 0 && !(count && count > 0)) return null
   return (
-    <div {...stylex.props(styles.trace)}>
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        {...stylex.props(text.caption, styles.toggle, focusRing.ring)}
-      >
-        <Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} />
+    <Disclosure
+      open={open}
+      onOpenChange={(next) => {
+        setTouched(true)
+        setSettling(false)
+        setOpen(next)
+      }}
+      {...stylex.props(styles.trace)}
+    >
+      <DisclosureTrigger {...stylex.props(text.caption, styles.toggle, focusRing.ring)}>
+        <DisclosureChevron open={open} />
         执行过程 · {count ?? steps.length + activeSteps.length} 个步骤
-      </button>
-      {open && (
+      </DisclosureTrigger>
+      <DisclosurePanel settling={settling}>
         <div {...stylex.props(styles.steps)}>
-          {steps.map((step) => (
-            <ActivityStep key={step.item_id} step={step} threadId={threadId} device={device} />
-          ))}
-          {activeSteps.map((step) => (
+          {/* 同一个列表：步骤从进行中变为已保存时不重新挂载，保留展开状态。 */}
+          {[...steps, ...activeSteps].map((step) => (
             <ActivityStep key={step.item_id} step={step} threadId={threadId} device={device} />
           ))}
           {runningStepsTruncated && <p {...stylex.props(text.caption, styles.muted)}>部分进行中的步骤未完整显示。</p>}
@@ -268,8 +278,8 @@ export function TurnActivityTrace({
             </>
           )}
         </div>
-      )}
-    </div>
+      </DisclosurePanel>
+    </Disclosure>
   )
 }
 

@@ -10,6 +10,7 @@ export function useChatScroll(
   { resetKey, ready, onFollow }: { resetKey: string; ready: boolean; onFollow?: (scrollTop: number) => void },
 ) {
   const atLiveEdge = useRef(true)
+  const lastScrollTop = useRef(0)
   const previousKey = useRef(resetKey)
   const [awayFromLatest, setAwayFromLatest] = useState(false)
 
@@ -17,6 +18,7 @@ export function useChatScroll(
     const viewport = viewportRef.current
     if (!viewport) return
     viewport.scrollTop = viewport.scrollHeight
+    lastScrollTop.current = viewport.scrollTop
     onFollow?.(viewport.scrollTop)
   }, [viewportRef, onFollow])
 
@@ -47,7 +49,11 @@ export function useChatScroll(
 
   const onScroll = useCallback((event: UIEvent<HTMLElement>) => {
     const viewport = event.currentTarget
-    atLiveEdge.current = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= liveEdgeThreshold
+    // 滚动事件晚于自动滚动一帧派发，期间新内容可能已经撑大页面，所以只有向上滚动才算离开底部。
+    const nearEnd = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= liveEdgeThreshold
+    if (nearEnd) atLiveEdge.current = true
+    else if (viewport.scrollTop < lastScrollTop.current) atLiveEdge.current = false
+    lastScrollTop.current = viewport.scrollTop
     setAwayFromLatest(!atLiveEdge.current)
   }, [])
 

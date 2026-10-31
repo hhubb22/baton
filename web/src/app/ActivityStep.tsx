@@ -1,11 +1,13 @@
 import * as stylex from '@stylexjs/stylex'
-import { lazy, Suspense, type ReactNode } from 'react'
+import { lazy, Suspense, useState, type ReactNode } from 'react'
 import { baseName, fileSize } from '../data/derive'
 import type { Device, TraceStep } from '../data/types'
 import { fonts, fontSize } from '../theme/base.stylex'
 import { text } from '../theme/text'
 import { semantic } from '../theme/semantic.stylex'
-import { space } from '../theme/tokens.stylex'
+import { motion, space } from '../theme/tokens.stylex'
+import { focusRing } from '../ui/Button'
+import { Disclosure, DisclosureChevron, DisclosurePanel, DisclosureTrigger } from '../ui/Disclosure'
 import { Icon, type IconName } from '../ui/Icon'
 import { FullOutput } from './FullOutput'
 
@@ -15,6 +17,29 @@ const styles = stylex.create({
   root: { display: 'flex', flexDirection: 'column', gap: space.xs, alignSelf: 'stretch', minWidth: 0 },
   head: { display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: '6px', color: semantic.mutedForeground },
   label: { overflowWrap: 'anywhere', minWidth: 0 },
+  status: { flexShrink: 0 },
+  tool: { display: 'flex', flexDirection: 'column', alignSelf: 'stretch', minWidth: 0 },
+  toolHead: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+    minWidth: 0,
+    color: semantic.mutedForeground,
+  },
+  toolToggle: {
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    textAlign: 'left',
+    color: { default: semantic.mutedForeground, ':hover': semantic.foreground },
+    transitionProperty: 'color',
+    transitionDuration: motion.micro,
+    transitionTimingFunction: motion.easeOut,
+  },
+  // 与标题文字左对齐：12px 图标加 6px 间距。
+  detail: { display: 'flex', flexDirection: 'column', gap: space.xs, paddingTop: space.xs, paddingLeft: '18px' },
   output: {
     margin: 0,
     maxHeight: '240px',
@@ -247,6 +272,24 @@ function statusLabel(status: string) {
   return Object.hasOwn(labels, status) ? labels[status]! : status
 }
 
+// 工具类步骤只显示标题，这些字段放在可展开的详情里；思考、计划和错误等内容继续直接显示。
+const toolDetailFields: Record<string, string[]> = {
+  command_execution: ['encoding', 'output', 'exitCode'],
+  dynamic_tool: ['nativeToolId', 'input', 'output'],
+  file_change: ['fileName', 'additions', 'deletions', 'diffStr', 'changes', 'oldStr', 'newStr'],
+  file_search: ['pattern', 'patterns', 'results'],
+  web_search: ['pattern', 'patterns', 'results'],
+  subagent: ['prompt', 'progress', 'result'],
+}
+
+// 正常结束不占标题行的位置；进行中和失败需要不展开就能看到。
+function headStatus(step: TraceStep, data: Record<string, unknown>): { label: string; failed: boolean } | null {
+  if (step.type === 'command_execution' && typeof data.exitCode === 'number')
+    return data.exitCode === 0 ? null : { label: `退出码 ${data.exitCode}`, failed: true }
+  if (!step.status || step.status === 'completed' || step.status === 'succeeded') return null
+  return { label: statusLabel(step.status), failed: step.status === 'failed' }
+}
+
 export function ActivityStep({
   step,
   threadId,
@@ -256,20 +299,33 @@ export function ActivityStep({
   threadId: string
   device: Device | undefined
 }) {
+  const [open, setOpen] = useState(false)
   const view = presentation(step)
   const times = [step.started_at && `开始：${step.started_at}`, step.completed_at && `结束：${step.completed_at}`]
     .filter(Boolean)
     .join('\n')
   const data = record(step.data)
-  return (
-    <div {...stylex.props(styles.root)}>
-      <div title={times || undefined} {...stylex.props(text.small, styles.head)}>
-        <Icon name={view.icon} size={12} />
-        <span {...stylex.props(styles.label, step.type === 'command_execution' && text.mono)}>{view.label}</span>
-        {step.status && !(step.type === 'command_execution' && typeof data.exitCode === 'number') && (
-          <span {...stylex.props(text.caption)}>{statusLabel(step.status)}</span>
+  const status = headStatus(step, data)
+  const fields = toolDetailFields[step.type]
+  const head = (
+    <>
+      <Icon name={view.icon} size={12} />
+      <span
+        {...stylex.props(
+          styles.label,
+          step.type === 'command_execution' && text.mono,
+          fields && !open && text.truncate,
         )}
-      </div>
+      >
+        {view.label}
+      </span>
+      {status && (
+        <span {...stylex.props(text.caption, styles.status, status.failed && text.danger)}>{status.label}</span>
+      )}
+    </>
+  )
+  const detail = (
+    <>
       {view.body}
       {step.truncated && (
         <>
@@ -284,6 +340,40 @@ export function ActivityStep({
           )}
         </>
       )}
-    </div>
+    </>
+  )
+  if (!fields)
+    return (
+      <div {...stylex.props(styles.root)}>
+        <div title={times || undefined} {...stylex.props(text.small, styles.head)}>
+          {head}
+        </div>
+        {detail}
+      </div>
+    )
+  if (
+    !step.truncated &&
+    !fields.some((field) => data[field] !== undefined && data[field] !== null && data[field] !== '')
+  )
+    return (
+      <div {...stylex.props(styles.root)}>
+        <div title={times || undefined} {...stylex.props(text.small, styles.toolHead)}>
+          {head}
+        </div>
+      </div>
+    )
+  return (
+    <Disclosure open={open} onOpenChange={setOpen} {...stylex.props(styles.tool)}>
+      <DisclosureTrigger
+        title={times || undefined}
+        {...stylex.props(text.small, styles.toolHead, styles.toolToggle, focusRing.ring)}
+      >
+        {head}
+        <DisclosureChevron open={open} />
+      </DisclosureTrigger>
+      <DisclosurePanel>
+        <div {...stylex.props(styles.detail)}>{detail}</div>
+      </DisclosurePanel>
+    </Disclosure>
   )
 }

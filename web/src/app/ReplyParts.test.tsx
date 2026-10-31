@@ -106,6 +106,33 @@ it('shows running steps after saved steps and gives saved trace precedence over 
   ).toBeTruthy()
 })
 
+it('expands a live turn, collapses it when the turn ends and keeps a choice the reader made', async () => {
+  const user = userEvent.setup()
+  const client = createMockClient('normal', { latency: { read: 0, save: 0, device: 0, run: 8000 } })
+  const failed = step('command_execution', { input: 'pnpm test', output: 'boom', exitCode: 1 })
+  client.readTurnTrace = async () => ({ state: 'ready', messageId: message.id, steps: [failed] })
+  const view = (turnSeq: number, live: boolean) => (
+    <ClientProvider client={client}>
+      <TurnActivityTrace threadId="thread" turnSeq={turnSeq} device={undefined} live={live} />
+    </ClientProvider>
+  )
+  const { rerender, unmount } = render(view(1, true))
+  const group = await screen.findByRole('button', { name: /执行过程/ })
+  expect(group).toHaveAttribute('aria-expanded', 'true')
+  expect(await screen.findByRole('button', { name: /pnpm test/ })).toHaveTextContent('退出码 1')
+  expect(screen.queryByText('boom')).not.toBeInTheDocument()
+  rerender(view(1, false))
+  expect(group).toHaveAttribute('aria-expanded', 'false')
+  unmount()
+
+  const { rerender: rerenderKept } = render(view(2, true))
+  const kept = await screen.findByRole('button', { name: /执行过程/ })
+  await user.click(kept)
+  await user.click(kept)
+  rerenderKept(view(2, false))
+  expect(kept).toHaveAttribute('aria-expanded', 'true')
+})
+
 it('renders typed steps, gap sizes and full output actions while the device is offline', async () => {
   const user = userEvent.setup()
   const client = createMockClient('normal', { latency: { read: 0, save: 0, device: 0, run: 8000 } })
@@ -152,6 +179,13 @@ it('renders typed steps, gap sizes and full output actions while the device is o
     connection: 'offline',
   })
   await user.click(screen.getByRole('button'))
+  await screen.findByText('printf')
+  expect(screen.queryByText('Saved fragment')).not.toBeInTheDocument()
+  expect(screen.queryByText('已完成')).not.toBeInTheDocument()
+  for (const toggle of screen.getAllByRole('button').slice(1)) {
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    await user.click(toggle)
+  }
   expect(await screen.findByText('Saved fragment')).toBeInTheDocument()
   expect(screen.getByText('退出码 0')).toBeInTheDocument()
   expect(screen.getByLabelText('工具输入')).toHaveTextContent('/work/source.ts')
@@ -224,22 +258,22 @@ it('retains all 120 steps across pages and retries a later page without losing e
   expect(readTrace).not.toHaveBeenCalled()
   const toggle = screen.getByRole('button')
   await user.click(toggle)
-  await screen.findByText('output-49')
+  await screen.findByText('command-49')
   await user.click(screen.getByRole('button', { name: '加载更多执行记录' }))
   expect(await screen.findByRole('status')).toHaveTextContent('无法加载更多执行记录。')
-  expect(screen.getByText('output-0')).toBeInTheDocument()
+  expect(screen.getByText('command-0')).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: '重试加载' }))
-  await screen.findByText('output-99')
+  await screen.findByText('command-99')
   await user.click(screen.getByRole('button', { name: '加载更多执行记录' }))
-  await screen.findByText('output-119')
-  expect(screen.getAllByLabelText('命令输出').map((node) => node.textContent)).toEqual(
-    steps.map((_, i) => `output-${i}`),
+  await screen.findByText('command-119')
+  expect(screen.getAllByText(/^command-\d+$/).map((node) => node.textContent)).toEqual(
+    steps.map((_, i) => `command-${i}`),
   )
   expect(screen.queryByRole('button', { name: '加载更多执行记录' })).not.toBeInTheDocument()
   expect(readTrace.mock.calls.map((call) => call[1])).toEqual([undefined, '50', '50', '100'])
   await user.click(toggle)
   await user.click(toggle)
-  expect(screen.getByText('output-119')).toBeInTheDocument()
+  expect(screen.getByText('command-119')).toBeInTheDocument()
   expect(readTrace).toHaveBeenCalledTimes(4)
 })
 
@@ -251,6 +285,7 @@ it('labels shell Base64 output without presenting it as decoded text', async () 
     steps: [step('command_execution', { input: 'printf binary', output: 'AP+A', encoding: 'base64', exitCode: 0 })],
   }))
   await user.click(screen.getByRole('button'))
+  await user.click(await screen.findByRole('button', { name: /printf binary/ }))
   expect(await screen.findByText('输出编码： Base64')).toBeInTheDocument()
   expect(screen.getByLabelText('Base64 编码的命令输出')).toHaveTextContent('AP+A')
   expect(screen.queryByLabelText('命令输出')).not.toBeInTheDocument()

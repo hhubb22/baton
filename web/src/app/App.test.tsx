@@ -491,6 +491,8 @@ describe('projects', () => {
     expect(live).toHaveTextContent('Checking')
     const conversation = screen.getByRole('region', { name: '对话' })
     Object.defineProperties(conversation, { scrollHeight: { value: 1000 }, clientHeight: { value: 200 } })
+    conversation.scrollTop = 800
+    fireEvent.scroll(conversation)
     conversation.scrollTop = 200
     fireEvent.scroll(conversation)
 
@@ -858,19 +860,20 @@ describe('threads', () => {
     await user.type(screen.getByLabelText('新对话消息'), 'Add a health check{Enter}')
     await advance(scheduler, browserLatency.read + browserLatency.save)
     const detail = await panel('Add a health check')
-    expect(await within(detail).findByText('运行中')).toBeInTheDocument()
+    expect((await within(detail).findAllByText('运行中')).length).toBeGreaterThan(0)
     expect(screen.getByLabelText('新对话消息')).toHaveTextContent(/^$/)
 
     await advance(scheduler, browserLatency.read + browserLatency.run)
     expect(await within(detail).findByText('空闲')).toBeInTheDocument()
-    expect(within(detail).getByText('Done. The change is ready for review.')).toBeInTheDocument()
+    // 流式回复的文字按字符拆开渲染，这里比较文本内容。
+    expect(detail).toHaveTextContent('Done. The change is ready for review.')
     await waitFor(() =>
       expect(screen.getByRole('link', { name: /Add a health check/ })).not.toHaveAccessibleName(/Unread/),
     )
 
     await user.type(within(detail).getByLabelText('消息'), 'Also document it{Enter}')
     await advance(scheduler, browserLatency.save + browserLatency.run)
-    await waitFor(() => expect(within(detail).getAllByText('Done. The change is ready for review.')).toHaveLength(2))
+    await waitFor(() => expect(detail.textContent?.match(/Done\. The change is ready for review\./g)).toHaveLength(2))
 
     await user.click(within(detail).getByRole('button', { name: '关闭对话' }))
     const row = await screen.findByRole('link', { name: /Add a health check/ })
@@ -1412,7 +1415,7 @@ describe('execution details', () => {
     expect(await screen.findByText('无法加载执行过程')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '重试' }))
-    expect(await screen.findByText('pnpm --dir web build')).toBeInTheDocument()
+    await user.click(await screen.findByRole('button', { name: /pnpm --dir web build/ }))
     expect(screen.getByText(/✓ built in 1.84s/)).toBeInTheDocument()
 
     await user.click(toggle)
@@ -1582,7 +1585,12 @@ describe('execution details', () => {
         expect(observers.some((observer) => observer.target === timeline.firstElementChild)).toBe(true),
       )
       const observer = observers.find((value) => value.target === timeline.firstElementChild)!
-      Object.defineProperties(timeline, { scrollHeight: { value: 1000, writable: true }, clientHeight: { value: 200 } })
+      Object.defineProperties(timeline, {
+        scrollHeight: { value: 1000, writable: true },
+        clientHeight: { value: 200 },
+      })
+      timeline.scrollTop = 800
+      fireEvent.scroll(timeline)
       timeline.scrollTop = 200
       fireEvent.scroll(timeline)
       act(() => observer.notify())
@@ -1592,6 +1600,11 @@ describe('execution details', () => {
       Object.defineProperty(timeline, 'scrollHeight', { value: 1200 })
       act(() => observer.notify())
       expect(timeline.scrollTop).toBe(1200)
+      // 自动滚动的事件派发前内容又变高：读者没有向上滚动，继续跟随。
+      Object.defineProperty(timeline, 'scrollHeight', { value: 1500 })
+      fireEvent.scroll(timeline)
+      act(() => observer.notify())
+      expect(timeline.scrollTop).toBe(1500)
     } finally {
       vi.unstubAllGlobals()
     }

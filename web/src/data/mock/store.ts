@@ -11,6 +11,7 @@ import {
   usableAgents,
 } from '../derive'
 import { DEFAULT_RUNTIME_MODE } from '@baton/protocol'
+import { turnReply, turnStep, turnStepCount } from './turn-script'
 import type {
   AgentKind,
   Device,
@@ -43,6 +44,7 @@ import type {
   ThreadAnswerInput,
   SubscriptionLoginChallenge,
   Trace,
+  TraceStep,
 } from '../types'
 import { previewLimit } from '../types'
 import { createWorld, type ScenarioId } from './scenarios'
@@ -59,6 +61,14 @@ export interface Latency {
   // Agent 完成一轮。
   run: number
 }
+
+interface LiveTurn {
+  seq: number
+  replyId: string
+  steps: TraceStep[]
+}
+
+const turnTraceKey = (threadId: ID, seq: number) => `turn:${threadId}:${seq}`
 
 export const browserLatency: Latency = { read: 150, save: 400, device: 900, run: 8000 }
 
@@ -131,6 +141,7 @@ export class MockStore {
   private listeners = new Set<(event: ChangeEvent) => void>()
   private timers = new Set<() => void>()
   private runs = new Map<ID, () => void>()
+  private liveTurns = new Map<ID, LiveTurn>()
   // 已发给设备、等待确认的停止，键为操作 ID。
   private stopTimers = new Map<ID, { operation: Operation; cancel: () => void }>()
   private clientIds = new Map<string, { opId: ID; body: string }>()
@@ -623,7 +634,11 @@ export class MockStore {
     thread.stop = null
     thread.stopCanceled = 0
     thread.runStartedAt = now
-    this.world.outputs[thread.id] = [{ kind: 'text', text: `$ cd ${thread.folder}\n` }]
+    if (thread.agent) {
+      thread.runTurnSeq = (thread.runTurnSeq ?? 0) + 1
+    } else {
+      this.world.outputs[thread.id] = [{ kind: 'text', text: `$ cd ${thread.folder}\n` }]
+    }
     if (operation) this.setPhase(operation, 'running', message.id)
     this.scheduleRunEnd(thread.id)
   }
@@ -631,6 +646,10 @@ export class MockStore {
   // 一轮执行到一半时设备报告一段输出，结束时整理成回复。
   private scheduleRunEnd(threadId: ID) {
     this.runs.get(threadId)?.()
+    if (this.thread(threadId).runTurnSeq !== undefined && this.thread(threadId).agent) {
+      this.scheduleTurn(threadId)
+      return
+    }
     const cancelOutput = this.schedule(this.latency.run / 2, () => {
       this.appendOutput(threadId, '$ pnpm test\nPASS src/gateway.test.ts (48 tests)\nDuration  2.314s\n')
     })
@@ -642,6 +661,46 @@ export class MockStore {
       cancelOutput()
       cancelEnd()
     })
+  }
+
+  // Agent 的一轮：前 70% 的时间逐个执行工具步骤，之后流式输出回复，全部说完才结束。
+  private scheduleTurn(threadId: ID) {
+    const seq = this.thread(threadId).runTurnSeq!
+    const id = `turn-${threadId}-${seq}`
+    const stepTime = (this.latency.run * 0.7) / turnStepCount
+    const time = () => new Date(this.scheduler.now()).toISOString()
+    const turn: LiveTurn = { seq, replyId: id, steps: [] }
+    this.liveTurns.set(threadId, turn)
+    this.world.outputs[threadId] = []
+    const cancels: (() => void)[] = []
+    for (let index = 0; index < turnStepCount; index++) {
+      cancels.push(
+        this.schedule(stepTime * index, () => {
+          turn.steps[index] = turnStep(id, index, false, time())
+          this.emit('messages')
+        }),
+        this.schedule(stepTime * (index + 1), () => {
+          turn.steps[index] = turnStep(id, index, true, turn.steps[index]!.started_at!, time())
+          this.world.traces[turnTraceKey(threadId, seq)] = turn.steps.filter((step) => step.status !== 'running')
+          this.emit('messages')
+        }),
+      )
+    }
+    const words = turnReply.split(/(?<=\s)/)
+    words.forEach((word, index) => {
+      cancels.push(
+        this.schedule(this.latency.run * (0.7 + (0.28 * index) / words.length), () =>
+          this.appendOutput(threadId, word),
+        ),
+      )
+    })
+    cancels.push(
+      this.schedule(this.latency.run, () => {
+        this.runs.delete(threadId)
+        this.finishRun(threadId)
+      }),
+    )
+    this.runs.set(threadId, () => cancels.forEach((cancel) => cancel()))
   }
 
   private appendOutput(threadId: ID, text: string) {
@@ -665,32 +724,47 @@ export class MockStore {
     const thread = this.thread(threadId)
     if (thread.status !== 'running' || thread.pending) return
     const now = this.scheduler.now()
+    const turn = this.liveTurns.get(threadId)
     const reply: Message = {
       id: this.nextId('msg'),
       threadId,
       role: 'agent',
       sender: 'agent',
-      body: 'Done. The change is ready for review.',
+      body: turn ? turnReply : 'Done. The change is ready for review.',
       createdAt: now,
       delivery: 'delivered',
-      activity: { commands: 1, tools: 0, files: 0 },
+      activity: turn ? null : { commands: 1, tools: 0, files: 0 },
       attachments: [],
+      ...(turn && {
+        replyId: turn.replyId,
+        workerTurnSeq: turn.seq,
+        traceItemCount: turn.steps.length,
+        timelineAt: thread.runStartedAt ?? now,
+      }),
     }
     this.world.messages.push(reply)
     // 一轮结束后，命令和输出作为过程步骤保存在中心。
-    const output = (this.world.outputs[threadId] ?? []).flatMap((chunk) => (chunk.kind === 'text' ? [chunk.text] : []))
-    const data = { input: 'pnpm test', output: output.join('').trimEnd(), exitCode: 0 }
-    this.world.traces[reply.id] = [
-      {
-        item_id: `${reply.id}:command`,
-        type: 'command_execution',
-        status: 'completed',
-        ordinal: 0,
-        data,
-        truncated: false,
-        original_bytes: new TextEncoder().encode(JSON.stringify(data)).length,
-      },
-    ]
+    if (turn) {
+      this.world.traces[reply.id] = turn.steps
+      this.world.traces[turnTraceKey(threadId, turn.seq)] = turn.steps
+      this.liveTurns.delete(threadId)
+    } else {
+      const output = (this.world.outputs[threadId] ?? []).flatMap((chunk) =>
+        chunk.kind === 'text' ? [chunk.text] : [],
+      )
+      const data = { input: 'pnpm test', output: output.join('').trimEnd(), exitCode: 0 }
+      this.world.traces[reply.id] = [
+        {
+          item_id: `${reply.id}:command`,
+          type: 'command_execution',
+          status: 'completed',
+          ordinal: 0,
+          data,
+          truncated: false,
+          original_bytes: new TextEncoder().encode(JSON.stringify(data)).length,
+        },
+      ]
+    }
     delete this.world.outputs[threadId]
     this.endRunningSends(thread, 'done')
     thread.status = 'idle'
@@ -2112,6 +2186,28 @@ export class MockStore {
   readOutput(threadId: ID): LiveOutput {
     const thread = this.thread(threadId)
     const chunks = thread.status === 'running' ? (this.world.outputs[threadId] ?? []) : []
-    return { threadId, chunks }
+    const turn = thread.status === 'running' ? this.liveTurns.get(threadId) : undefined
+    if (!turn) return { threadId, chunks }
+    return {
+      threadId,
+      chunks,
+      replyId: turn.replyId,
+      workerTurnSeq: turn.seq,
+      // 已结束的步骤也带上，页面下一次读取保存的过程之前不会闪没。
+      runningSteps: turn.steps.filter(Boolean),
+    }
+  }
+
+  // 一轮进行中和结束后都能读到已完成的步骤。
+  readTurnTrace(threadId: ID, turnSeq: number, cursor?: string): Trace {
+    const steps = this.world.traces[turnTraceKey(threadId, turnSeq)] ?? []
+    const start = Number(cursor ?? 0)
+    const end = start + 50
+    return {
+      state: 'ready',
+      messageId: `turn:${turnSeq}`,
+      steps: steps.slice(start, end),
+      nextCursor: end < steps.length ? String(end) : undefined,
+    }
   }
 }

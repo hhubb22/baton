@@ -630,7 +630,7 @@ describe('project maintenance', () => {
     act(() => client.controls.setDeviceConnection('dev-windows', 'online'))
     await user.type(await within(thread).findByLabelText('消息'), 'Continue after project archive.{Enter}')
     await advance(scheduler, browserLatency.save + browserLatency.run)
-    expect(await within(thread).findByText('Done. The change is ready for review.')).toBeInTheDocument()
+    await waitFor(() => expect(thread).toHaveTextContent('Done. The change is ready for review.'))
     expect(screen.queryByLabelText('给项目助手发消息')).not.toBeInTheDocument()
   })
 

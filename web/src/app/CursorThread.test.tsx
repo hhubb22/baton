@@ -553,6 +553,7 @@ describe('remote Cursor threads', () => {
       }
       if (reason === 'failed') expect(within(detail).getByText('Cursor 未能完成此回复')).toBeInTheDocument()
       await user.click(toggle)
+      await user.click(await within(detail).findByRole('button', { name: /command-0/ }))
       expect(await within(detail).findByText('Saved output 0')).toBeInTheDocument()
       const requests = fetcher.mock.calls
         .map(([input]) => new URL(requestURL(input), 'https://baton.test'))
