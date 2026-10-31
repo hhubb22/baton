@@ -29,13 +29,13 @@ it('caches probes independently, refreshes changed fingerprints and expires succ
   const first = await read(signal)
   Reflect.set(first[0]!, 'models', [{ id: 'mutated', name: 'mutated' }])
   expect((await read(signal))[0]!.models).toEqual([])
-  expect(probe).toHaveBeenCalledTimes(4)
+  expect(probe).toHaveBeenCalledTimes(5)
   changed = true
   await read(signal)
-  expect(probe).toHaveBeenCalledTimes(5)
+  expect(probe).toHaveBeenCalledTimes(6)
   now = 300_000
   await read(signal)
-  expect(probe).toHaveBeenCalledTimes(9)
+  expect(probe).toHaveBeenCalledTimes(11)
 })
 
 it('backs off unavailable probes, resets backoff on changes and never caches an aborted probe', async () => {
@@ -52,13 +52,13 @@ it('backs off unavailable probes, resets backoff on changes and never caches an 
   await read(signal)
   now = 30_000
   await read(signal)
-  expect(probe).toHaveBeenCalledTimes(8)
+  expect(probe).toHaveBeenCalledTimes(10)
   now = 60_000
   await read(signal)
-  expect(probe).toHaveBeenCalledTimes(8)
+  expect(probe).toHaveBeenCalledTimes(10)
   version = 'new'
   await read(signal)
-  expect(probe).toHaveBeenCalledTimes(12)
+  expect(probe).toHaveBeenCalledTimes(15)
   const controller = new AbortController()
   now += 30_000
   probe.mockImplementation(async (type) => {
@@ -69,7 +69,7 @@ it('backs off unavailable probes, resets backoff on changes and never caches an 
   const afterAbort = probe.mock.calls.length
   probe.mockImplementation(async (type) => agent(type))
   await read(signal)
-  expect(probe).toHaveBeenCalledTimes(afterAbort + 4)
+  expect(probe).toHaveBeenCalledTimes(afterAbort + 5)
 })
 
 it('retries probe exceptions with backoff instead of spawning again on every check', async () => {
@@ -86,10 +86,10 @@ it('retries probe exceptions with backoff instead of spawning again on every che
   const signal = new AbortController().signal
   await expect(read(signal)).rejects.toThrow('Offline failure')
   await expect(read(signal)).rejects.toThrow('Offline failure')
-  expect(probe).toHaveBeenCalledTimes(4)
+  expect(probe).toHaveBeenCalledTimes(5)
   now = 30_000
   await expect(read(signal)).rejects.toThrow('Offline failure')
-  expect(probe).toHaveBeenCalledTimes(8)
+  expect(probe).toHaveBeenCalledTimes(10)
 })
 
 it('invalidates native credentials and CLI metadata without reading credential contents', async () => {
@@ -107,13 +107,13 @@ it('invalidates native credentials and CLI metadata without reading credential c
     const signal = new AbortController().signal
     await read(signal)
     await read(signal)
-    expect(probe).toHaveBeenCalledTimes(4)
+    expect(probe).toHaveBeenCalledTimes(5)
     await writePrivateFileAtomic(join(codex, 'auth.json'), 'not parsed by fingerprint')
     await read(signal)
-    expect(probe).toHaveBeenCalledTimes(5)
+    expect(probe).toHaveBeenCalledTimes(6)
     await writePrivateFileAtomic(join(bin, 'codex'), 'not executed by fingerprint')
     await read(signal)
-    expect(probe).toHaveBeenCalledTimes(6)
+    expect(probe).toHaveBeenCalledTimes(7)
   } finally {
     vi.unstubAllEnvs()
     await rm(directory, { recursive: true, force: true })

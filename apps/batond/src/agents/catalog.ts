@@ -26,6 +26,12 @@ export const agentCatalog = {
     capabilities: { create: true, queue: true, steer: false, stop: true, resume: true, switch_model: false },
     limitation: '上游 adapter 不支持 steer 和 Thread 内换模型',
   },
+  antigravity: {
+    kind: 'hosted',
+    name: 'Antigravity',
+    capabilities: { create: true, queue: true, steer: false, stop: true, resume: true, switch_model: true },
+    limitation: '上游 adapter 不支持 steer',
+  },
 } as const satisfies Record<
   string,
   {

@@ -36,8 +36,10 @@ export function makeAgentProbe(options: {
                     join(env.XDG_DATA_HOME ?? join(home, '.local', 'share'), 'kiro-cli', 'data.sqlite3'),
                     join(env.XDG_DATA_HOME ?? join(home, '.local', 'share'), 'kiro-cli', 'data.sqlite3-wal'),
                   ]
-                : []
-        const binary = type === 'kiro' ? 'kiro-cli' : type
+                : type === 'antigravity'
+                  ? [join(home, '.gemini', 'jetski-standalone-oauth-token')]
+                  : []
+        const binary = type === 'kiro' ? 'kiro-cli' : type === 'antigravity' ? 'agy' : type
         const extensions = process.platform === 'win32' ? ['', '.exe', '.cmd', '.bat'] : ['']
         const paths = [
           ...files,

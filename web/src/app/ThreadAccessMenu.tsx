@@ -30,7 +30,7 @@ export function ThreadAccessMenu({
       ? reported
       : [{ id: mode, available: false, reason: '设备未报告此模式。' }, ...reported]
     : [{ id: mode, available: true }]
-  const noSandbox = agent && (agent.kind === 'pi' || agent.kind === 'kiro')
+  const noSandbox = agent && (agent.kind === 'pi' || agent.kind === 'kiro' || agent.kind === 'antigravity')
   return (
     <Menu
       width="wide"

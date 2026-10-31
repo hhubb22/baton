@@ -595,6 +595,7 @@ function SettingsScene() {
                   { value: 'cursor', label: 'Cursor' },
                   { value: 'pi', label: 'Pi' },
                   { value: 'kiro', label: 'Kiro' },
+                  { value: 'antigravity', label: 'Antigravity' },
                 ]}
               />
             )}

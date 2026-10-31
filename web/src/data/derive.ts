@@ -468,7 +468,13 @@ export function devicesHeading(devices: Device[]) {
   return `${count}，${online} 台在线`
 }
 
-export const agentNames: Record<AgentKind, string> = { codex: 'Codex', kiro: 'Kiro', pi: 'Pi', cursor: 'Cursor' }
+export const agentNames: Record<AgentKind, string> = {
+  codex: 'Codex',
+  kiro: 'Kiro',
+  pi: 'Pi',
+  cursor: 'Cursor',
+  antigravity: 'Antigravity',
+}
 
 const clock = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
 const day = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' })

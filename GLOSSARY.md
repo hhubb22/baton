@@ -10,7 +10,7 @@
 | 设备 / 节点 | 员工注册的、运行 batond 并具有稳定身份的一份运行环境。 | `NodeIdentity`、`node_id`，见 [device.ts](packages/protocol/src/device.ts)。 | 网页称设备，协议和存储多称 node；宿主机与虚拟机可以分别注册。 |
 | 默认设备 | 员工选定的、新建 Thread 时默认使用且优先承载 Project Agent 的设备。 | `DefaultDevice`、`default_device_node_id`、`default_pc_node_id`，见 [device.ts](packages/protocol/src/device.ts)。 | 两个默认设备响应字段指向同一设备；默认设备身份与设备是否在线分别表示。 |
 | 连接身份 | 中心认证的一次节点连接所绑定的员工、设备、凭据、进程实例与连接标识。 | `NodeSource`，见 [errors.ts](apps/server/src/errors.ts)；认证覆盖见 [gateway.ts](apps/server/src/gateway.ts)。 | 报文中的可选 `Source` 由发送方提供，中心以认证得到的身份覆盖它。 |
-| Agent 类型 | 设备可用于执行 Thread 的 Agent 实现类别。 | `agent_type`、`agentCatalog`、`HostedAgentType`，见 [catalog.ts](apps/batond/src/agents/catalog.ts)。 | Cursor、Pi、Codex、Kiro 通过 provider host 运行；Project Agent 有独立的协调身份。 |
+| Agent 类型 | 设备可用于执行 Thread 的 Agent 实现类别。 | `agent_type`、`agentCatalog`、`HostedAgentType`，见 [catalog.ts](apps/batond/src/agents/catalog.ts)。 | Cursor、Pi、Codex、Kiro、Antigravity 通过 provider host 运行；Project Agent 有独立的协调身份。 |
 | Execution / 命令执行 | Project Agent 通过 `nodes.exec` 在设备上发起的一次独立命令执行。 | `Execution`、`execution_id`，见 [execution.ts](packages/protocol/src/execution.ts) 和 [executions.ts](apps/server/src/executions.ts)。 | 关联 Project、设备和工具调用，拥有独立状态、输出和停止请求；不产生 Thread 或 Turn。 |
 | Thread | 绑定员工、设备、工作目录和 Agent，并具有稳定 ID 的执行对话。 | `Thread`、`thread_id`、`native_session_id`，见 [thread.ts](packages/protocol/src/thread.ts)。 | 输出协议 `SessionRequest.session_id` 实际传 Thread ID，见 [full-output.ts](apps/server/src/full-output.ts)；它与原生会话 ID、浏览器登录 session 分属不同身份。 |
 | Turn / 回合 | Thread 中从一条 queue 输入被原生接受到对应终态的一轮执行。 | `ThreadTurn`、`worker_turn_seq`、`turn.started`、`turn.ended`，见 [thread.ts](packages/protocol/src/thread.ts)。 | steer 输入加入当前回合；`worker_seq` 是报告序号，`worker_turn_seq` 是回合序号，`executionId` 是原生执行关联标识。 |

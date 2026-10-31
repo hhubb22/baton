@@ -8,6 +8,7 @@ packages:
   - upstream/t3code/packages/provider-pi
   - upstream/t3code/packages/provider-acp
   - upstream/t3code/packages/provider-acp-registry
+  - upstream/t3code/packages/provider-antigravity
   - upstream/t3code/packages/provider-cursor
   - upstream/t3code/packages/provider-codex
   - upstream/t3code/packages/provider-testing

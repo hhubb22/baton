@@ -65,7 +65,7 @@ it('opens each local Agent with a custom model and budget and reuses its saved c
   try {
     const cwd = await realpath(directory)
     const requests: WorkerRequest[] = []
-    const probeAgent = async (agent: 'cursor' | 'pi' | 'codex' | 'kiro'): Promise<RuntimeAgent> => ({
+    const probeAgent = async (agent: 'cursor' | 'pi' | 'codex' | 'kiro' | 'antigravity'): Promise<RuntimeAgent> => ({
       agent_type: agent,
       version: 'offline',
       status: 'available',
@@ -94,7 +94,7 @@ it('opens each local Agent with a custom model and budget and reuses its saved c
         },
       },
     }
-    for (const agent of ['cursor', 'pi', 'codex', 'kiro']) {
+    for (const agent of ['cursor', 'pi', 'codex', 'kiro', 'antigravity']) {
       const thread = randomUUID()
       const base = ['--data-dir', directory, '--thread-id', thread]
       await runLocalCLI(

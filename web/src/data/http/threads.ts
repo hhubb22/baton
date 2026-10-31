@@ -210,7 +210,13 @@ function mapThread(t: ThreadDTO, events: EventDTO[]): Thread {
     unknown: 'unknown',
     archived: 'archived',
   }
-  if (t.agent_type !== 'pi' && t.agent_type !== 'codex' && t.agent_type !== 'kiro' && t.agent_type !== 'cursor') {
+  if (
+    t.agent_type !== 'pi' &&
+    t.agent_type !== 'codex' &&
+    t.agent_type !== 'kiro' &&
+    t.agent_type !== 'cursor' &&
+    t.agent_type !== 'antigravity'
+  ) {
     throw new ClientError('invalid', `Unsupported thread agent: ${t.agent_type}`)
   }
   const latestStop = events.findLastIndex(

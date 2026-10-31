@@ -22,11 +22,11 @@ Thread 模型取 `model ?? adapter_config.model ?? 'default'`。fork 在 `sessio
 
 Baton 在上游 status 之外运行 `kiro-cli --version`，使用 host 提供的 Node Effect `ChildProcessSpawner` 和 process registrar，由 Scope 与进程回收路径管理生命周期。版本命令限时 4 秒，stdout、stderr 各最多收集 4096 字节；只返回解析出的版本号，原始输出与诊断留在 host 内，不进入能力报告。命令超时、失败、输出超限或无法解析时，版本为 `unknown`，reason 记录相应问题；已确认程序安装时仍允许新建与恢复。缺少程序时报告 `unavailable`。
 
-程序已安装且认证为 valid 或 unknown 时报告 `available`，开放 `capabilities.create` 和 `capabilities.resume`。系统和版本不设白名单，预发布、构建后缀与未知版本也允许新建。reason 保留版本、系统和认证未知提示，认证由原生程序在首次执行时检查；明确 `missing` 或程序缺失则报告 `unavailable`。模型目录不可读时可使用原生默认模型。整次 host 探测失败且安装状态未确认时报告 `unverified`。四个 Agent 共用这一规则。上游 Kiro adapter 报告不支持 steer 和 Thread 内换模型，reason 同时说明这两项限制。
+程序已安装且认证为 valid 或 unknown 时报告 `available`，开放 `capabilities.create` 和 `capabilities.resume`。系统和版本不设白名单，预发布、构建后缀与未知版本也允许新建。reason 保留版本、系统和认证未知提示，认证由原生程序在首次执行时检查；明确 `missing` 或程序缺失则报告 `unavailable`。模型目录不可读时可使用原生默认模型。整次 host 探测失败且安装状态未确认时报告 `unverified`。所有 hosted Agent 共用这一规则。上游 Kiro adapter 报告不支持 steer 和 Thread 内换模型，reason 同时说明这两项限制。
 
 Kiro 的思考强度是 ACP 配置项 `effortLevel`，只有部分模型提供。探测在一次性的空 session 里逐个切换模型，读取各模型的选项后写入 `model_thinking`，不发送消息。发消息时把选中的档位通过 `session/set_config_option` 设置给当前 session。
 
-网页按节点报告开放 Kiro 的新建与恢复；不满足准入条件的新建请求返回 HTTP 422、`code: "agent_unavailable"`。本地 CLI 的 `open --agent` 支持四个 hosted Agent。
+网页按节点报告开放 Kiro 的新建与恢复；不满足准入条件的新建请求返回 HTTP 422、`code: "agent_unavailable"`。本地 CLI 的 `open --agent` 支持所有 hosted Agent。
 
 实际回合中的明确认证失败向 Thread 返回固定文案“Sign in to Kiro CLI and try again.”；其他 provider 错误返回“Check Kiro CLI on this device and try again.”。原始错误不透传，Baton 不自动登录或重发输入。
 

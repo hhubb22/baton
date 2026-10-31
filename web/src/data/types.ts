@@ -5,7 +5,7 @@ import type { MemoryEmbeddingConfig, MemoryEmbeddingConfigInput, ThreadTraceStep
 
 export type ID = string
 
-export type AgentKind = 'codex' | 'kiro' | 'pi' | 'cursor'
+export type AgentKind = 'codex' | 'kiro' | 'pi' | 'cursor' | 'antigravity'
 
 export interface Account {
   id: ID

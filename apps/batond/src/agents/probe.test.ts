@@ -14,7 +14,7 @@ import { agentCatalog, type HostedAgentType } from './catalog.ts'
 import { probeAgents, probeInternals } from './probe.ts'
 
 const directories: string[] = []
-const providers = ['cursor', 'pi', 'codex', 'kiro'] as const
+const providers = ['cursor', 'pi', 'codex', 'kiro', 'antigravity'] as const
 const result: ProbeResult = { authenticated: 'unknown', models: [], details: { installed: true } }
 const record = { pid: 12345, creationTime: 'probe-fixture-created', role: 'kiro-host' }
 const deferred = <A = void>() => Promise.withResolvers<A>()

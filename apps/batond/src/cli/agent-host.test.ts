@@ -20,6 +20,10 @@ vi.mock('../agents/kiro/host-module.ts', () => {
   loaded.add('kiro')
   return { kiroAgentHostModule: { driver: vi.fn() } }
 })
+vi.mock('../agents/antigravity/host-module.ts', () => {
+  loaded.add('antigravity')
+  return { antigravityAgentHostModule: { driver: vi.fn() } }
+})
 
 beforeEach(() => {
   vi.resetModules()

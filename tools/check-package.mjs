@@ -374,7 +374,7 @@ async function main() {
       validateReleaseMetadata(probe.release, report.runtime)
       assert.deepEqual(
         [...probe.agents].sort((left, right) => left.localeCompare(right)),
-        ['codex', 'cursor', 'kiro', 'pi'],
+        ['antigravity', 'codex', 'cursor', 'kiro', 'pi'],
       )
       assert.deepEqual(
         [...probe.nativeModules].sort((left, right) => left.localeCompare(right)),
