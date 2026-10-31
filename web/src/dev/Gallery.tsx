@@ -37,7 +37,9 @@ import { StatusChip, StatusDot, StatusPill, type Tone } from '../ui/Status'
 import { Segmented, Tabs } from '../ui/Tabs'
 import { threadList } from '../ui/ThreadList'
 import { Toggle } from '../ui/Toggle'
-import { threadStatusTones } from '../data/derive'
+import { ThreadModelMenu, type ThreadModelChoice } from '../app/ThreadModelMenu'
+import { agentNames, threadStatusTones } from '../data/derive'
+import type { AgentKind, DeviceAgent } from '../data/types'
 import { ThreadStatusIcon, type ThreadStatus } from '../ui/ThreadStatusIcon'
 import { Tooltip } from '../ui/Tooltip'
 
@@ -408,9 +410,46 @@ function SuggestionPopup() {
   )
 }
 
+function makeGalleryAgent(kind: AgentKind, models: string[]): DeviceAgent {
+  return {
+    kind,
+    status: 'available',
+    reason: null,
+    version: '1.0',
+    models,
+    defaultModel: models[0] ?? '',
+    abilities: { create: true, queue: true, steer: true, stop: true, resume: true, switchModel: true },
+    account: null,
+    problem: null,
+  }
+}
+
+const galleryAgents: DeviceAgent[] = [
+  makeGalleryAgent('codex', ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.3-codex-spark']),
+  makeGalleryAgent('kiro', ['claude-sonnet-4-5', 'claude-opus-4-6', 'claude-haiku-4-5']),
+  makeGalleryAgent('pi', [
+    'anthropic/claude-sonnet-4-6',
+    'anthropic/claude-opus-4-6',
+    'openai-codex/gpt-5.4',
+    'google-vertex/gemini-3.1-pro-preview-customtools',
+    'openrouter/deepseek-r1',
+  ]),
+  makeGalleryAgent('cursor', ['composer-2', 'claude-4.5-sonnet-thinking', 'gpt-5.4']),
+  makeGalleryAgent('antigravity', ['gemini-2.5-pro', 'gemini-2.5-flash']),
+  makeGalleryAgent('droid', ['claude-opus-4-6', 'gpt-5.3-codex']),
+]
+
 function ComposerGallery() {
   const [newChat, setNewChat] = useState('')
   const [reply, setReply] = useState('')
+  const [createChoice, setCreateChoice] = useState<ThreadModelChoice>({
+    agent: 'codex',
+    model: 'gpt-5.4',
+  })
+  const [replyChoice, setReplyChoice] = useState<ThreadModelChoice>({
+    agent: 'kiro',
+    model: 'claude-sonnet-4-5',
+  })
   return (
     <div {...stylex.props(styles.stack)}>
       <PageComposer
@@ -418,12 +457,16 @@ function ComposerGallery() {
         value={newChat}
         onChange={setNewChat}
         onSend={() => setNewChat('')}
-        placeholder="给 Kiro 发消息…"
+        placeholder={`给 ${agentNames[createChoice.agent]} 发消息…`}
         chips={
           <>
-            <Chip composer icon="sparkle">
-              gpt-5.6-sol
-            </Chip>
+            <ThreadModelMenu
+              agents={galleryAgents}
+              choice={createChoice}
+              label={createChoice.model || agentNames[createChoice.agent]}
+              accessibleLabel="选择助手和模型"
+              onSelect={setCreateChoice}
+            />
             <Chip composer icon="reasoning">
               默认
             </Chip>
@@ -447,12 +490,18 @@ function ComposerGallery() {
         value={reply}
         onChange={setReply}
         onSend={() => setReply('')}
-        placeholder="给 Kiro 发消息…"
+        placeholder={`给 ${agentNames[replyChoice.agent]} 发消息…`}
         chips={
           <>
-            <Chip composer icon="sparkle">
-              gpt-5.6-sol
-            </Chip>
+            <ThreadModelMenu
+              agents={galleryAgents.filter((agent) => agent.kind === 'kiro')}
+              choice={replyChoice}
+              label={replyChoice.model || agentNames[replyChoice.agent]}
+              accessibleLabel="切换模型"
+              mode="switch"
+              side="top"
+              onSelect={setReplyChoice}
+            />
             <Chip composer icon="reasoning">
               默认
             </Chip>

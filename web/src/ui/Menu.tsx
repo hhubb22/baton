@@ -33,6 +33,10 @@ const styles = stylex.create({
   wide: { width: '304px' },
   // 带搜索框的短列表：下限足够宽，过滤时宽度基本不跳动，长名称仍可撑开
   search: { minWidth: '240px' },
+  // 单栏模型面板：下限保证过滤时不跳动，长模型名与右侧 provider 前缀可撑到 340px
+  modelList: { minWidth: '240px', maxWidth: 'min(340px, calc(100vw - 24px))', padding: 0, overflow: 'hidden' },
+  // 双栏助手+模型选择器：按内容自适应，左右栏各有最小宽度兜底，长模型名可撑到 440px
+  picker: { minWidth: '320px', maxWidth: 'min(440px, calc(100vw - 24px))', padding: 0, overflow: 'hidden' },
   // 收起的侧栏里触发器很窄，此时由 minWidth 保证可读
   trigger: { width: 'var(--anchor-width)', minWidth: '160px', maxWidth: 'none' },
   option: {
@@ -77,6 +81,7 @@ const styles = stylex.create({
 export function Menu({
   trigger,
   children,
+  open,
   width = 'content',
   align = 'start',
   side = 'bottom',
@@ -84,13 +89,14 @@ export function Menu({
 }: {
   trigger: ReactElement
   children: ReactNode
-  width?: 'content' | 'search' | 'wide' | 'trigger'
+  open?: boolean
+  width?: 'content' | 'search' | 'wide' | 'modelList' | 'picker' | 'trigger'
   align?: 'start' | 'center' | 'end'
   side?: 'top' | 'bottom' | 'left' | 'right'
   onOpenChange?: (open: boolean) => void
 }) {
   return (
-    <BaseMenu.Root onOpenChange={onOpenChange}>
+    <BaseMenu.Root open={open} onOpenChange={onOpenChange}>
       <BaseMenu.Trigger render={trigger} />
       <BaseMenu.Portal>
         <BaseMenu.Positioner side={side} align={align} sideOffset={4} {...stylex.props(styles.positioner)}>
@@ -99,6 +105,8 @@ export function Menu({
               styles.popup,
               width === 'search' && styles.search,
               width === 'wide' && styles.wide,
+              width === 'modelList' && styles.modelList,
+              width === 'picker' && styles.picker,
               width === 'trigger' && styles.trigger,
             )}
           >
@@ -112,6 +120,7 @@ export function Menu({
 
 export function MenuOption({
   children,
+  ariaLabel,
   leading,
   note,
   detail,
@@ -120,6 +129,7 @@ export function MenuOption({
   onSelect,
 }: {
   children: ReactNode
+  ariaLabel?: string
   leading?: ReactNode
   note?: ReactNode
   detail?: ReactNode
@@ -130,6 +140,7 @@ export function MenuOption({
   return (
     <BaseMenu.Item
       onClick={onSelect}
+      aria-label={ariaLabel}
       aria-checked={selected === undefined ? undefined : selected}
       className={(state) =>
         stylex.props(

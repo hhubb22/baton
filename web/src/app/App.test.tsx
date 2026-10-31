@@ -168,6 +168,7 @@ describe('app', () => {
         }))
     })
     await user.click(await screen.findByRole('button', { name: /Codex ·/ }))
+    await user.click(await screen.findByRole('tab', { name: 'Pi' }))
     await user.click(await screen.findByRole('menuitem', { name: '默认模型' }))
     expect(await screen.findByRole('button', { name: 'Pi · 默认模型' })).toBeInTheDocument()
   })
