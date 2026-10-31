@@ -47,6 +47,7 @@ const styles = stylex.create({
   hidden: { opacity: 0 },
   leaving: { transitionDuration: motion.exit },
   wide: { width: '600px' },
+  split: { width: '680px' },
   header: { display: 'flex', flexDirection: 'column', gap: space.sm },
   description: { color: semantic.mutedForeground },
   footer: {
@@ -69,6 +70,7 @@ export function Dialog({
   note,
   actions,
   wide,
+  split,
   finalFocus,
 }: {
   open: boolean
@@ -79,6 +81,7 @@ export function Dialog({
   note?: ReactNode
   actions?: ReactNode
   wide?: boolean
+  split?: boolean
   // 关闭后焦点回到哪里；默认回到打开弹窗的按钮，按钮已经不在页面上时由调用方指定。
   finalFocus?: ComponentProps<typeof BaseDialog.Popup>['finalFocus']
 }) {
@@ -100,6 +103,7 @@ export function Dialog({
             stylex.props(
               styles.popup,
               wide && styles.wide,
+              split && styles.split,
               state.transitionStatus !== undefined && styles.popupHidden,
               state.transitionStatus === 'ending' && styles.leaving,
             ).className ?? ''

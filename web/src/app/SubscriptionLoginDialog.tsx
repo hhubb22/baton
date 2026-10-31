@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ComponentProps } from 'react'
 import { useStartSubscriptionLogin } from '../data/queries'
 import type { Device } from '../data/types'
 import { text } from '../theme/text'
@@ -26,11 +26,13 @@ export function SubscriptionLoginDialog({
   device,
   provider,
   localOnly = false,
+  finalFocus,
   onClose,
 }: {
   device: Device
   provider: string
   localOnly?: boolean
+  finalFocus?: ComponentProps<typeof Dialog>['finalFocus']
   onClose: () => void
 }) {
   const start = useStartSubscriptionLogin()
@@ -89,7 +91,7 @@ export function SubscriptionLoginDialog({
           ? `${Math.floor(remaining / 60)} 分 ${remaining % 60} 秒后过期`
           : undefined
       }
-      finalFocus={() => document.getElementById(`device-row-${device.id}`)}
+      finalFocus={finalFocus ?? (() => document.getElementById(`device-row-${device.id}`))}
       actions={<Button onClick={onClose}>{signedIn ? '完成' : '关闭'}</Button>}
     >
       {localSetup && (

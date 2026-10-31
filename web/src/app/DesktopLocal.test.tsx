@@ -118,11 +118,11 @@ describe('local thread actions', () => {
     await f.user.click(await within(row).findByRole('button', { name: '在编辑器中打开' }))
     expect(f.desktop.bridge.openLocal).toHaveBeenCalledWith({ threadId: 'thr-gateway', action: 'editor' })
     expect(f.router.state.location.search.thread).toBeUndefined()
-    expect(screen.queryByRole('button', { name: '选择本地文件夹…' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '选择本地文件夹' })).not.toBeInTheDocument()
     await f.user.click(screen.getByRole('button', { name: '新建项目' }))
     const dialog = await screen.findByRole('dialog', { name: '新建项目' })
     expect(within(dialog).queryByLabelText('设备')).not.toBeInTheDocument()
-    expect(within(dialog).queryByRole('button', { name: '选择本地文件夹…' })).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '选择本地文件夹' })).not.toBeInTheDocument()
   })
 })
 
@@ -135,7 +135,7 @@ describe('native folder selection', () => {
     const location = await screen.findByRole('button', { name: '文件夹：baton' })
     const pick = async () => {
       await f.user.click(location)
-      await f.user.click(await screen.findByRole('menuitem', { name: '选择本地文件夹…' }))
+      await f.user.click(await screen.findByRole('menuitem', { name: '选择本地文件夹' }))
     }
     await pick()
     await waitFor(() => expect(f.desktop.bridge.pickDirectory).toHaveBeenCalledWith({ nodeId: 'dev-mac' }))
@@ -185,11 +185,11 @@ describe('native folder selection', () => {
       </ClientProvider>,
     )
     const dialog = await screen.findByRole('dialog', { name: '选择文件夹' })
-    expect(within(dialog).queryByRole('button', { name: '选择本地文件夹…' })).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '选择本地文件夹' })).not.toBeInTheDocument()
     await within(dialog).findByRole('option', { name: 'MacBook Pro' })
     await user.selectOptions(within(dialog).getByLabelText('设备'), 'dev-mac')
     desktop.bridge.pickDirectory.mockResolvedValueOnce('/outside')
-    await user.click(await within(dialog).findByRole('button', { name: '选择本地文件夹…' }))
+    await user.click(await within(dialog).findByRole('button', { name: '选择本地文件夹' }))
     expect(await within(dialog).findByText('所选文件夹不在此设备允许访问的范围内。')).toBeInTheDocument()
     expect(selected).not.toHaveBeenCalled()
     let finish!: (path: string | null) => void
@@ -199,11 +199,11 @@ describe('native folder selection', () => {
           finish = resolve
         }),
     )
-    await user.click(within(dialog).getByRole('button', { name: '选择本地文件夹…' }))
+    await user.click(within(dialog).getByRole('button', { name: '选择本地文件夹' }))
     await user.selectOptions(within(dialog).getByLabelText('设备'), 'dev-ubuntu')
     await act(async () => finish('~/src/baton'))
     expect(selected).not.toHaveBeenCalled()
-    expect(within(dialog).queryByRole('button', { name: '选择本地文件夹…' })).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '选择本地文件夹' })).not.toBeInTheDocument()
   })
 
   it.each(['browser', 'old client', 'remote'])('keeps the location menu unchanged in %s', async (mode) => {
@@ -215,8 +215,8 @@ describe('native folder selection', () => {
     if (mode === 'old client') f.desktop.bridge.capabilities = []
     f.show()
     await f.user.click(await screen.findByRole('button', { name: '文件夹：baton' }))
-    await screen.findByRole('menuitem', { name: '选择其他文件夹…' })
-    expect(screen.queryByRole('menuitem', { name: '选择本地文件夹…' })).not.toBeInTheDocument()
+    await screen.findByRole('menuitem', { name: '选择其他文件夹' })
+    expect(screen.queryByRole('menuitem', { name: '选择本地文件夹' })).not.toBeInTheDocument()
   })
 })
 

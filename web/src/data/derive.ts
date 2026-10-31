@@ -595,6 +595,73 @@ export function capabilityLines(device: Device): CapabilityLine[] {
   return [...lines, runtime]
 }
 
+export interface DeviceSectionSummary {
+  text: string
+  attention: boolean
+}
+
+// 设备展开区的「项目助手」一行摘要：汇总订阅、API 连接、凭据异常与命令权限。
+export function projectAssistantSummary(device: Device): DeviceSectionSummary {
+  if (!device.hasRuntime) return { text: '未安装', attention: true }
+  const signedIn = device.subscriptions.filter((item) => item.signedIn).map((item) => item.provider)
+  const unknown = device.subscriptions
+    .filter((item) => !item.signedIn && item.status === 'unknown')
+    .map((item) => `${item.provider} 可尝试`)
+  const issues = device.subscriptions.flatMap((item) => {
+    const issue = subscriptionCredentialIssue(item)
+    return issue ? [`${item.provider}: ${issue}`] : []
+  })
+  const connections = device.modelConnections ?? []
+  const connectionPart =
+    connections.length === 1
+      ? `${connections[0]!.name}${connections[0]!.keyNeeded ? '（需要密钥）' : ''}`
+      : connections.length > 1
+        ? (() => {
+            const needKey = connections.filter((item) => item.keyNeeded).length
+            return needKey > 0
+              ? `${connections.length} 个 API 连接（${needKey} 个需要密钥）`
+              : `${connections.length} 个 API 连接`
+          })()
+        : null
+  const commandPart = device.commandAccess.enabled ? '允许运行命令' : null
+
+  if (!subscriptionCanRun(device) && connections.length === 0) {
+    const missing = device.subscriptions.some((item) => item.status) ? '需要登录订阅账号' : 'ChatGPT 登录已过期'
+    return {
+      text: [missing, ...issues, commandPart].filter(Boolean).join(' · '),
+      attention: true,
+    }
+  }
+
+  const subPart = signedIn.length > 0 ? `${signedIn.join('、')} 已登录` : unknown.length > 0 ? unknown.join('、') : null
+  const hasReadyConnection = connections.some((item) => !item.keyNeeded)
+  const attention =
+    issues.length > 0 ||
+    connections.some((item) => item.keyNeeded) ||
+    (!subscriptionCanRun(device) && !hasReadyConnection)
+  const text = [subPart, ...issues, connectionPart, commandPart].filter(Boolean).join(' · ') || '已就绪'
+  return { text, attention }
+}
+
+// 设备展开区的「编码 Agent」一行摘要：同时列出已就绪的 Agent 与需要处理的缺项。
+export function codingAgentsSummary(device: Device): DeviceSectionSummary {
+  if (device.agents.length === 0) return { text: '未检测到编码 Agent', attention: false }
+  const usable = device.agents.filter(canCreateAgent)
+  const broken = device.agents.filter((agent) => !canCreateAgent(agent))
+  const usablePart = usable.length > 0 ? `${usable.map((agent) => agentNames[agent.kind]).join('、')} 可用` : null
+  if (broken.length === 0) {
+    return { text: usablePart ?? '已就绪', attention: false }
+  }
+  const brokenPart =
+    broken.length <= 2
+      ? broken.map((agent) => `${agentNames[agent.kind]} ${agentUnavailableReason(agent)}`).join(' · ')
+      : `${broken.map((agent) => agentNames[agent.kind]).join('、')} 需要处理`
+  return {
+    text: [usablePart, brokenPart].filter(Boolean).join(' · '),
+    attention: true,
+  }
+}
+
 // 设备行只写系统名，去掉版本号，例如 `macOS 15.0.1` 显示为 `macOS`，`Windows 11 24H2` 显示为 `Windows 11`。
 export function systemName(system: string) {
   if (system === 'macos') return 'macOS'

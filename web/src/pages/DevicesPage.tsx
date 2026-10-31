@@ -3,13 +3,20 @@ import { isAccessError } from '../data/client'
 import { SyncStatus } from '../app/SyncStatus'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { DeviceAgentsDialog } from '../app/DeviceAgentsDialog'
 import { EnrollDialog } from '../app/EnrollDialog'
 import { LocalDeviceDiagnostics } from '../app/LocalDeviceDiagnostics'
-import { SubscriptionLoginDialog } from '../app/SubscriptionLoginDialog'
-import { ModelConnectionEditor } from '../app/ModelConnectionEditor'
+import { ProjectAssistantDialog, type PermissionState } from '../app/ProjectAssistantDialog'
 import { Page } from '../app/Page'
 import { useNow } from '../app/useNow'
-import { agentSummary, capabilityLines, deviceConnectionView, devicesHeading, systemName } from '../data/derive'
+import {
+  agentSummary,
+  codingAgentsSummary,
+  deviceConnectionView,
+  devicesHeading,
+  projectAssistantSummary,
+  systemName,
+} from '../data/derive'
 import {
   useDevices,
   useClient,
@@ -22,17 +29,15 @@ import {
   useSetCommandAccess,
   useSetDefaultDevice,
 } from '../data/queries'
-import type { Device, ID, ModelConnection } from '../data/types'
+import type { Device, ID } from '../data/types'
 import { desktopStatusLabel, desktopStatusReason, needsDesktopReauth, useDesktopStatus } from '../data/desktop'
 import { text } from '../theme/text'
 import { semantic } from '../theme/semantic.stylex'
 import { radius, space } from '../theme/tokens.stylex'
-import { Button, focusRing, IconButton } from '../ui/Button'
+import { Button, focusRing } from '../ui/Button'
 import { Dialog } from '../ui/Dialog'
 import { Icon } from '../ui/Icon'
-import { Menu, MenuOption } from '../ui/Menu'
 import { StatusDot } from '../ui/Status'
-import { Toggle } from '../ui/Toggle'
 
 const styles = stylex.create({
   column: {
@@ -113,20 +118,14 @@ const styles = stylex.create({
     paddingRight: space.lg,
   },
   group: { display: 'flex', flexDirection: 'column', gap: space.sm, minWidth: 0 },
-  sourceHeading: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
-  sourceRow: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: space.md,
-    paddingBlock: space.xs,
+  summaries: {
+    display: 'grid',
+    gridTemplateColumns: '76px minmax(0, 1fr)',
+    gap: '8px 16px',
+    alignItems: 'baseline',
   },
-  sourceInfo: { display: 'flex', flexDirection: 'column', gap: space.xxs, minWidth: 0 },
-  capability: { display: 'flex', alignItems: 'baseline', gap: space.sm },
-  logins: { display: 'flex', flexWrap: 'wrap', gap: space.sm },
-  permission: { display: 'flex', alignItems: 'flex-start', gap: space.lg },
-  permissionText: { display: 'flex', flexDirection: 'column', gap: space.xxs, flexGrow: 1 },
-  actions: { display: 'flex', alignItems: 'center', gap: space.sm },
+  summaryLabel: { color: semantic.mutedForeground },
+  actions: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: space.sm },
   disconnect: { marginInlineStart: 'auto' },
   folders: { display: 'flex', flexDirection: 'column' },
   folder: {
@@ -181,23 +180,8 @@ const upgradeLabels: Partial<Record<NonNullable<Device['updateRequest']>['phase'
   syncing: '正在同步',
   failed: '更新失败',
 }
-const connectionProtocol = {
-  'openai-responses': 'OpenAI Responses',
-  'openai-completions': 'OpenAI Chat Completions',
-  'anthropic-messages': 'Anthropic Messages',
-} as const
-function connectionHost(value: string) {
-  try {
-    return new URL(value).host
-  } catch {
-    return value
-  }
-}
-
 // 操作后的提示。移除默认设备后要等用户选出替代设备，替代设备按当前列表现算。
 type Feedback = { kind: 'notice'; notice: Notice } | { kind: 'chooseDefault'; removed: string }
-
-type PermissionState = { deviceId: ID; phase: 'saving' | 'saved' | 'failed'; enabled: boolean }
 
 type Disconnect = { device: Device; wasDefault: boolean; phase: 'confirm' | 'pending' | 'failed' }
 
@@ -251,52 +235,12 @@ function DeviceRow({
   )
 }
 
-function CommandPermission({
-  state,
-  enabled,
-  onChange,
-}: {
-  state: PermissionState | undefined
-  enabled: boolean
-  onChange: (enabled: boolean) => void
-}) {
-  let line: { text: string; warning?: boolean } | null = null
-  if (state?.phase === 'saving') line = { text: '正在保存命令权限…' }
-  else if (state?.phase === 'saved') line = { text: '已保存' }
-  else if (state?.phase === 'failed') {
-    line = {
-      warning: true,
-      text: state.enabled ? '保存失败，命令执行仍处于关闭状态。' : '保存失败，命令执行仍处于允许状态。',
-    }
-  }
-  return (
-    <section aria-label="命令权限" {...stylex.props(styles.permission)}>
-      <div {...stylex.props(styles.permissionText)}>
-        <span {...stylex.props(text.label)}>允许项目助手运行命令</span>
-        <span {...stylex.props(text.caption, text.muted)}>以设备用户身份运行，可访问目录外的文件。</span>
-        {line && (
-          <span role="status" {...stylex.props(text.caption, line.warning ? styles.attention : text.muted)}>
-            {line.text}
-          </span>
-        )}
-      </div>
-      <Toggle
-        label="允许项目助手运行命令"
-        checked={enabled}
-        onChange={(next) => {
-          if (state?.phase !== 'saving') onChange(next)
-        }}
-      />
-    </section>
-  )
-}
-
 function DeviceDetails({
   device,
   isDefault,
   savingDefault,
-  permission,
-  onPermission,
+  onAgents,
+  onAssistant,
   onDefault,
   onFolders,
   onReconnect,
@@ -305,114 +249,35 @@ function DeviceDetails({
   device: Device
   isDefault: boolean
   savingDefault: boolean
-  permission: PermissionState | undefined
-  onPermission: (enabled: boolean) => void
+  onAgents: () => void
+  onAssistant: () => void
   onDefault: () => void
   onFolders: () => void
   onReconnect: () => void
   onDisconnect: () => void
 }) {
-  const [loginProvider, setLoginProvider] = useState<{ provider: string; localOnly: boolean } | null>(null)
   const client = useClient()
-  const [editing, setEditing] = useState<ModelConnection | 'new' | null>(null)
-  const [logoutError, setLogoutError] = useState(false)
   const [updateState, setUpdateState] = useState<'idle' | 'sending' | 'accepted' | 'failed'>('idle')
   // 离线或同步中的设备只显示操作，Agent 信息要等设备同步完才准确。
   const connected = device.connection === 'online'
-  // 一切正常时不列 Agent，只列需要处理的问题。
-  const problems = connected ? capabilityLines(device).filter((line) => !line.ok) : []
+  const assistant = connected ? projectAssistantSummary(device) : null
+  const coding = connected ? codingAgentsSummary(device) : null
   const upgrade = device.updateRequest ?? device.upgradeState
   const upgradeLabel = upgrade && upgradeLabels[upgrade.phase]
   const availableVersion = device.updateAvailability?.status === 'available' ? device.updateAvailability : null
-  if (editing)
-    return (
-      <div {...stylex.props(styles.details)}>
-        <ModelConnectionEditor
-          device={device}
-          initial={editing === 'new' ? undefined : editing}
-          onBack={() => setEditing(null)}
-        />
-      </div>
-    )
+
   return (
     <div id={`device-${device.id}`} {...stylex.props(styles.details)}>
       <LocalDeviceDiagnostics nodeId={device.id} />
-      <div {...stylex.props(styles.group)}>
-        <span {...stylex.props(text.label)}>订阅</span>
-        {device.subscriptions.map((sub) => {
-          const canLogin = connected && sub.loginMethods?.includes('oauth')
-          return (
-            <div key={sub.provider} {...stylex.props(styles.sourceRow)}>
-              <div {...stylex.props(styles.sourceInfo)}>
-                <span {...stylex.props(text.small)}>{sub.provider}</span>
-                {!sub.signedIn && !canLogin && <span {...stylex.props(text.caption, text.muted)}>未登录</span>}
-              </div>
-              {!sub.signedIn && canLogin && (
-                <Button
-                  small
-                  aria-label={`登录 ${sub.provider}`}
-                  onClick={() => setLoginProvider({ provider: sub.provider, localOnly: false })}
-                >
-                  登录
-                </Button>
-              )}
-              {sub.signedIn && connected && (
-                <Menu align="end" trigger={<IconButton icon="dots" label={`管理 ${sub.provider}`} />}>
-                  {canLogin && (
-                    <MenuOption onSelect={() => setLoginProvider({ provider: sub.provider, localOnly: false })}>
-                      重新登录
-                    </MenuOption>
-                  )}
-                  <MenuOption
-                    onSelect={() => {
-                      setLogoutError(false)
-                      void client
-                        .logoutSubscription({ deviceId: device.id, provider: sub.providerId ?? sub.provider })
-                        .catch(() => setLogoutError(true))
-                    }}
-                  >
-                    退出登录
-                  </MenuOption>
-                </Menu>
-              )}
-            </div>
-          )
-        })}
-        {logoutError && (
-          <p role="alert" {...stylex.props(text.small, styles.attention)}>
-            无法退出登录，请重试。
-          </p>
-        )}
-      </div>
-      <div {...stylex.props(styles.group)}>
-        <div {...stylex.props(styles.sourceHeading)}>
-          <span {...stylex.props(text.label)}>API 连接</span>
-          <Button small onClick={() => setEditing('new')}>
-            添加连接
-          </Button>
+      {connected && assistant && coding && (
+        <div {...stylex.props(styles.summaries)}>
+          <span {...stylex.props(text.caption, styles.summaryLabel)}>项目助手</span>
+          <span {...stylex.props(text.small, assistant.attention ? styles.attention : text.muted)}>
+            {assistant.text}
+          </span>
+          <span {...stylex.props(text.caption, styles.summaryLabel)}>编码 Agent</span>
+          <span {...stylex.props(text.small, coding.attention ? styles.attention : text.muted)}>{coding.text}</span>
         </div>
-        {(device.modelConnections ?? []).map((connection) => (
-          <div key={connection.id} {...stylex.props(styles.sourceRow)}>
-            <div {...stylex.props(styles.sourceInfo)}>
-              <span {...stylex.props(text.small)}>{connection.name}</span>
-              <span {...stylex.props(text.caption, text.muted)}>
-                {connectionProtocol[connection.protocol]} · {connectionHost(connection.base_url)}
-                {connection.keyNeeded ? ' · 需要密钥' : ''}
-              </span>
-            </div>
-            <Button small aria-label={`编辑 ${connection.name}`} onClick={() => setEditing(connection)}>
-              编辑
-            </Button>
-          </div>
-        ))}
-      </div>
-      {loginProvider && (
-        <SubscriptionLoginDialog
-          device={device}
-          provider={loginProvider.provider}
-          localOnly={loginProvider.localOnly}
-          onClose={() => setLoginProvider(null)}
-        />
       )}
       {upgradeLabel && (
         <span {...stylex.props(text.small, text.muted)}>
@@ -429,42 +294,40 @@ function DeviceDetails({
       {device.connection === 'offline' && device.credentialState !== 'idle_expired' && (
         <span {...stylex.props(text.small, text.muted)}>新对话将等待设备就绪。</span>
       )}
-      {problems.length > 0 && (
-        <div role="group" aria-label="需要处理" {...stylex.props(styles.group)}>
-          {problems.map((line) => (
-            <span key={line.name} {...stylex.props(styles.capability)}>
-              <span {...stylex.props(text.small)}>{line.name}</span>
-              <span {...stylex.props(text.caption, styles.attention)}>{line.detail}</span>
-            </span>
-          ))}
-        </div>
-      )}
-      {connected && device.hasRuntime && (
-        <CommandPermission state={permission} enabled={device.commandAccess.enabled} onChange={onPermission} />
-      )}
       <div {...stylex.props(styles.actions)}>
-        {device.updateProtocol === 1 ? (
-          device.updateAvailability?.status !== 'current' && (
-            <Button
-              small
-              disabled={updateState === 'sending'}
-              onClick={() => {
-                setUpdateState('sending')
-                void client.updateDevice(device.id).then(
-                  () => setUpdateState('accepted'),
-                  () => setUpdateState('failed'),
-                )
-              }}
-            >
-              {updateState === 'sending'
-                ? '正在提交…'
-                : availableVersion
-                  ? `更新到 ${availableVersion.version}`
-                  : '更新设备'}
+        {connected && (
+          <>
+            <Button small onClick={onAgents}>
+              编码 Agent
             </Button>
-          )
-        ) : (
-          <span {...stylex.props(text.caption, text.muted)}>请在设备上安装新版并完成一次本机初始化。</span>
+            <Button small onClick={onAssistant}>
+              项目助手
+            </Button>
+          </>
+        )}
+        {device.connection !== 'offline' && (
+          <Button small onClick={onFolders}>
+            文件夹
+          </Button>
+        )}
+        {device.updateProtocol === 1 && device.updateAvailability?.status !== 'current' && (
+          <Button
+            small
+            disabled={updateState === 'sending'}
+            onClick={() => {
+              setUpdateState('sending')
+              void client.updateDevice(device.id).then(
+                () => setUpdateState('accepted'),
+                () => setUpdateState('failed'),
+              )
+            }}
+          >
+            {updateState === 'sending'
+              ? '正在提交…'
+              : availableVersion
+                ? `更新到 ${availableVersion.version}`
+                : '更新设备'}
+          </Button>
         )}
         {device.credentialState === 'idle_expired' && (
           <Button small onClick={onReconnect}>
@@ -474,11 +337,6 @@ function DeviceDetails({
         {!isDefault && (
           <Button small onClick={onDefault}>
             {savingDefault ? '正在保存…' : '设为默认'}
-          </Button>
-        )}
-        {device.connection !== 'offline' && (
-          <Button small onClick={onFolders}>
-            文件夹…
           </Button>
         )}
         <Button small variant="danger" style={styles.disconnect} onClick={onDisconnect}>
@@ -531,10 +389,10 @@ export function DevicesPage() {
   const [enrolling, setEnrolling] = useState<Device | true | null>(() => (search.connect ? true : null))
   const [disconnect, setDisconnect] = useState<Disconnect | null>(null)
   const [permission, setPermission] = useState<PermissionState | null>(null)
-  // 打开命令权限前先确认；关闭直接保存。
-  const [allowing, setAllowing] = useState<Device | null>(null)
   const [offlineDefault, setOfflineDefault] = useState<Device | null>(null)
   const [folders, setFolders] = useState<Device | null>(null)
+  const [agentsDeviceId, setAgentsDeviceId] = useState<ID | null>(null)
+  const [assistantDeviceId, setAssistantDeviceId] = useState<ID | null>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
   const removed = useRef(false)
 
@@ -577,11 +435,6 @@ export function DevicesPage() {
         onError: () => setPermission({ deviceId: device.id, phase: 'failed', enabled }),
       },
     )
-  }
-
-  const changePermission = (device: Device, enabled: boolean) => {
-    if (enabled) setAllowing(device)
-    else savePermission(device, false)
   }
 
   const startDisconnect = (device: Device) => {
@@ -661,8 +514,8 @@ export function DevicesPage() {
                   device={device}
                   isDefault={device.id === defaultId}
                   savingDefault={setDefault.isPending && setDefault.variables === device.id}
-                  permission={permission?.deviceId === device.id ? permission : undefined}
-                  onPermission={(enabled) => changePermission(device, enabled)}
+                  onAgents={() => setAgentsDeviceId(device.id)}
+                  onAssistant={() => setAssistantDeviceId(device.id)}
                   onDefault={() => chooseDefault(device)}
                   onFolders={() => setFolders(device)}
                   onReconnect={() => setEnrolling(device)}
@@ -735,28 +588,24 @@ export function DevicesPage() {
 
       {folders && <FoldersDialog device={folders} onClose={() => setFolders(null)} />}
 
-      <Dialog
-        open={allowing !== null}
-        onOpenChange={(open) => {
-          if (!open) setAllowing(null)
-        }}
-        title={`允许项目助手在 ${allowing?.name ?? ''} 上运行命令？`}
-        description={`命令以 ${allowing?.commandAccess.user || '当前用户'} 的身份直接运行，可以访问所选文件夹以外的文件。`}
-        actions={
-          <>
-            <Button onClick={() => setAllowing(null)}>取消</Button>
-            <Button
-              variant="primary"
-              onClick={() => {
-                if (allowing) savePermission(allowing, true)
-                setAllowing(null)
-              }}
-            >
-              允许执行命令
-            </Button>
-          </>
-        }
-      />
+      {(() => {
+        const agentsDevice = agentsDeviceId ? list.find((item) => item.id === agentsDeviceId) : null
+        return agentsDevice ? (
+          <DeviceAgentsDialog device={agentsDevice} onClose={() => setAgentsDeviceId(null)} />
+        ) : null
+      })()}
+
+      {(() => {
+        const assistantDevice = assistantDeviceId ? list.find((item) => item.id === assistantDeviceId) : null
+        return assistantDevice ? (
+          <ProjectAssistantDialog
+            device={assistantDevice}
+            permission={permission?.deviceId === assistantDevice.id ? permission : undefined}
+            onSavePermission={(enabled) => savePermission(assistantDevice, enabled)}
+            onClose={() => setAssistantDeviceId(null)}
+          />
+        ) : null
+      })()}
 
       <Dialog
         open={offlineDefault !== null}

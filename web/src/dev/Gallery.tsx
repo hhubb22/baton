@@ -37,6 +37,7 @@ import { StatusChip, StatusDot, StatusPill, type Tone } from '../ui/Status'
 import { Segmented, Tabs } from '../ui/Tabs'
 import { threadList } from '../ui/ThreadList'
 import { Toggle } from '../ui/Toggle'
+import { DeviceAgentsPanel } from '../app/DeviceAgentsDialog'
 import { ThreadModelMenu, type ThreadModelChoice } from '../app/ThreadModelMenu'
 import { agentNames, threadStatusTones } from '../data/derive'
 import type { AgentKind, DeviceAgent } from '../data/types'
@@ -439,6 +440,21 @@ const galleryAgents: DeviceAgent[] = [
   makeGalleryAgent('droid', ['claude-opus-4-6', 'gpt-5.3-codex']),
 ]
 
+const galleryDeviceAgents: DeviceAgent[] = [
+  ...galleryAgents.filter((agent) => agent.kind !== 'cursor'),
+  {
+    kind: 'cursor',
+    status: 'unavailable',
+    reason: 'not_authenticated',
+    version: '1.2',
+    models: ['composer-2', 'claude-4.5-sonnet-thinking', 'gpt-5.4'],
+    defaultModel: 'composer-2',
+    abilities: { create: false, queue: true, steer: true, stop: true, resume: false, switchModel: true },
+    account: null,
+    problem: null,
+  },
+]
+
 function ComposerGallery() {
   const [newChat, setNewChat] = useState('')
   const [reply, setReply] = useState('')
@@ -551,6 +567,7 @@ function ComposerGallery() {
 
 function Overlays() {
   const [dialog, setDialog] = useState(false)
+  const [agentsDialog, setAgentsDialog] = useState(false)
   const [command, setCommand] = useState(false)
   const [selected, setSelected] = useState('all')
   return (
@@ -570,6 +587,7 @@ function Overlays() {
         <MenuOption dot="danger">归档 Archive</MenuOption>
       </Menu>
       <Button onClick={() => setDialog(true)}>对话框 Dialog</Button>
+      <Button onClick={() => setAgentsDialog(true)}>编码 Agent</Button>
       <Button onClick={() => setCommand(true)}>命令面板 Command</Button>
       <Tooltip label="连续悬停时不再等待">
         <Button variant="ghost">提示 Tooltip</Button>
@@ -592,6 +610,16 @@ function Overlays() {
           </>
         }
       />
+      <Dialog
+        open={agentsDialog}
+        onOpenChange={setAgentsDialog}
+        split
+        title="MacBook Pro 上的编码 Agent"
+        description="由设备自动探测已安装的 CLI 与登录状态。"
+        actions={<Button onClick={() => setAgentsDialog(false)}>完成</Button>}
+      >
+        <DeviceAgentsPanel agents={galleryDeviceAgents} />
+      </Dialog>
       <CommandDialog
         open={command}
         onOpenChange={setCommand}

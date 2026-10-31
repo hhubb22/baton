@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { App } from '../app/App'
@@ -49,15 +49,14 @@ it('stays quiet about a finished update and an up-to-date device', async () => {
   expect(screen.queryByRole('button', { name: '更新设备' })).not.toBeInTheDocument()
 })
 
-it('asks for local initialization when the device does not report update support', async () => {
+it('omits the update button when the device does not report update support', async () => {
   const user = userEvent.setup()
   const client = createMockClient('normal', { latency: { read: 0, save: 0, device: 0, run: 8000 } })
   const update = vi.spyOn(client, 'updateDevice')
   const router = createAppRouter({ history: createMemoryHistory({ initialEntries: ['/devices'] }) })
   render(<App client={client} router={router} />)
   await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
-  expect(screen.getByText('请在设备上安装新版并完成一次本机初始化。')).toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: '更新设备' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /更新/ })).not.toBeInTheDocument()
   expect(update).not.toHaveBeenCalled()
 })
 
@@ -95,8 +94,11 @@ it('adds, edits and deletes a device API connection without sending a key to the
   const router = createAppRouter({ history: createMemoryHistory({ initialEntries: ['/devices'] }) })
   render(<App client={client} router={router} />)
   await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
-  expect(screen.getByText('Local gateway')).toBeInTheDocument()
-  expect(screen.getByText(/需要密钥/)).toBeInTheDocument()
+  expect(screen.getByText(/2 个 API 连接（1 个需要密钥）/)).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: '项目助手' }))
+  const assistantDialog = await screen.findByRole('dialog', { name: 'Ubuntu Dev 上的项目助手' })
+  expect(within(assistantDialog).getByText('Local gateway')).toBeInTheDocument()
+  expect(within(assistantDialog).getByText(/需要密钥/)).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: '添加连接' }))
   await user.type(screen.getByLabelText('名称'), 'Custom')
   await user.clear(screen.getByLabelText('服务地址'))
@@ -115,6 +117,7 @@ it('adds, edits and deletes a device API connection without sending a key to the
     }),
   )
   expect(JSON.stringify(configure.mock.calls)).not.toContain('key-file contents')
+  await user.click(screen.getByRole('button', { name: '完成' }))
   await user.click(screen.getByRole('button', { name: '新建项目' }))
   await user.type(screen.getByLabelText('名称'), 'API project')
   await user.selectOptions(
@@ -133,6 +136,7 @@ it('adds, edits and deletes a device API connection without sending a key to the
   expect(await screen.findByText('Custom · Ubuntu Dev · model-id')).toBeInTheDocument()
   await user.click(screen.getByRole('link', { name: /设备/ }))
   await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
+  await user.click(screen.getByRole('button', { name: '项目助手' }))
   await user.click(screen.getByRole('button', { name: '编辑 Custom' }))
   await user.click(screen.getByRole('button', { name: '删除连接' }))
   expect(screen.getByText(/删除此连接后，API project/)).toBeInTheDocument()
@@ -163,6 +167,7 @@ it('loads the complete model list before editing a truncated device report', asy
   const router = createAppRouter({ history: createMemoryHistory({ initialEntries: ['/devices'] }) })
   render(<App client={client} router={router} />)
   await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
+  await user.click(screen.getByRole('button', { name: '项目助手' }))
   await user.click(screen.getByRole('button', { name: '编辑 Local gateway' }))
   expect(screen.getByLabelText('模型 ID')).toHaveAttribute('readonly')
   await user.clear(screen.getByLabelText('名称'))
@@ -176,6 +181,29 @@ it('loads the complete model list before editing a truncated device report', asy
   expect(screen.getByLabelText('模型 ID')).not.toHaveAttribute('readonly')
   expect(configure).toHaveBeenCalledWith(expect.objectContaining({ action: 'get' }))
   expect(screen.getByRole('button', { name: '保存连接' })).toBeEnabled()
+})
+
+it('shows read-only summaries in the expanded row and inspects coding agents in a split modal', async () => {
+  const user = userEvent.setup()
+  const client = createMockClient('error', { latency: { read: 0, save: 0, device: 0, run: 8000 } })
+  const router = createAppRouter({ history: createMemoryHistory({ initialEntries: ['/devices'] }) })
+  render(<App client={client} router={router} />)
+  await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
+  expect(screen.getByText('Claude 已登录')).toBeInTheDocument()
+  expect(screen.getByText('Kiro 可用 · Codex ChatGPT 登录已过期')).toBeInTheDocument()
+
+  await user.click(screen.getByRole('button', { name: '编码 Agent' }))
+  const dialog = await screen.findByRole('dialog', { name: 'Ubuntu Dev 上的编码 Agent' })
+  // 默认选中第一个需要处理的 Agent（Codex）
+  expect(screen.getByRole('tab', { name: /Codex/ })).toHaveAttribute('aria-selected', 'true')
+  expect(screen.getByText('ChatGPT 登录已过期')).toBeInTheDocument()
+  expect(screen.getByText(/codex login/)).toBeInTheDocument()
+
+  // 切换到可用的 Kiro 查看模型与能力
+  await user.click(screen.getByRole('tab', { name: /Kiro/ }))
+  expect(screen.getByRole('tab', { name: /Kiro/ })).toHaveAttribute('aria-selected', 'true')
+  expect(within(dialog).getByText('claude-sonnet-5-5')).toBeInTheDocument()
+  expect(within(dialog).getByText('新建对话')).toBeInTheDocument()
 })
 
 describe('desktop app link', () => {

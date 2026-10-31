@@ -52,5 +52,5 @@ export function useLocalDirectoryPicker({
       setPending(false)
     }
   }
-  return { available, pick, label: pending ? '正在检查文件夹…' : '选择本地文件夹…' }
+  return { available, pick, label: pending ? '正在检查文件夹…' : '选择本地文件夹' }
 }

@@ -230,7 +230,7 @@ function LocationMenus({
         ))}
         <MenuRule />
         {local.available && <MenuOption onSelect={() => void local.pick()}>{local.label}</MenuOption>}
-        <MenuOption onSelect={onBrowse}>选择其他文件夹…</MenuOption>
+        <MenuOption onSelect={onBrowse}>选择其他文件夹</MenuOption>
       </Menu>
     </>
   )

@@ -1157,7 +1157,7 @@ describe('devices', () => {
     const user = userEvent.setup()
     const { client } = renderApp('/devices')
     await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
-    await user.click(screen.getByRole('button', { name: '文件夹…' }))
+    await user.click(screen.getByRole('button', { name: '文件夹' }))
     const dialog = await screen.findByRole('dialog', { name: 'Ubuntu Dev 上的文件夹' })
     const remove = await within(dialog).findByRole('button', { name: '移除 /home/kaken/work' })
 
@@ -1181,6 +1181,7 @@ describe('devices', () => {
     const user = userEvent.setup()
     const { client } = renderApp('/devices', 'error')
     await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
+    await user.click(screen.getByRole('button', { name: '项目助手' }))
     await user.click(screen.getByRole('button', { name: '登录 ChatGPT' }))
     const dialog = await screen.findByRole('dialog', { name: '在 Ubuntu Dev 上登录 ChatGPT' })
     expect(await within(dialog).findByText('BATON-1234')).toBeInTheDocument()
@@ -1199,9 +1200,10 @@ describe('devices', () => {
     expect(await within(dialog).findByText('已登录')).toBeInTheDocument()
     expect(within(dialog).queryByText('BATON-1234')).not.toBeInTheDocument()
     await user.click(within(dialog).getByRole('button', { name: '完成' }))
+    const assistantDialog = await screen.findByRole('dialog', { name: 'Ubuntu Dev 上的项目助手' })
+    expect(within(assistantDialog).getByRole('button', { name: '管理 ChatGPT' })).toBeInTheDocument()
+    await user.click(within(assistantDialog).getByRole('button', { name: '完成' }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(deviceRow('Ubuntu Dev')).toHaveFocus()
-    expect(screen.getByRole('button', { name: '管理 ChatGPT' })).toBeInTheDocument()
   })
 
   it.each([true, false])('shows local API key setup for Claude with signedIn=%s', async (signedIn) => {
@@ -1223,6 +1225,7 @@ describe('devices', () => {
       }
     })
     await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
+    await user.click(screen.getByRole('button', { name: '项目助手' }))
     if (signedIn) {
       await user.click(screen.getByRole('button', { name: '管理 Claude' }))
       await user.click(await screen.findByRole('menuitem', { name: '重新登录' }))
@@ -1235,13 +1238,14 @@ describe('devices', () => {
     expect(within(dialog).queryByText('Getting sign-in code…')).not.toBeInTheDocument()
     expect(loginCalls).toBe(0)
     await user.click(within(dialog).getByRole('button', { name: signedIn ? '完成' : '关闭' }))
-    expect(deviceRow('Ubuntu Dev')).toHaveFocus()
+    expect(await screen.findByRole('dialog', { name: 'Ubuntu Dev 上的项目助手' })).toBeInTheDocument()
   })
 
   it('retries a subscription login after the device could not be reached', async () => {
     const user = userEvent.setup()
     const { client } = renderApp('/devices', 'error')
     await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
+    await user.click(screen.getByRole('button', { name: '项目助手' }))
     client.controls.setReachable(false)
     await user.click(screen.getByRole('button', { name: '登录 ChatGPT' }))
     const dialog = await screen.findByRole('dialog', { name: '在 Ubuntu Dev 上登录 ChatGPT' })
@@ -1307,7 +1311,8 @@ describe('devices', () => {
     renderApp('/devices', 'error')
     await screen.findByRole('heading', { name: '3 台设备，2 台在线' })
     await user.click(deviceRow('Ubuntu Dev'))
-    expect(screen.getAllByText('ChatGPT 登录已过期').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/ChatGPT 登录已过期/).length).toBeGreaterThan(0)
+    await user.click(screen.getByRole('button', { name: '项目助手' }))
     expect(screen.getByRole('switch', { name: '允许项目助手运行命令' })).not.toBeChecked()
   })
 
@@ -1316,6 +1321,7 @@ describe('devices', () => {
     const { client } = renderApp('/devices')
     await screen.findByRole('heading', { name: '3 台设备，2 台在线' })
     await user.click(deviceRow('Ubuntu Dev'))
+    await user.click(screen.getByRole('button', { name: '项目助手' }))
     const toggle = screen.getByRole('switch', { name: '允许项目助手运行命令' })
     expect(toggle).not.toBeChecked()
 
@@ -1323,13 +1329,15 @@ describe('devices', () => {
     const confirm = await screen.findByRole('dialog', { name: '允许项目助手在 Ubuntu Dev 上运行命令？' })
     expect(within(confirm).getByText(/命令以 kaken 的身份直接运行/)).toBeInTheDocument()
     await user.click(within(confirm).getByRole('button', { name: '允许执行命令' }))
-    expect(await screen.findByText('已保存')).toBeInTheDocument()
-    expect(toggle).toBeChecked()
+    const dialog = await screen.findByRole('dialog', { name: 'Ubuntu Dev 上的项目助手' })
+    expect(await within(dialog).findByText('已保存')).toBeInTheDocument()
+    const updatedToggle = within(dialog).getByRole('switch', { name: '允许项目助手运行命令' })
+    expect(updatedToggle).toBeChecked()
 
     client.controls.setReachable(false)
-    await user.click(toggle)
-    expect(await screen.findByText('保存失败，命令执行仍处于允许状态。')).toBeInTheDocument()
-    expect(toggle).toBeChecked()
+    await user.click(updatedToggle)
+    expect(await within(dialog).findByText('保存失败，命令执行仍处于允许状态。')).toBeInTheDocument()
+    expect(updatedToggle).toBeChecked()
   })
 
   it('retries disconnecting the default device and asks for a replacement', async () => {
