@@ -67,7 +67,7 @@ const cursorProbe = Effect.gen(function* () {
   if (!helpers) return result({ authenticated: 'unknown', models: [], reason: '无法运行 Cursor SDK 的平台辅助程序' })
   details.installed = true
   details.integrity = true
-  if (!key?.trim()) return result({ authenticated: 'missing', models: [], reason: '需要显式配置 CURSOR_API_KEY' })
+  if (!key?.trim()) return result({ authenticated: 'missing', models: [], reason: '未配置 CURSOR_API_KEY' })
   const authenticated = yield* Effect.tryPromise({
     try: () => Cursor.me({ apiKey: key }),
     catch: () => undefined,

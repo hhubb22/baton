@@ -1025,7 +1025,8 @@ describe('devices', () => {
     if (phase !== 'cancelled' && phase !== 'completed')
       expect(within(row).queryByText('正在运行 Baton Dev')).not.toBeInTheDocument()
     await user.click(row)
-    expect(screen.getByText(/^0\.9\.2 · /)).toBeInTheDocument()
+    if (phase === 'cancelled' || phase === 'completed') expect(screen.queryByText(/^0\.9\.2 · /)).toBeNull()
+    else expect(screen.getByText(/^0\.9\.2 · /)).toBeInTheDocument()
     if (phase === 'failed') expect(screen.getByText('0.9.2 · 更新失败')).toBeInTheDocument()
   })
 
@@ -1179,8 +1180,7 @@ describe('devices', () => {
     const user = userEvent.setup()
     const { client } = renderApp('/devices', 'error')
     await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
-    await user.click(screen.getByRole('button', { name: '管理 ChatGPT' }))
-    await user.click(await screen.findByRole('menuitem', { name: '登录' }))
+    await user.click(screen.getByRole('button', { name: '登录 ChatGPT' }))
     const dialog = await screen.findByRole('dialog', { name: '在 Ubuntu Dev 上登录 ChatGPT' })
     expect(await within(dialog).findByText('BATON-1234')).toBeInTheDocument()
     expect(within(dialog).getByText(/15 分|14 分/)).toBeInTheDocument()
@@ -1222,8 +1222,12 @@ describe('devices', () => {
       }
     })
     await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
-    await user.click(screen.getByRole('button', { name: '管理 Claude' }))
-    await user.click(await screen.findByRole('menuitem', { name: signedIn ? '重新登录' : '登录' }))
+    if (signedIn) {
+      await user.click(screen.getByRole('button', { name: '管理 Claude' }))
+      await user.click(await screen.findByRole('menuitem', { name: '重新登录' }))
+    } else {
+      await user.click(screen.getByRole('button', { name: '登录 Claude' }))
+    }
     const dialog = await screen.findByRole('dialog', { name: '在 Ubuntu Dev 上设置 Claude' })
     expect(within(dialog).getByText('batond login anthropic')).toBeInTheDocument()
     expect(within(dialog).queryByText(/login-api-key/)).not.toBeInTheDocument()
@@ -1238,8 +1242,7 @@ describe('devices', () => {
     const { client } = renderApp('/devices', 'error')
     await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
     client.controls.setReachable(false)
-    await user.click(screen.getByRole('button', { name: '管理 ChatGPT' }))
-    await user.click(await screen.findByRole('menuitem', { name: '登录' }))
+    await user.click(screen.getByRole('button', { name: '登录 ChatGPT' }))
     const dialog = await screen.findByRole('dialog', { name: '在 Ubuntu Dev 上登录 ChatGPT' })
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('无法开始登录')
     client.controls.setReachable(true)
@@ -1281,7 +1284,7 @@ describe('devices', () => {
         )
     })
     await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
-    expect(screen.queryByText('助手与订阅')).not.toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: '需要处理' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Sign in to ChatGPT' })).not.toBeInTheDocument()
     expect(screen.queryByText('Finish setup on Ubuntu Dev')).not.toBeInTheDocument()
   })
@@ -1294,7 +1297,7 @@ describe('devices', () => {
     await user.click(row)
     const details = document.getElementById(row.getAttribute('aria-controls') ?? '')
     expect(details).not.toBeNull()
-    expect(within(details!).queryByText('助手与订阅')).not.toBeInTheDocument()
+    expect(within(details!).queryByRole('group', { name: '需要处理' })).not.toBeInTheDocument()
     expect(within(details!).getByRole('button', { name: '断开设备' })).toBeInTheDocument()
   })
 

@@ -590,6 +590,8 @@ export function capabilityLines(device: Device): CapabilityLine[] {
 
 // 设备行只写系统名，去掉版本号，例如 `macOS 15.0.1` 显示为 `macOS`，`Windows 11 24H2` 显示为 `Windows 11`。
 export function systemName(system: string) {
+  if (system === 'macos') return 'macOS'
+  if (system === 'linux') return 'Linux'
   const windows = /^Windows \d+/.exec(system)
   if (windows) return windows[0]
   const parts = system.split(' ')

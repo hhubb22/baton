@@ -252,7 +252,7 @@ const probeAgent = Effect.fn('Agents.probeAgent')(function* (agentType: HostedAg
         authenticated: 'missing',
         models: [],
         details: { installed: true, version },
-        reason: '需要显式配置 CURSOR_API_KEY',
+        reason: '未配置 CURSOR_API_KEY',
       })
   }
   const result = yield* Effect.scoped(probeHost(agentType, dataDirectory)).pipe(

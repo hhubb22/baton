@@ -25,11 +25,28 @@ it('queues an update for an offline device and displays reported progress', asyn
   const router = createAppRouter({ history: createMemoryHistory({ initialEntries: ['/devices'] }) })
   render(<App client={client} router={router} />)
   await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
-  expect(screen.getByText('更新管理通道可用')).toBeInTheDocument()
-  expect(screen.getByText(/有新版本 v2 · 检查时间/)).toBeInTheDocument()
-  await user.click(screen.getByRole('button', { name: '更新设备' }))
+  await user.click(screen.getByRole('button', { name: '更新到 v2' }))
   expect(update).toHaveBeenCalledWith('dev-ubuntu')
-  expect(await screen.findByText('更新请求已保存，等待设备处理。')).toBeInTheDocument()
+  expect(await screen.findByText('等待设备更新')).toBeInTheDocument()
+})
+
+it('stays quiet about a finished update and an up-to-date device', async () => {
+  const user = userEvent.setup()
+  const client = createMockClient('normal', { latency: { read: 0, save: 0, device: 0, run: 8000 } })
+  const list = client.listDevices.bind(client)
+  client.listDevices = async () =>
+    (await list()).map((device) => ({
+      ...device,
+      updateProtocol: 1,
+      updateManagementLastSeen: Date.now(),
+      updateAvailability: { status: 'current' as const, version: 'v2', checkedAt: Date.now() },
+      upgradeState: { operationId: 'operation', sourceVersion: 'v1', targetVersion: 'v2', phase: 'completed' as const },
+    }))
+  const router = createAppRouter({ history: createMemoryHistory({ initialEntries: ['/devices'] }) })
+  render(<App client={client} router={router} />)
+  await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
+  expect(screen.queryByText(/v2/)).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '更新设备' })).not.toBeInTheDocument()
 })
 
 it('asks for local initialization when the device does not report update support', async () => {

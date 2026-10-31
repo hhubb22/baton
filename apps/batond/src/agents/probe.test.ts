@@ -255,7 +255,7 @@ describe('Cursor installation', () => {
   it('requires an explicit API key before host startup', async () => {
     vi.stubEnv('CURSOR_API_KEY', '  ')
     expect(await probeAgents({ dataDirectory: await root(), agentTypes: ['cursor'] })).toMatchObject([
-      { status: 'unavailable', reason: '需要显式配置 CURSOR_API_KEY' },
+      { status: 'unavailable', reason: '未配置 CURSOR_API_KEY' },
     ])
     expect(probeInternals.connect).not.toHaveBeenCalled()
   })

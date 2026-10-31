@@ -27,7 +27,7 @@ import { desktopStatusLabel, desktopStatusReason, needsDesktopReauth, useDesktop
 import { text } from '../theme/text'
 import { semantic } from '../theme/semantic.stylex'
 import { radius, space } from '../theme/tokens.stylex'
-import { Button, focusRing } from '../ui/Button'
+import { Button, focusRing, IconButton } from '../ui/Button'
 import { Dialog } from '../ui/Dialog'
 import { Icon } from '../ui/Icon'
 import { Menu, MenuOption } from '../ui/Menu'
@@ -170,16 +170,15 @@ interface Notice {
 }
 
 const unreachableNotice: Notice = { title: '无法保存默认设备', detail: '请重试。' }
-const upgradeLabels: Record<NonNullable<Device['updateRequest']>['phase'], string> = {
-  requested: '等待设备处理',
+// 已结束且没有问题的更新不显示。
+const upgradeLabels: Partial<Record<NonNullable<Device['updateRequest']>['phase'], string>> = {
+  requested: '等待设备更新',
   downloading: '正在下载',
   verifying: '正在校验',
   draining: '等待工作结束',
   ready: '准备就绪',
   migrating: '正在迁移',
   syncing: '正在同步',
-  completed: '更新完成',
-  cancelled: '已取消',
   failed: '更新失败',
 }
 const connectionProtocol = {
@@ -274,7 +273,7 @@ function CommandPermission({
     <section aria-label="命令权限" {...stylex.props(styles.permission)}>
       <div {...stylex.props(styles.permissionText)}>
         <span {...stylex.props(text.label)}>允许项目助手运行命令</span>
-        <span {...stylex.props(text.caption, text.muted)}>项目助手自行运行的 Shell 命令。对话单独设置访问权限。</span>
+        <span {...stylex.props(text.caption, text.muted)}>以设备用户身份运行，可访问目录外的文件。</span>
         {line && (
           <span role="status" {...stylex.props(text.caption, line.warning ? styles.attention : text.muted)}>
             {line.text}
@@ -314,7 +313,6 @@ function DeviceDetails({
   onDisconnect: () => void
 }) {
   const [loginProvider, setLoginProvider] = useState<{ provider: string; localOnly: boolean } | null>(null)
-  const now = useNow(30_000)
   const client = useClient()
   const [editing, setEditing] = useState<ModelConnection | 'new' | null>(null)
   const [logoutError, setLogoutError] = useState(false)
@@ -323,6 +321,9 @@ function DeviceDetails({
   const connected = device.connection === 'online'
   // 一切正常时不列 Agent，只列需要处理的问题。
   const problems = connected ? capabilityLines(device).filter((line) => !line.ok) : []
+  const upgrade = device.updateRequest ?? device.upgradeState
+  const upgradeLabel = upgrade && upgradeLabels[upgrade.phase]
+  const availableVersion = device.updateAvailability?.status === 'available' ? device.updateAvailability : null
   if (editing)
     return (
       <div {...stylex.props(styles.details)}>
@@ -338,27 +339,30 @@ function DeviceDetails({
       <LocalDeviceDiagnostics nodeId={device.id} />
       <div {...stylex.props(styles.group)}>
         <span {...stylex.props(text.label)}>订阅</span>
-        {device.subscriptions.map((sub) => (
-          <div key={sub.provider} {...stylex.props(styles.sourceRow)}>
-            <div {...stylex.props(styles.sourceInfo)}>
-              <span {...stylex.props(text.small)}>{sub.provider}</span>
-              <span {...stylex.props(text.caption, text.muted)}>{sub.signedIn ? '已登录' : '需要登录'}</span>
-            </div>
-            {connected && (
-              <Menu
-                align="end"
-                trigger={
-                  <Button small aria-label={`管理 ${sub.provider}`}>
-                    管理…
-                  </Button>
-                }
-              >
-                {sub.loginMethods?.includes('oauth') && (
-                  <MenuOption onSelect={() => setLoginProvider({ provider: sub.provider, localOnly: false })}>
-                    {sub.signedIn ? '重新登录' : '登录'}
-                  </MenuOption>
-                )}
-                {sub.signedIn && (
+        {device.subscriptions.map((sub) => {
+          const canLogin = connected && sub.loginMethods?.includes('oauth')
+          return (
+            <div key={sub.provider} {...stylex.props(styles.sourceRow)}>
+              <div {...stylex.props(styles.sourceInfo)}>
+                <span {...stylex.props(text.small)}>{sub.provider}</span>
+                {!sub.signedIn && !canLogin && <span {...stylex.props(text.caption, text.muted)}>未登录</span>}
+              </div>
+              {!sub.signedIn && canLogin && (
+                <Button
+                  small
+                  aria-label={`登录 ${sub.provider}`}
+                  onClick={() => setLoginProvider({ provider: sub.provider, localOnly: false })}
+                >
+                  登录
+                </Button>
+              )}
+              {sub.signedIn && connected && (
+                <Menu align="end" trigger={<IconButton icon="dots" label={`管理 ${sub.provider}`} />}>
+                  {canLogin && (
+                    <MenuOption onSelect={() => setLoginProvider({ provider: sub.provider, localOnly: false })}>
+                      重新登录
+                    </MenuOption>
+                  )}
                   <MenuOption
                     onSelect={() => {
                       setLogoutError(false)
@@ -369,11 +373,11 @@ function DeviceDetails({
                   >
                     退出登录
                   </MenuOption>
-                )}
-              </Menu>
-            )}
-          </div>
-        ))}
+                </Menu>
+              )}
+            </div>
+          )
+        })}
         {logoutError && (
           <p role="alert" {...stylex.props(text.small, styles.attention)}>
             无法退出登录，请重试。
@@ -410,35 +414,15 @@ function DeviceDetails({
           onClose={() => setLoginProvider(null)}
         />
       )}
-      {device.updateRequest && (
+      {upgradeLabel && (
         <span {...stylex.props(text.small, text.muted)}>
-          {device.upgradeState?.operationId === device.updateRequest.operationId &&
-            `${device.upgradeState.targetVersion} · `}
-          {upgradeLabels[device.updateRequest.phase]}
-          {device.updateRequest.reason && ` · ${device.updateRequest.reason}`}
+          {device.upgradeState?.operationId === upgrade.operationId && `${device.upgradeState.targetVersion} · `}
+          {upgradeLabel}
+          {device.updateRequest?.reason && ` · ${device.updateRequest.reason}`}
         </span>
       )}
-      {!device.updateRequest && device.upgradeState && (
-        <span {...stylex.props(text.small, text.muted)}>
-          {device.upgradeState.targetVersion} · {upgradeLabels[device.upgradeState.phase]}
-        </span>
-      )}
-      {device.updateProtocol === 1 && device.updateManagementLastSeen !== undefined && (
-        <span {...stylex.props(text.caption, text.muted)}>
-          {now - device.updateManagementLastSeen < 60_000 ? '更新管理通道可用' : '更新管理通道未连接'}
-        </span>
-      )}
-      {device.updateAvailability && (
-        <span {...stylex.props(text.caption, text.muted)}>
-          {device.updateAvailability.status === 'current'
-            ? '已是最新版本'
-            : `有新版本 ${device.updateAvailability.version}`}
-          {' · 检查时间 '}
-          {new Date(device.updateAvailability.checkedAt).toLocaleString('zh-CN')}
-        </span>
-      )}
-      {updateState === 'accepted' && !device.updateRequest && <span role="status">更新请求已保存，等待设备处理。</span>}
-      {updateState === 'failed' && <span role="alert">无法提交更新请求，请重试。</span>}
+      {updateState === 'accepted' && !device.updateRequest && <span role="status">等待设备更新</span>}
+      {updateState === 'failed' && <span role="alert">无法更新，请重试。</span>}
       {device.credentialState === 'idle_expired' && (
         <span {...stylex.props(text.small, styles.attention)}>需要登录</span>
       )}
@@ -446,18 +430,13 @@ function DeviceDetails({
         <span {...stylex.props(text.small, text.muted)}>新对话将等待设备就绪。</span>
       )}
       {problems.length > 0 && (
-        <div {...stylex.props(styles.group)}>
-          {problems.length > 0 && (
-            <>
-              <span {...stylex.props(text.caption, text.muted)}>助手与订阅</span>
-              {problems.map((line) => (
-                <span key={line.name} {...stylex.props(styles.capability)}>
-                  <span {...stylex.props(text.small)}>{line.name}</span>
-                  <span {...stylex.props(text.caption, styles.attention)}>{line.detail}</span>
-                </span>
-              ))}
-            </>
-          )}
+        <div role="group" aria-label="需要处理" {...stylex.props(styles.group)}>
+          {problems.map((line) => (
+            <span key={line.name} {...stylex.props(styles.capability)}>
+              <span {...stylex.props(text.small)}>{line.name}</span>
+              <span {...stylex.props(text.caption, styles.attention)}>{line.detail}</span>
+            </span>
+          ))}
         </div>
       )}
       {connected && device.hasRuntime && (
@@ -465,19 +444,25 @@ function DeviceDetails({
       )}
       <div {...stylex.props(styles.actions)}>
         {device.updateProtocol === 1 ? (
-          <Button
-            small
-            disabled={updateState === 'sending'}
-            onClick={() => {
-              setUpdateState('sending')
-              void client.updateDevice(device.id).then(
-                () => setUpdateState('accepted'),
-                () => setUpdateState('failed'),
-              )
-            }}
-          >
-            {updateState === 'sending' ? '正在提交…' : '更新设备'}
-          </Button>
+          device.updateAvailability?.status !== 'current' && (
+            <Button
+              small
+              disabled={updateState === 'sending'}
+              onClick={() => {
+                setUpdateState('sending')
+                void client.updateDevice(device.id).then(
+                  () => setUpdateState('accepted'),
+                  () => setUpdateState('failed'),
+                )
+              }}
+            >
+              {updateState === 'sending'
+                ? '正在提交…'
+                : availableVersion
+                  ? `更新到 ${availableVersion.version}`
+                  : '更新设备'}
+            </Button>
+          )
         ) : (
           <span {...stylex.props(text.caption, text.muted)}>请在设备上安装新版并完成一次本机初始化。</span>
         )}
