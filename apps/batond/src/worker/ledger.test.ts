@@ -178,6 +178,59 @@ it('preserves unknown fields, incomplete intent evidence and raw UTF-16 reply ev
   expect(loaded.outbox[0]?.replyEvidence).toEqual(evidence)
 })
 
+it('persists an ACK without changing history and reuses its baseline on subsequent saves', async () => {
+  const f = await fixture()
+  const event = report(f, { kind: 'reply', content: 'reply' })
+  const evidence = { future: ['preserved'] }
+  await seed(f, { outbox: [Object.assign({ report: event, acked: false }, evidence)] })
+  await withLedger(f, (ledger) =>
+    Effect.gen(function* () {
+      const db = new DatabaseSync(f.dbPath, { readOnly: true })
+      try {
+        const meta = () => db.prepare('SELECT payload FROM thread_meta').get()!.payload
+        const token = () => db.prepare('SELECT commit_token FROM worker_commit').get()!.commit_token
+        const before = meta()
+        yield* ledger.ack(1, event.event_id)
+        const committed = token()
+        yield* ledger.ack(1, event.event_id)
+        expect(token()).toBe(committed)
+        expect(meta()).toBe(before)
+        expect(JSON.parse(String(db.prepare('SELECT payload FROM thread_outbox').get()!.payload))).toEqual({
+          report: event,
+          acked: true,
+          ...evidence,
+        })
+        ledger.initial.outbox[0]!.acked = true
+        ledger.initial.phase = 'stopped'
+        yield* ledger.save(ledger.initial)
+      } finally {
+        db.close()
+      }
+    }),
+  )
+  expect((await reopen(f)).outbox).toEqual([{ report: event, acked: true, ...evidence }])
+})
+
+it('retains an unconfirmed report and closes the ledger handle when an ACK transaction fails', async () => {
+  const f = await fixture()
+  const event = report(f)
+  await seed(f, { outbox: [{ report: event, acked: false }] })
+  editDatabase(f, (db) =>
+    db.exec(
+      "CREATE TRIGGER reject_ack BEFORE UPDATE ON thread_outbox BEGIN SELECT RAISE(ABORT, 'offline ACK failure'); END",
+    ),
+  )
+  await withLedger(f, (ledger) =>
+    Effect.gen(function* () {
+      expect(Exit.isFailure(yield* Effect.exit(ledger.ack(1, event.event_id)))).toBe(true)
+      const next = yield* Effect.exit(ledger.ack(1, event.event_id))
+      expect(Exit.isFailure(next)).toBe(true)
+      if (Exit.isFailure(next)) expect(Cause.squash(next.cause)).toMatchObject({ code: 'ledger_closed' })
+    }),
+  )
+  expect((await reopen(f)).outbox).toEqual([{ report: event, acked: false }])
+})
+
 it.each(['zero-byte', 'initialized', 'empty-meta'] as const)(
   'initializes a permitted %s empty ledger after inspection without changing it during inspection',
   async (kind) => {

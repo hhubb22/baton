@@ -12,7 +12,7 @@ Runtime 通过专用 stdio 交换逐行 JSON，每帧最多 192 KiB、最多 8 �
 
 后台 memory 模式复用同一 manager、RuntimeRunner、租约计时与进程回收；command 的 run_id 是独立 attempt，lease_epoch 是后台 claim_epoch。宿主按命令模式固定业务操作白名单；后台不能转发 call_tool、claim_inputs 或 append_event。memory_kind=embedding 时跳过聊天凭据准入检查，SDK 只使用 embeddings 私有凭据。
 
-`project-runtime.db` 使用现有 Effect SQLite、WAL/FULL 和提交结果核查。账本 kind 记录 foreground/memory。启动意图先提交，同一 run 不再次启动；进程记录保存 PID 与创建时间。进程树、stdio 和控制目录收尾后保存清理证据，独立循环先补送 exited、再补送 stopped。领取先提交下次尝试时间，失败按最多 30 秒退避重试，并为每次管理请求预留 5 秒。SQLite 暂时不可写时，最多 4 个 run 的名额同时约束活动实例和待保存清理事实。重启后可核实的进程记录经过平台回收再补写证据；只有启动意图、没有进程或清理证据的旧记录保持未确认。
+`project-runtime.db` 使用现有 Effect SQLite、WAL/FULL 和提交结果核查。账本 kind 记录 foreground/memory。启动意图先提交，同一 run 不再次启动；进程记录保存 PID 与创建时间。进程树、stdio 和控制目录收尾后保存清理证据，独立循环先补送 exited、再补送 stopped。空清理队列只读检查并逐步退避至五秒，连接替换、新命令或保存新清理证据时重置退避；有候选记录后才进入写事务重新核查并领取。领取先提交下次尝试时间，失败按最多 30 秒退避重试，并为每次管理请求预留 5 秒。SQLite 暂时不可写时，最多 4 个 run 的名额同时约束活动实例和待保存清理事实。重启后可核实的进程记录经过平台回收再补写证据；只有启动意图、没有进程或清理证据的旧记录保持未确认。
 
 租约使用 `max(hrtime 经过值, wall 经过值)`，默认每 20 秒续租，58 秒未成功续租时自停，检查间隔 200ms。发送及接受续租前都检查原期限，成功续租从请求开始时刻计时。注入的 `clock` 和 `timing` 用于确定性测试；时钟失败会停止所属运行。
 

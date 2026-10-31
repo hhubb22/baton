@@ -228,6 +228,10 @@ it('reconnects with the same incarnation, retains reports before Worker ACK, and
         return {
           type: 'result',
           ok: true,
+          worker_ready: true,
+          session_id: threadId,
+          runtime_mode: 'full-access',
+          storage_generation: generation,
           thread_reports: releaseReports ? reports.filter((r) => !workerAcks.has(r.event_id)) : [],
         }
       if (req.type === 'thread_ack') {
@@ -480,6 +484,10 @@ it.each(['dropped_reply', 'worker_unavailable'])(
           return {
             type: 'result',
             ok: true,
+            worker_ready: true,
+            session_id: threadId,
+            runtime_mode: 'full-access',
+            ...(receipt ? { storage_generation: receipt.storage_generation } : {}),
             thread_reports: releaseReports ? reports.filter((r) => !workerAcks.has(r.event_id)) : [],
           }
         if (request.type === 'thread_ack') {

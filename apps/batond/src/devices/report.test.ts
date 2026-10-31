@@ -21,3 +21,29 @@ it.each([48 * 1024, 64 * 1024])('counts escaped ampersands against the %i-byte r
   expect(bounded.roots?.length).toBeGreaterThan(0)
   expect(bounded.roots?.length).toBeLessThan(report.roots?.length ?? 0)
 })
+
+it('bounds a large model catalog without changing input or removing the default model', () => {
+  const report: RuntimeReport = {
+    exec: { enabled: false, shell: '/bin/sh' },
+    roots: [],
+    repos: [],
+    agents: [
+      {
+        agent_type: 'codex',
+        version: 'offline',
+        status: 'available',
+        default_model: 'default',
+        capabilities: { create: true, queue: true, steer: true, stop: true, resume: true, switch_model: true },
+        models: Array.from({ length: 2000 }, (_, index) => ({
+          id: index === 1999 ? 'default' : `model-${index}`,
+          name: '&'.repeat(100),
+        })),
+      },
+    ],
+  }
+  const bounded = boundRuntimeReport(report)
+  expect(Schema.is(RuntimeReport)(bounded)).toBe(true)
+  expect(bounded.agents?.[0]?.models).toContainEqual({ id: 'default', name: '&'.repeat(100) })
+  expect(bounded.agents?.[0]?.models?.length).toBeLessThan(2000)
+  expect(report.agents?.[0]?.models).toHaveLength(2000)
+})

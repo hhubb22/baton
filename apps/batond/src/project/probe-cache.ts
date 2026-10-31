@@ -6,7 +6,7 @@ import type { ProcessCommand } from '../platform/process.ts'
 import { hasCode } from '../platform/errors.ts'
 
 /** 只记录文件元数据；凭据内容不进入报告缓存。 */
-export async function probeFingerprint(command: ProcessCommand): Promise<string | undefined> {
+export async function probeFingerprint(command: ProcessCommand, dataDirectory?: string): Promise<string | undefined> {
   const metadata = async (path: string, follow: boolean) => {
     try {
       const info = await (follow ? stat(path) : lstat(path))
@@ -25,8 +25,22 @@ export async function probeFingerprint(command: ProcessCommand): Promise<string 
       if (hasCode(error, 'ENOENT')) return []
       throw error
     })
+    const environmentDirectory = dataDirectory ? join(dataDirectory, 'environment') : undefined
+    const environmentFiles = environmentDirectory
+      ? await readdir(environmentDirectory).catch((error: unknown) => {
+          if (hasCode(error, 'ENOENT')) return []
+          throw error
+        })
+      : []
     const paths = [
       directory,
+      ...(dataDirectory
+        ? [join(dataDirectory, 'project-runtime.json'), join(dataDirectory, 'environment', 'environment.json')]
+        : []),
+      ...environmentFiles
+        .filter((file) => file.startsWith('secrets-') && file.endsWith('.json'))
+        .sort()
+        .map((file) => join(environmentDirectory!, file)),
       ...files
         .filter((file) => file.endsWith('.json'))
         .sort()

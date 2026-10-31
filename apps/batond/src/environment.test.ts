@@ -11,6 +11,9 @@ import {
   updateEnvironment,
 } from './environment.ts'
 import { runEnvironmentCLI } from './environment-cli.ts'
+import { makeEnvironmentReader } from './environment.ts'
+import * as locks from './platform/lock.ts'
+import { writePrivateFileAtomic } from './platform/private.ts'
 
 it('keeps imports across installation and separates proxy credentials', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'baton-env-'))
@@ -98,6 +101,28 @@ it('serializes reads and writes and removes replaced secrets', async () => {
       1,
     )
     expect(Object.keys((await loadEnvironment(directory)).scopes)).toHaveLength(5)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+it('checks unchanged environment metadata without lock writes and reloads atomic replacements', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'baton-env-cache-'))
+  try {
+    const first = await importEnvironment(directory, { PATH: '/first' })
+    const read = makeEnvironmentReader(directory)
+    expect((await read()).revision).toBe(first.revision)
+    const lock = vi.spyOn(locks, 'acquireProcessLock')
+    try {
+      for (let i = 0; i < 20; i++) expect((await read()).imported.PATH).toBe('/first')
+      expect(lock).not.toHaveBeenCalled()
+      const next = await importEnvironment(directory, { PATH: '/second' })
+      expect(await read()).toMatchObject({ revision: next.revision, imported: { PATH: '/second' } })
+      await writePrivateFileAtomic(join(directory, 'environment', `secrets-${next.revision}.json`), 'invalid')
+      await expect(read()).rejects.toThrow('秘密文件损坏')
+    } finally {
+      lock.mockRestore()
+    }
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

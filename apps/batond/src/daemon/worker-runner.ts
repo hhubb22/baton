@@ -15,6 +15,7 @@ import { currentBatondCommand, initializeWorkerDirectory, type BatondCommand } f
 import { makeNodeLedger } from './ledger.ts'
 import { readUpgradeState, upgradeOffline } from './upgrade.ts'
 import { assertNoUpdateRollback } from './update-state.ts'
+import { makeEnvironmentReader } from '../environment.ts'
 
 export const runWorker = (options: {
   readonly dataDirectory: string
@@ -137,6 +138,7 @@ export const runWorker = (options: {
       },
     })
     if (process.platform !== 'win32') yield* Effect.promise(() => chmod(paths.endpoint, 0o600))
+    const readEnvironment = makeEnvironmentReader(options.dataDirectory)
     yield* Effect.raceFirst(
       worker.failed,
       Effect.gen(function* () {
@@ -145,8 +147,7 @@ export const runWorker = (options: {
           if (yield* worker.drain) return
           if (Date.now() - lastEnvironmentCheck >= 1000) {
             lastEnvironmentCheck = Date.now()
-            const { loadEnvironment } = yield* Effect.promise(() => import('../environment.ts'))
-            const result = yield* Effect.result(Effect.tryPromise(() => loadEnvironment(options.dataDirectory)))
+            const result = yield* Effect.result(Effect.tryPromise(readEnvironment))
             if (result._tag === 'Failure') {
               yield* Effect.logWarning('无法检查设备环境配置，Worker 将继续运行并重试')
             } else {
@@ -159,7 +160,7 @@ export const runWorker = (options: {
                 return
             }
           }
-          yield* Effect.sleep(100)
+          yield* Effect.sleep(1000)
         }
       }),
     )

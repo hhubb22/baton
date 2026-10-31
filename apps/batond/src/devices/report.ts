@@ -19,21 +19,39 @@ export function boundRuntimeReport(report: RuntimeReport, maxBytes = 64 * 1024):
   const tooLarge = () => jsonBytes(bounded, 1, true) > maxBytes
   if (!tooLarge()) return bounded
   bounded = { ...bounded, truncated: true }
-  while (tooLarge() && repos.length) repos.pop()
-  for (const agent of [...agents].reverse()) {
-    while (tooLarge() && agent.models.length) {
-      const index = agent.models.findLastIndex((model) => model.id !== agent.default_model)
-      if (index < 0) break
-      agent.models.splice(index, 1)
+  const trim = <A>(items: A[], protectedItem: (item: A) => boolean = () => false) => {
+    if (!items.length || !tooLarge()) return
+    const original = [...items]
+    let low = 0
+    let high = original.filter((item) => !protectedItem(item)).length
+    const retain = (count: number) => {
+      let removable = 0
+      items.length = 0
+      for (const item of original) {
+        if (protectedItem(item) || removable++ < count) items.push(item)
+      }
     }
+    retain(0)
+    if (tooLarge()) return
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2)
+      retain(middle)
+      if (tooLarge()) high = middle - 1
+      else low = middle
+    }
+    retain(low)
+  }
+  trim(repos)
+  for (const agent of [...agents].reverse()) {
+    trim(agent.models, (model) => model.id === agent.default_model)
   }
   for (const provider of [...providers].reverse()) {
-    while (tooLarge() && provider.models.length) {
-      provider.models.pop()
+    if (tooLarge() && provider.models.length) {
       Object.assign(provider, { models_truncated: true })
+      trim(provider.models)
     }
   }
-  while (tooLarge() && roots.length) roots.pop()
+  trim(roots)
   if (tooLarge()) throw new Error('设备报告超出容量限制')
   return bounded
 }

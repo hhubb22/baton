@@ -57,11 +57,14 @@ export const makeProjectLedger = Effect.fn('Project.makeProjectLedger')(function
     sql.withTransaction(sql`UPDATE project_runtime_runs SET cleanup_complete=1,
     state=CASE WHEN state='failed' THEN state ELSE 'exited' END,
     reason=CASE WHEN reason='' THEN 'runtime_exited' ELSE reason END WHERE run_id=${id}`)
-  const claim = (now: number) =>
-    sql.withTransaction(
-      Effect.gen(function* () {
-        const rows = yield* sql<RunRow>`SELECT * FROM project_runtime_runs WHERE cleanup_complete=1 AND cleanup_acked=0
+  const due = (now: number) =>
+    sql<RunRow>`SELECT * FROM project_runtime_runs WHERE cleanup_complete=1 AND cleanup_acked=0
       AND cleanup_next_at<=${now} ORDER BY cleanup_next_at,run_id LIMIT 1`
+  const claim = Effect.fnUntraced(function* (now: number) {
+    if (!(yield* due(now)).length) return
+    return yield* sql.withTransaction(
+      Effect.gen(function* () {
+        const rows = yield* due(now)
         const row = rows[0]
         if (!row) return
         const next = now + 5000 + Math.min(30000, 1000 * 2 ** Math.min(row.cleanup_attempts, 5))
@@ -69,6 +72,7 @@ export const makeProjectLedger = Effect.fn('Project.makeProjectLedger')(function
         return row
       }),
     )
+  })
   const ack = (id: string, epoch: number) =>
     sql.withTransaction(
       sql`UPDATE project_runtime_runs SET cleanup_acked=1 WHERE run_id=${id} AND lease_epoch=${epoch} AND cleanup_complete=1`,

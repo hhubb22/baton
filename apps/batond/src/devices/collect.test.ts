@@ -1,7 +1,10 @@
 import { rm } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { join } from 'node:path'
 import { expect, it, vi } from 'vite-plus/test'
 import { makeDeviceService } from './index.ts'
 import { makePrivateTempDirectory } from '../testing/private.ts'
+import { writePrivateFileAtomic } from '../platform/private.ts'
 
 const mocks = vi.hoisted(() => ({ scan: vi.fn() }))
 vi.mock('./scan.ts', async (importOriginal) => ({
@@ -50,6 +53,39 @@ it('preserves completed provider probes when the one filesystem scan exhausts th
     expect(maximumActive).toBe(1)
     expect(scansActive).toBe(0)
   } finally {
+    await service.close()
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+it('refreshes roots and exec independently without rescanning unchanged roots for five minutes', async () => {
+  const directory = await makePrivateTempDirectory('baton-device-cache-')
+  const clock = vi.spyOn(performance, 'now').mockReturnValue(0)
+  mocks.scan.mockReset().mockResolvedValue({ roots: [], repos: [], truncated: false })
+  const service = await makeDeviceService({ dataDirectory: directory })
+  try {
+    await service.collect()
+    for (let i = 0; i < 12; i++) {
+      clock.mockReturnValue(i * 5000)
+      await service.collect()
+    }
+    expect(mocks.scan).toHaveBeenCalledTimes(1)
+    expect(
+      await service.handle({ type: 'node.project_exec_set', operation_id: randomUUID(), enabled: true }),
+    ).toMatchObject({ ok: true })
+    expect(await service.collect()).toMatchObject({ exec: { enabled: true } })
+    expect(mocks.scan).toHaveBeenCalledTimes(1)
+    await writePrivateFileAtomic(join(directory, 'project-exec.json'), '{"enabled":true}')
+    expect(await service.collect()).toMatchObject({ exec: { enabled: false }, truncated: true })
+    expect(mocks.scan).toHaveBeenCalledTimes(1)
+    await writePrivateFileAtomic(join(directory, 'browse-roots.json'), '{"roots":[]}')
+    await service.collect()
+    expect(mocks.scan).toHaveBeenCalledTimes(2)
+    clock.mockReturnValue(355_000)
+    await service.collect()
+    expect(mocks.scan).toHaveBeenCalledTimes(3)
+  } finally {
+    clock.mockRestore()
     await service.close()
     await rm(directory, { recursive: true, force: true })
   }

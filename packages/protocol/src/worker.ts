@@ -132,6 +132,7 @@ export const WorkerIPCMessage = Schema.Struct({
   thread_id: Schema.optionalKey(UUID),
   storage_generation: Schema.optionalKey(StorageGeneration),
   worker_ready: Schema.optionalKey(Schema.Boolean),
+  worker_idle: Schema.optionalKey(Schema.Boolean),
   runtime_mode: Schema.optionalKey(RuntimeMode),
   agent_ready: Schema.optionalKey(Schema.Boolean),
   receipt: Schema.optionalKey(WorkerCommandReceipt),

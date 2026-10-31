@@ -67,10 +67,21 @@ export function makeThreadService(options: {
   host: DaemonWorkerHost
   tracer?: Tracer.Tracer
   capability: () => RuntimeAgent | readonly RuntimeAgent[]
+  pollIntervalMs?: number
+  onActivity?: () => void
+  now?: () => number
 }) {
   const { ledger, host } = options
   const recovery = makeWorkerRecovery({ dataDirectory: options.dataDirectory, ledger, host })
   const inFlight = new Map<string, { hash: string; result: Promise<ThreadCommandResult> }>()
+  const polls = new Map<string, { at: number; delay: number }>()
+  const now = options.now ?? (() => performance.now())
+  const pollMs = options.pollIntervalMs ?? 250
+  let recoverAt = 0
+  const wake = (threadId: string) => {
+    polls.delete(threadId)
+    options.onActivity?.()
+  }
   const commandHash = ({ trace_context: _trace, ...business }: ThreadCommand) => contentHash(business)
   async function deliver(saved: NodeCommand, deadline: number, reconcile: boolean): Promise<ThreadCommandResult> {
     return tracePromise(
@@ -316,6 +327,7 @@ export function makeThreadService(options: {
               ok: false,
               code: 'command_content_mismatch',
             })
+      wake(cmd.thread_id)
       const result = tracePromise(
         options.tracer,
         'baton.command.receive',
@@ -337,15 +349,20 @@ export function makeThreadService(options: {
             ...(error.reason ? { reason: error.reason } : {}),
           }
         })
-        .finally(() => inFlight.delete(id))
+        .finally(() => {
+          inFlight.delete(id)
+          wake(cmd.thread_id)
+        })
       inFlight.set(id, { hash: commandHash(cmd), result })
       return result
     },
     async discover(signal?: AbortSignal) {
       await recovery.recoverAll(signal)
+      recoverAt = now() + 30_000
     },
     async recover(signal?: AbortSignal) {
       await recovery.recoverAll(signal)
+      recoverAt = now() + 30_000
       for (const saved of await io(ledger.pendingCommands())) {
         if (signal?.aborted) return
         try {
@@ -356,10 +373,23 @@ export function makeThreadService(options: {
       }
     },
     async collectReports(signal?: AbortSignal) {
-      await recovery.recoverAll(signal)
+      if (now() >= recoverAt) {
+        await recovery.recoverAll(signal)
+        recoverAt = now() + 30_000
+      }
+      let nextAt = Math.min(recoverAt, now() + 5000)
       for (const saved of await io(ledger.workers())) {
-        if (signal?.aborted) return
+        if (signal?.aborted) return pollMs
         if (saved.history_unavailable) continue
+        let poll = polls.get(saved.threadId)
+        if (poll && now() < poll.at) {
+          nextAt = Math.min(nextAt, poll.at)
+          continue
+        }
+        if (!poll) {
+          poll = { at: 0, delay: pollMs }
+          polls.set(saved.threadId, poll)
+        }
         let reply: WorkerIPCMessage
         try {
           reply = await host.request(
@@ -368,11 +398,26 @@ export function makeThreadService(options: {
             { timeoutMs: 1000 },
           )
         } catch {
+          await recovery.ensure(saved.threadId, signal)
+          poll.delay = Math.min(5000, Math.max(1000, poll.delay * 2))
+          poll.at = now() + poll.delay
+          nextAt = Math.min(nextAt, poll.at)
           continue
         }
-        if (!reply.ok) continue
+        const identified =
+          reply.ok &&
+          reply.worker_ready === true &&
+          reply.session_id === saved.threadId &&
+          reply.storage_generation === saved.config.storage_generation &&
+          reply.runtime_mode === saved.config.runtime_mode
+        if (!identified) {
+          await recovery.ensure(saved.threadId, signal)
+          poll.at = now() + 1000
+          nextAt = Math.min(nextAt, poll.at)
+          continue
+        }
         for (const input of reply.thread_reports ?? []) {
-          if (signal?.aborted) return
+          if (signal?.aborted) return pollMs
           const report = Schema.decodeUnknownSync(ThreadReport)(input)
           if (report.thread_id !== saved.threadId || report.storage_generation !== saved.config.storage_generation)
             throw new Error('Worker 报告身份不符')
@@ -388,7 +433,12 @@ export function makeThreadService(options: {
             break
           }
         }
+        poll.delay =
+          reply.worker_idle === true && !reply.thread_reports?.length ? Math.min(5000, poll.delay * 2) : pollMs
+        poll.at = now() + poll.delay
+        nextAt = Math.min(nextAt, poll.at)
       }
+      return Math.max(1, nextAt - now())
     },
   }
 }

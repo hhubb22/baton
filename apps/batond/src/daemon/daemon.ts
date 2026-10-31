@@ -5,7 +5,7 @@ import { unlink, chmod, lstat } from 'node:fs/promises'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { Cause, Clock, Context, Deferred, Effect, Exit, Option, Schema, Tracer } from 'effect'
+import { Cause, Clock, Context, Deferred, Effect, Exit, Option, Queue, Schema, Tracer } from 'effect'
 import { HttpTraceContext } from 'effect/http'
 import { traceParent, waitEvent } from '@baton/telemetry'
 import type * as Scope from 'effect/Scope'
@@ -254,6 +254,8 @@ async function connected(options: {
   }
   const ticker = async () => {
     let heartbeatAt = 0
+    let previousReport: RuntimeReport | undefined
+    let reportHash = ''
     while (!controller.signal.aborted) {
       const now = performance.now()
       if (!authenticated && now - started >= options.controlTimeoutMs) throw new Error('节点认证超时')
@@ -293,7 +295,11 @@ async function connected(options: {
           }
         }
         const report = await options.report()
-        const hash = contentHash(report)
+        if (report !== previousReport) {
+          reportHash = contentHash(report)
+          previousReport = report
+        }
+        const hash = reportHash
         if (hash !== reportAcked && (!reportPending || now - reportPending.sent >= options.heartbeatMs)) {
           const id = reportPending?.hash === hash ? reportPending.id : randomUUID()
           reportPending = { id, hash, sent: now }
@@ -598,6 +604,7 @@ async function writeDaemonStatus(
 
 /** Scope 管理连接、后台任务、节点数据库与进程锁；Worker 独立存活。 */
 export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error, Scope.Scope> => {
+  let agentProbe: Promise<ReturnType<typeof import('../agents/probe-cache.ts').makeAgentProbe>> | undefined
   const program = Effect.gen(function* () {
     const services = yield* DaemonServices
     const heartbeatMs = options.heartbeatMs ?? 15_000
@@ -987,6 +994,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
               (service) => Effect.promise(() => service.close()),
             )
             let agents: RuntimeAgent[] = [pendingCapability()]
+            const reportWake = yield* Queue.sliding<void>(1)
             const threads = makeThreadService({
               dataDirectory: options.dataDirectory,
               identity,
@@ -994,6 +1002,10 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
               host: services.host,
               capability: () => agents,
               tracer: yield* Tracer.Tracer,
+              pollIntervalMs: pollMs,
+              onActivity: () => {
+                Effect.runSync(Queue.offer(reportWake, undefined))
+              },
             })
             const executions = makeExecutionService({
               dataDirectory: options.dataDirectory,
@@ -1015,8 +1027,10 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
             } catch {
               /* The operating system may not provide a user name. */
             }
-            const report = async (): Promise<RuntimeReport> =>
-              boundRuntimeReport({
+            let cachedReport: { agents: typeof agents; devices: typeof deviceReport; value: RuntimeReport } | undefined
+            const report = async (): Promise<RuntimeReport> => {
+              if (cachedReport?.agents === agents && cachedReport.devices === deviceReport) return cachedReport.value
+              const value = boundRuntimeReport({
                 upgrade_protocol: 1,
                 ...(isSea() ? { update_protocol: 1 } : {}),
                 batond_version: BUILD.version,
@@ -1024,6 +1038,9 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
                 agents,
                 ...deviceReport,
               })
+              cachedReport = { agents, devices: deviceReport, value }
+              return value
+            }
             const pruneOutputs = Effect.gen(function* () {
               while (true) {
                 yield* controlAttempt(() => pruneDeviceOutputs(options.dataDirectory)).pipe(
@@ -1042,14 +1059,14 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
                   })
                   collectedAt = performance.now()
                 }
-                yield* Effect.sleep(100)
+                yield* Effect.sleep(1000)
               }
             })
             const collect = Effect.gen(function* () {
               yield* controlAttempt((signal) => threads.recover(signal))
               while (true) {
-                yield* controlAttempt((signal) => threads.collectReports(signal))
-                yield* Effect.sleep(pollMs)
+                const nextPoll = yield* controlAttempt((signal) => threads.collectReports(signal))
+                yield* Effect.raceFirst(Effect.sleep(nextPoll), Queue.take(reportWake))
               }
             })
             const probe = Effect.gen(function* () {
@@ -1076,7 +1093,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
                     return
                   }
                 }
-                yield* Effect.sleep(100)
+                yield* Effect.sleep(1000)
               }
             })
             yield* Effect.raceFirst(
@@ -1141,8 +1158,12 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
       transport: options.transport ?? connectWebSocket,
       probe:
         options.probe ??
-        (async (signal) =>
-          (await import('../agents/probe.ts')).probeAgents({ dataDirectory: options.dataDirectory, signal })),
+        (async (signal) => {
+          const probe = await (agentProbe ??= import('../agents/probe-cache.ts').then(({ makeAgentProbe }) =>
+            makeAgentProbe({ dataDirectory: options.dataDirectory }),
+          ))
+          return probe(signal)
+        }),
     }),
   )
 }

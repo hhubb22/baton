@@ -63,7 +63,11 @@ export class RuntimeRunner {
   private readonly loginStarts = new Map<string, Promise<DeviceLoginCode>>()
   private readonly logins = new Map<string, { cancel: AbortController; done: Promise<void> }>()
   private closing = false
-  private lastProbe: { report: ProjectRuntime; fingerprint: string } | undefined
+  private lastProbe: { report: ProjectRuntime; fingerprint: string; at: number } | undefined
+  private probeFlight: { result: Promise<ProjectRuntime>; cancel: AbortController; waiters: number } | undefined
+  private reportRetry:
+    | { fingerprint: string | undefined; at: number; attempts: number; value: ProjectRuntime | undefined }
+    | undefined
   constructor(
     private readonly options: ProjectManagerOptions,
     private readonly watchdog: ProcessWatchdog | undefined,
@@ -133,36 +137,92 @@ export class RuntimeRunner {
     this.owned.delete(owned)
   }
   async report(signal?: AbortSignal): Promise<ProjectRuntime | undefined> {
+    if (signal?.aborted || this.closing) return undefined
+    const fingerprint = await this.fingerprint()
+    const now = this.options.clock?.monotonic() ?? performance.now()
+    if (this.reportRetry && this.reportRetry.fingerprint === fingerprint && now < this.reportRetry.at)
+      return this.reportRetry.value
+    if (fingerprint && this.lastProbe?.fingerprint === fingerprint && now - this.lastProbe.at < 60_000)
+      return this.lastProbe.report
     try {
       return await this.probe(signal)
     } catch (error) {
       if (signal?.aborted || this.closing) return undefined
       const cached = this.lastProbe
-      const fingerprint = await probeFingerprint(this.options.runtimeCommand ?? defaultRuntimeCommand()).catch(
-        () => undefined,
-      )
-      if (!cached || !fingerprint || cached.fingerprint !== fingerprint) {
+      const after = await this.fingerprint()
+      const failedAt = this.options.clock?.monotonic() ?? performance.now()
+      if (this.reportRetry && this.reportRetry.fingerprint === after && failedAt < this.reportRetry.at)
+        return this.reportRetry.value
+      let value: ProjectRuntime | undefined
+      if (!cached || !after || cached.fingerprint !== after) {
         this.lastProbe = undefined
-        return undefined
+      } else {
+        const config = await readProjectRuntimeConfig(this.options.dataDir).catch(() => undefined)
+        if (config)
+          value = {
+            ...cached.report,
+            max_concurrent_projects: config.maxConcurrentProjects,
+            stale: true,
+            probe_error:
+              error instanceof Error && error.name === 'TimeoutError'
+                ? 'probe_timeout'
+                : error instanceof Error && error.message === 'Project Runtime 输出超限'
+                  ? 'probe_output_limit'
+                  : 'probe_failed',
+          }
       }
-      const config = await readProjectRuntimeConfig(this.options.dataDir).catch(() => undefined)
-      if (!config) return undefined
-      return {
-        ...cached.report,
-        max_concurrent_projects: config.maxConcurrentProjects,
-        stale: true,
-        probe_error:
-          error instanceof Error && error.name === 'TimeoutError'
-            ? 'probe_timeout'
-            : error instanceof Error && error.message === 'Project Runtime 输出超限'
-              ? 'probe_output_limit'
-              : 'probe_failed',
+      const attempts = this.reportRetry && this.reportRetry.fingerprint === after ? this.reportRetry.attempts + 1 : 1
+      if (fingerprint === after)
+        this.reportRetry = {
+          fingerprint: after,
+          at: failedAt + Math.min(60_000, 5000 * 2 ** Math.min(attempts - 1, 4)),
+          attempts,
+          value,
+        }
+      return value
+    }
+  }
+  private fingerprint() {
+    return probeFingerprint(this.options.runtimeCommand ?? defaultRuntimeCommand(), this.options.dataDir)
+  }
+  async probe(signal?: AbortSignal): Promise<ProjectRuntime> {
+    signal?.throwIfAborted()
+    let flight = this.probeFlight
+    if (!flight) {
+      const cancel = new AbortController()
+      const next = {
+        cancel,
+        waiters: 0,
+        result: this.runProbe(cancel.signal).finally(() => {
+          if (this.probeFlight === next) this.probeFlight = undefined
+        }),
+      }
+      this.probeFlight = flight = next
+    }
+    flight.waiters++
+    let abort: (() => void) | undefined
+    try {
+      return await (signal
+        ? Promise.race([
+            flight.result,
+            new Promise<never>((_resolve, reject) => {
+              abort = () => reject(signal.reason)
+              signal.addEventListener('abort', abort, { once: true })
+              if (signal.aborted) abort()
+            }),
+          ])
+        : flight.result)
+    } finally {
+      if (abort) signal?.removeEventListener('abort', abort)
+      if (--flight.waiters === 0) {
+        flight.cancel.abort()
+        await flight.result.catch(() => undefined)
       }
     }
   }
-  async probe(signal?: AbortSignal): Promise<ProjectRuntime> {
+  private async runProbe(signal: AbortSignal): Promise<ProjectRuntime> {
     const config = await readProjectRuntimeConfig(this.options.dataDir)
-    const fingerprint = await probeFingerprint(this.options.runtimeCommand ?? defaultRuntimeCommand())
+    const fingerprint = await this.fingerprint()
     const capture = new AbortController()
     const bounded = AbortSignal.any([
       capture.signal,
@@ -199,8 +259,12 @@ export class RuntimeRunner {
         probed_at: new Date().toISOString(),
         stale: false,
       }
-      const after = await probeFingerprint(this.options.runtimeCommand ?? defaultRuntimeCommand())
-      this.lastProbe = fingerprint && fingerprint === after ? { report, fingerprint } : undefined
+      const after = await this.fingerprint()
+      this.lastProbe =
+        fingerprint && fingerprint === after
+          ? { report, fingerprint, at: this.options.clock?.monotonic() ?? performance.now() }
+          : undefined
+      this.reportRetry = undefined
       return report
     } finally {
       bounded.removeEventListener('abort', stop)
@@ -257,7 +321,10 @@ export class RuntimeRunner {
       const bytes = output ? await output : undefined
       if ((await owned.exited).code !== 0) throw new Error('连接配置失败')
       bounded.throwIfAborted()
-      if (action !== 'get') this.options.onReportChanged?.()
+      if (action !== 'get') {
+        this.invalidateProbe()
+        this.options.onReportChanged?.()
+      }
       if (bytes)
         return Schema.decodeUnknownSync(ModelConnection)(
           JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)),
@@ -284,6 +351,7 @@ export class RuntimeRunner {
       owned.stdout.resume()
       if ((await owned.exited).code !== 0) throw new Error('退出订阅失败')
       bounded.throwIfAborted()
+      this.invalidateProbe()
       this.options.onReportChanged?.()
     } finally {
       bounded.removeEventListener('abort', stop)
@@ -332,6 +400,7 @@ export class RuntimeRunner {
       })
       .finally(() => {
         if (this.logins.get(provider)?.cancel === cancel) this.logins.delete(provider)
+        this.invalidateProbe()
         onDone?.()
         this.options.onReportChanged?.()
       })
@@ -348,10 +417,16 @@ export class RuntimeRunner {
   }
   async close() {
     this.closing = true
+    this.probeFlight?.cancel.abort()
+    await this.probeFlight?.result.catch(() => undefined)
     for (const login of this.logins.values()) login.cancel.abort()
     await Promise.allSettled(this.starting)
     await Promise.all([...this.owned].map((p) => this.reap(p)))
     await Promise.allSettled(this.loginStarts.values())
     await Promise.all([...this.logins.values()].map((p) => p.done))
+  }
+  private invalidateProbe() {
+    this.lastProbe = undefined
+    this.reportRetry = undefined
   }
 }

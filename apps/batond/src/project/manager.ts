@@ -58,6 +58,8 @@ class Manager implements ProjectManager {
   private readonly timer: NodeJS.Timeout
   private readonly cleanupTimer: NodeJS.Timeout
   private cleanupBusy = false
+  private cleanupAt = 0
+  private cleanupDelay = 200
   private closing?: Promise<void>
   private readonly wakes: { command: ProjectRunCommand; transport: NonNullable<Manager['transport']> }[] = []
   private wakeBusy = false
@@ -94,7 +96,7 @@ class Manager implements ProjectManager {
     this.transport =
       request && !this.cancel.signal.aborted ? { request, cancel: new AbortController(), receipts: false } : undefined
     this.checkRuns()
-    this.cleanup()
+    this.cleanup(true)
   }
   onDisconnect() {
     this.setTransport()
@@ -317,7 +319,7 @@ class Manager implements ProjectManager {
         this.track(
           this.management(command, old.state === 'failed' ? 'start_failed' : 'exited', old.reason || 'runtime_lost'),
         ).catch(() => {})
-      this.cleanup()
+      this.cleanup(true)
       return
     }
     if (command.type === 'project_run_stop' || command.type === 'project_memory_stop') {
@@ -326,7 +328,7 @@ class Manager implements ProjectManager {
         await safePromise(this.ledger.state(command.run_id, 'exited', 'stopped_before_start'))
         await safePromise(this.ledger.complete(command.run_id))
       }
-      this.cleanup()
+      this.cleanup(true)
       return
     }
     const config = await readProjectRuntimeConfig(this.options.dataDir).catch(() => undefined)
@@ -523,6 +525,8 @@ class Manager implements ProjectManager {
   private async persistCleanup(run: Run) {
     try {
       await safePromise(this.ledger.complete(run.command.run_id))
+      this.cleanupAt = 0
+      this.cleanupDelay = 200
       if (this.runs.get(run.command.run_id) === run) this.runs.delete(run.command.run_id)
     } catch {
       /* 内存中的清理事实保留到下一轮持久化。 */
@@ -665,7 +669,11 @@ class Manager implements ProjectManager {
       })
       .catch(() => {})
   }
-  private cleanup() {
+  private cleanup(force = false) {
+    if (force) {
+      this.cleanupAt = 0
+      this.cleanupDelay = 200
+    }
     if (this.cleanupBusy || this.cancel.signal.aborted) return
     this.cleanupBusy = true
     this.track(
@@ -683,9 +691,15 @@ class Manager implements ProjectManager {
           }
           await this.persistCleanup(run)
         }
+        if (Date.now() < this.cleanupAt) return
         for (let count = 0; count < 32 && this.transport && !this.cancel.signal.aborted; count++) {
           const row = await safePromise(this.ledger.claim(Date.now()))
-          if (!row) break
+          if (!row) {
+            this.cleanupDelay = Math.min(5000, this.cleanupDelay * 2)
+            this.cleanupAt = Date.now() + this.cleanupDelay
+            break
+          }
+          this.cleanupDelay = 200
           const command = { run_id: row.run_id, lease_epoch: row.lease_epoch }
           const budget = AbortSignal.timeout(5000)
           const exited = await this.call(

@@ -206,10 +206,17 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
   const openMs = options.openTimeoutMs ?? 35_000
   const prepareMs = options.prepareTimeoutMs ?? 10_000
   const sendMs = options.sendTimeoutMs ?? 35_000
+  let upgradeWasPaused = false
   const paused = Effect.tryPromise({
     try: () => upgradePaused(options.dataDirectory),
     catch: (cause) => new WorkerFailure('upgrade_state_invalid', '无法读取升级门禁', cause),
-  })
+  }).pipe(
+    Effect.tap((value) =>
+      Effect.sync(() => {
+        if (value) upgradeWasPaused = true
+      }),
+    ),
+  )
   const stopMs = options.stopTimeoutMs ?? 60_000
 
   function report(
@@ -1740,16 +1747,38 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         const command = state.commands[request.command_id]
         return command ? receiptResult(command) : { type: 'result', ok: false, code: 'command_not_found' }
       }
-      if (request.type === 'thread_pending') return pendingResult(state.outbox, request.after_worker_seq ?? 0)
-      if (request.type === 'thread_ack')
-        return yield* commit((draft) => {
-          const entry = draft.outbox.find(
-            (item) => item.report.worker_seq === request.worker_seq && item.report.event_id === request.event_id,
-          )
-          if (!entry) return reject('invalid_ack', 'Report sequence and event ID do not match')
-          entry.acked = true
-          return { type: 'result', ok: true } as const
-        })
+      if (request.type === 'thread_pending')
+        return {
+          ...pendingResult(state.outbox, request.after_worker_seq ?? 0),
+          worker_ready: true,
+          worker_idle:
+            !operation &&
+            !stopFiber &&
+            !recovering &&
+            !state.activeMessage &&
+            !state.resumeRequested &&
+            (state.phase === 'idle' || state.phase === 'stopped') &&
+            !Object.values(state.commands).some(isPending),
+          ...(state.config
+            ? {
+                session_id: state.config.thread_id,
+                storage_generation: state.config.storage_generation,
+                runtime_mode: state.config.runtime_mode,
+              }
+            : {}),
+        }
+      if (request.type === 'thread_ack') {
+        const entry = state.outbox[(request.worker_seq ?? 0) - 1]
+        if (!entry || entry.report.worker_seq !== request.worker_seq || entry.report.event_id !== request.event_id)
+          return reject('invalid_ack', 'Report sequence and event ID do not match')
+        if (!entry.acked) {
+          yield* ledger
+            .ack(entry.report.worker_seq, entry.report.event_id)
+            .pipe(Effect.catch((cause) => freeze(cause).pipe(Effect.andThen(Effect.fail(frozen!)))))
+          state.outbox[entry.report.worker_seq - 1] = { ...entry, acked: true }
+        }
+        return { type: 'result', ok: true } as const
+      }
       return {
         type: 'result',
         ok: false,
@@ -1758,7 +1787,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       }
     })
   }
-  function submit<A>(task: Effect.Effect<A, WorkerFailure>): Effect.Effect<A, WorkerFailure> {
+  function submit<A>(task: Effect.Effect<A, WorkerFailure>, driveAfter = true): Effect.Effect<A, WorkerFailure> {
     return Effect.gen(function* () {
       if (closed) return yield* Effect.fail(new WorkerFailure('worker_closed', 'Worker scope has closed'))
       if (frozen) return yield* Effect.fail(frozen)
@@ -1771,7 +1800,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
           const result = yield* Effect.exit(frozen ? Effect.fail(frozen) : task)
           yield* Deferred.done(response, result)
           waiting.delete(fail)
-          if (!frozen && !closed) yield* drive().pipe(Effect.catch((cause) => freeze(cause)))
+          if (driveAfter && !frozen && !closed) yield* drive().pipe(Effect.catch((cause) => freeze(cause)))
         }),
       )
       return yield* Deferred.await(response)
@@ -1914,7 +1943,10 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       )
         return { type: 'result', ok: false, code: 'node_upgrading' }
       const trace = commandAction(decoded.type) ? yield* captureTrace : undefined
-      return yield* submit(shortRequest({ ...decoded, ...(trace ? { trace_context: trace } : {}) })).pipe(
+      return yield* submit(
+        shortRequest({ ...decoded, ...(trace ? { trace_context: trace } : {}) }),
+        decoded.type !== 'thread_ack',
+      ).pipe(
         Effect.catch((error) =>
           error.code === 'storage_error' || error.code === 'commit_unknown' || error.code === 'worker_closed'
             ? Effect.fail(error)
@@ -1955,8 +1987,13 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
   const drain = (environmentChanged: boolean) =>
     submit(
       Effect.gen(function* () {
+        const upgrading = !environmentChanged && (yield* paused)
+        if (!environmentChanged && !upgrading && upgradeWasPaused) {
+          upgradeWasPaused = false
+          yield* drive()
+        }
         if (
-          (!environmentChanged && !(yield* paused)) ||
+          (!environmentChanged && !upgrading) ||
           operation ||
           stopFiber ||
           recovering ||
@@ -1968,6 +2005,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         closing = true
         return true
       }),
+      false,
     )
   return {
     handle,

@@ -72,6 +72,7 @@ export const makeNodeLedger = Effect.fn('Daemon.makeNodeLedger')(function* (file
     },
   }).pipe(Effect.provide(Reactivity.layer))
   yield* initializeStorage(sql, 'node', storageBaseline)
+  yield* sql.unsafe('CREATE INDEX IF NOT EXISTS node_outbox_pending ON node_outbox(thread_id,seq) WHERE acked=0')
   const command = (id: string) =>
     sql
       .unsafe<{ payload: string }>('SELECT payload FROM node_commands WHERE id=?', [id])

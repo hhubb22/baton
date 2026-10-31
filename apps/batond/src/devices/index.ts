@@ -20,7 +20,9 @@ import {
   type SubscriptionLoginResult,
 } from '@baton/protocol'
 import { Schema } from 'effect'
+import { join } from 'node:path'
 import { ensurePrivateDirectory } from '../platform/private.ts'
+import { fileVersion } from '../platform/file-version.ts'
 import { defaultProjectShell, readProjectExec, setProjectExec } from './config.ts'
 import { DeviceError } from './errors.ts'
 import { updateBrowseRoots } from './roots.ts'
@@ -90,6 +92,8 @@ export async function makeDeviceService(options: DeviceServiceOptions): Promise<
   const lifetime = new AbortController()
   const active = new Set<Promise<unknown>>()
   const loginStarts = new Map<string, Promise<unknown>>()
+  let scanCache: { version: string; at: number; value: Awaited<ReturnType<typeof scanRuntimeRoots>> } | undefined
+  let execCache: { version: string; value: Awaited<ReturnType<typeof readProjectExec>>; truncated: boolean } | undefined
   const changed = () => {
     void Promise.resolve()
       .then(() => options.onChanged?.())
@@ -100,18 +104,33 @@ export async function makeDeviceService(options: DeviceServiceOptions): Promise<
     combined.throwIfAborted()
     const runtime = options.runtime
     const probing = (runtime?.report ? runtime.report(combined) : runtime?.probe(combined))?.catch(() => undefined)
-    const scanSignal = AbortSignal.any([combined, AbortSignal.timeout(2000)])
-    const scan = await scanRuntimeRoots(options.dataDirectory, scanSignal).catch(() => ({
-      roots: [],
-      repos: [],
-      truncated: true,
-    }))
-    const exec = await readProjectExec(options.dataDirectory).catch(() => {
-      scan.truncated = true
-      return { enabled: false, shell: defaultProjectShell() }
-    })
+    const rootsVersion = await fileVersion(join(options.dataDirectory, 'browse-roots.json'))
+    let scan: Awaited<ReturnType<typeof scanRuntimeRoots>>
+    if (!scanCache || scanCache.version !== rootsVersion || performance.now() - scanCache.at >= 300_000) {
+      const scanSignal = AbortSignal.any([combined, AbortSignal.timeout(2000)])
+      scan = await scanRuntimeRoots(options.dataDirectory, scanSignal).catch(() => ({
+        roots: [],
+        repos: [],
+        truncated: true,
+      }))
+      if (!combined.aborted) scanCache = { version: rootsVersion, at: performance.now(), value: scan }
+    } else scan = scanCache.value
+    const execVersion = await fileVersion(join(options.dataDirectory, 'project-exec.json'))
+    if (!execCache || execCache.version !== execVersion) {
+      let truncated = false
+      const value = await readProjectExec(options.dataDirectory).catch(() => {
+        truncated = true
+        return { enabled: false, shell: defaultProjectShell() }
+      })
+      execCache = { version: execVersion, value, truncated }
+    }
     const projectRuntime = await probing
-    return boundRuntimeReport({ ...scan, exec, ...(projectRuntime ? { project_runtime: projectRuntime } : {}) })
+    return boundRuntimeReport({
+      ...scan,
+      truncated: scan.truncated || execCache.truncated,
+      exec: execCache.value,
+      ...(projectRuntime ? { project_runtime: projectRuntime } : {}),
+    })
   }
   const handle = async (body: DeviceRequest, signal?: AbortSignal): Promise<DeviceResult> => {
     const combined = signal ? AbortSignal.any([lifetime.signal, signal]) : lifetime.signal
@@ -151,7 +170,9 @@ export async function makeDeviceService(options: DeviceServiceOptions): Promise<
         if (body.type === 'node.browse_roots_set') {
           const req = decodeRequest(BrowseRootsRequest, body)
           const roots = await updateBrowseRoots(options.dataDirectory, { action: req.action, path: req.path })
+          const version = await fileVersion(join(options.dataDirectory, 'browse-roots.json'))
           const scan = await scanRuntimeRoots(options.dataDirectory, combined)
+          scanCache = { version, at: performance.now(), value: scan }
           const report = boundRuntimeReport(
             {
               ...scan,

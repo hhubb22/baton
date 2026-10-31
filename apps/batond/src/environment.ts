@@ -3,8 +3,14 @@ import { lstat, readdir, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { Schema } from 'effect'
-import { ensurePrivateDirectory, readPrivateFile, writePrivateFileAtomic } from './platform/private.ts'
+import {
+  ensurePrivateDirectory,
+  readPrivateFile,
+  validatePrivateDirectory,
+  writePrivateFileAtomic,
+} from './platform/private.ts'
 import { acquireProcessLock, ProcessLockBusy } from './platform/lock.ts'
+import { fileVersion } from './platform/file-version.ts'
 
 const Values = Schema.Record(Schema.String, Schema.NullOr(Schema.String))
 const Layers = Schema.Record(Schema.String, Values)
@@ -225,6 +231,34 @@ export async function loadEnvironment(dataDirectory: string): Promise<Environmen
     return await readEnvironment(dataDirectory)
   } finally {
     await release()
+  }
+}
+
+/** A process-local reader; unchanged configuration never acquires or publishes a disk lock. */
+export function makeEnvironmentReader(dataDirectory: string): () => Promise<EnvironmentConfiguration> {
+  const directory = join(dataDirectory, 'environment')
+  let cached: { version: string; config: EnvironmentConfiguration } | undefined
+  const version = async (revision: string) => {
+    try {
+      await validatePrivateDirectory(directory)
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return 'missing'
+      throw error
+    }
+    return JSON.stringify([
+      await fileVersion(join(directory, 'environment.json')),
+      ...(revision ? [await fileVersion(join(directory, `secrets-${revision}.json`))] : []),
+    ])
+  }
+  return async () => {
+    const before = await version(cached?.config.revision ?? '')
+    if (cached?.version === before) return structuredClone(cached.config)
+    const config = await loadEnvironment(dataDirectory)
+    const after = await version(config.revision)
+    // Include the new secret filename without caching a snapshot read across a replacement.
+    if ((await version(cached?.config.revision ?? '')) === before) cached = { version: after, config }
+    else cached = undefined
+    return structuredClone(config)
   }
 }
 

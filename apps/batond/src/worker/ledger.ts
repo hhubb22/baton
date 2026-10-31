@@ -124,6 +124,7 @@ export type WorkerLedgerInspection = 'valid' | 'missing' | 'empty' | 'corrupt' |
 export interface OpenWorkerLedger {
   readonly initial: State
   readonly save: (next: State) => Effect.Effect<void, WorkerFailure | SqlError>
+  readonly ack: (seq: number, eventId: string) => Effect.Effect<void, WorkerFailure | SqlError>
 }
 
 type Row = Record<string, SQLOutputValue>
@@ -476,5 +477,24 @@ export const openWorkerLedger = Effect.fn('Worker.openWorkerLedger')(function* (
       }),
     ),
   )
-  return { initial, save }
+  const ack = Effect.fn('Worker.ack')(
+    function* (seq: number, eventId: string) {
+      if (!usable)
+        return yield* Effect.fail(new WorkerFailure('ledger_closed', 'Reopen the Worker ledger after a failed save'))
+      const payload = baseline.outbox[seq - 1]
+      const entry: OutboxEntry | undefined = payload === undefined ? undefined : JSON.parse(payload)
+      if (!entry || entry.report.worker_seq !== seq || entry.report.event_id !== eventId)
+        return yield* Effect.fail(new WorkerFailure('invalid_ack', 'Report sequence and event ID do not match'))
+      if (entry.acked) return
+      const next = JSON.stringify({ ...entry, acked: true })
+      yield* sql.withTransaction(sql.unsafe('UPDATE thread_outbox SET payload=? WHERE seq=?', [next, seq]))
+      baseline.outbox[seq - 1] = next
+    },
+    Effect.onExit((exit) =>
+      Effect.sync(() => {
+        if (Exit.isFailure(exit)) usable = false
+      }),
+    ),
+  )
+  return { initial, save, ack }
 })

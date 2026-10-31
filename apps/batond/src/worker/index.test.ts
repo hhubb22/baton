@@ -216,6 +216,33 @@ const readyWorker = Effect.fnUntraced(function* (dbPath: string) {
 })
 
 describe('reliable Worker', () => {
+  it.effect('reports bound identity and idle state for adaptive report polling', () =>
+    fixture((dbPath) =>
+      Effect.gen(function* () {
+        const { cfg, f, worker } = yield* readyWorker(dbPath)
+        const pending = () => worker.handle({ type: 'thread_pending', ok: false })
+        yield* until(pending(), (reply) => reply.worker_idle === true)
+        expect(Schema.is(WorkerIPCMessageSchema)(yield* pending())).toBe(true)
+        expect(yield* pending()).toMatchObject({
+          worker_ready: true,
+          worker_idle: true,
+          session_id: cfg.thread_id,
+          storage_generation: cfg.storage_generation,
+          runtime_mode: cfg.runtime_mode,
+        })
+        const input = message(cfg)
+        yield* worker.handle(input)
+        yield* completed(worker, input.command_id!)
+        expect((yield* pending()).worker_idle).toBe(false)
+        const stop = request(cfg, 'thread_stop')
+        yield* worker.handle(stop)
+        yield* Queue.offer(f.events, event(input.client_message_id!, 'end'))
+        yield* completed(worker, stop.command_id!)
+        yield* until(pending(), (reply) => reply.worker_idle === true)
+      }),
+    ),
+  )
+
   it.effect('keeps the Turn span open through output and ends it with reported usage', () =>
     fixture((dbPath) => {
       const spans: Tracer.NativeSpan[] = []
@@ -535,6 +562,11 @@ describe('reliable Worker', () => {
               db.close()
             }
             yield* Effect.promise(() => saveUpgradeState(dirname(dbPath), { ...state, phase: 'cancelled' }))
+            expect(yield* worker.drain).toBe(false)
+            yield* until(
+              Effect.sync(() => f.sentInputs.some((input) => input.id === second.client_message_id)),
+              Boolean,
+            )
             yield* completed(worker, second.command_id!)
             yield* Queue.offer(f.events, event(second.client_message_id!, 'end'))
             yield* completed(worker, third.command_id!)

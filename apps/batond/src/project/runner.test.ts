@@ -3,13 +3,14 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 import { Effect, Scope, Exit } from 'effect'
-import { afterEach, expect, it } from 'vite-plus/test'
+import { afterEach, expect, it, vi } from 'vite-plus/test'
 import { ensurePrivateDirectory, writePrivateFileAtomic } from '../platform/private.ts'
 import { makePrivateTempDirectory } from '../testing/private.ts'
 import { makeProjectManager } from './index.ts'
 import { RuntimeRunner, defaultRuntimeCommand, defaultWatchdogCommand } from './runner.ts'
-import { LeaseClock, success } from './types.ts'
+import { LeaseClock, success, type ProjectClock } from './types.ts'
 import { serveRuntime } from './stdio.ts'
+import { importEnvironment } from '../environment.ts'
 
 const cleanups: (() => Promise<void>)[] = []
 afterEach(async () => {
@@ -45,12 +46,14 @@ const quickRunner = async (
   program: string,
   credentialsDirectory?: string,
   telemetry?: import('@baton/telemetry').LocalTelemetry,
+  clock?: ProjectClock,
 ) => {
   const dataDir = await makePrivateTempDirectory('baton-early-output-')
   cleanups.push(() => rm(dataDir, { recursive: true, force: true }))
   const runner = new RuntimeRunner(
     {
       dataDir,
+      ...(clock ? { clock } : {}),
       ...(telemetry ? { telemetry } : {}),
       runtimeCommand: {
         file: process.execPath,
@@ -197,6 +200,7 @@ it('retains a timestamped report after probe timeout and invalidates it when cre
   await ensurePrivateDirectory(credentials)
   const credential = join(credentials, 'openai-codex.json')
   await writePrivateFileAtomic(credential, '{}')
+  let now = 0
   const { runner, dataDir } = await quickRunner(
     `
     const fs = require('node:fs');
@@ -206,7 +210,13 @@ it('retains a timestamped report after probe timeout and invalidates it when cre
     else console.log(JSON.stringify({version:'0.1.0',providers:[{provider:'openai-codex',status:mode === 'ok' ? 'available' : mode}]}));
   `,
     credentials,
+    undefined,
+    { wall: () => Date.now(), monotonic: () => now },
   )
+  const refresh = () => {
+    now += 61_000
+    return runner.report()
+  }
   // probeTimeoutMs 同时约束正常探测与超时场景。Windows 启动子进程更慢，正常路径需要更大预算，
   // 但超时场景要等满该预算，因此不能放得太大。
   await writePrivateFileAtomic(
@@ -217,17 +227,17 @@ it('retains a timestamped report after probe timeout and invalidates it when cre
   expect(initial).toMatchObject({ stale: false })
   expect(initial?.probed_at).toBeDefined()
   await writeFile(mode, 'timeout')
-  expect(await runner.report()).toMatchObject({
+  expect(await refresh()).toMatchObject({
     stale: true,
     probed_at: initial?.probed_at,
     probe_error: 'probe_timeout',
   })
   await writeFile(mode, 'login_required')
-  expect(await runner.report()).toMatchObject({ stale: false, providers: [{ status: 'login_required' }] })
+  expect(await refresh()).toMatchObject({ stale: false, providers: [{ status: 'login_required' }] })
   await writeFile(mode, 'timeout')
-  expect(await runner.report()).toMatchObject({ stale: true, providers: [{ status: 'login_required' }] })
+  expect(await refresh()).toMatchObject({ stale: true, providers: [{ status: 'login_required' }] })
   await writeFile(mode, 'output')
-  expect(await runner.report()).toMatchObject({ stale: true, probe_error: 'probe_output_limit' })
+  expect(await refresh()).toMatchObject({ stale: true, probe_error: 'probe_output_limit' })
   await expect(runner.probe()).rejects.toThrow('输出超限')
   if (process.platform !== 'win32') {
     await chmod(credential, 0o644)
@@ -245,6 +255,45 @@ it('retains a timestamped report after probe timeout and invalidates it when cre
   await rm(credential)
   expect(await runner.report()).toBeUndefined()
 }, 60000)
+
+it('shares probes, reuses fresh reports and backs off failures without sharing caller cancellation', async () => {
+  let now = 0
+  const { runner, dataDir } = await quickRunner(
+    `setTimeout(() => console.log(JSON.stringify({version:'0.1.0',providers:[]})), 40)`,
+    undefined,
+    undefined,
+    { wall: () => Date.now(), monotonic: () => now },
+  )
+  const spawn = vi.spyOn(runner, 'spawn')
+  const reports = await Promise.all(Array.from({ length: 8 }, () => runner.report()))
+  expect(reports.every((report) => report?.probed_at === reports[0]?.probed_at)).toBe(true)
+  for (let i = 1; i < 12; i++) {
+    now = i * 5000
+    expect(await runner.report()).toEqual(reports[0])
+  }
+  expect(spawn).toHaveBeenCalledTimes(1)
+  const cancel = new AbortController()
+  const cancelled = runner.probe(cancel.signal)
+  const surviving = runner.probe()
+  cancel.abort()
+  await expect(cancelled).rejects.toBeDefined()
+  expect(await surviving).toMatchObject({ stale: false })
+  expect(spawn).toHaveBeenCalledTimes(2)
+  await writePrivateFileAtomic(join(dataDir, 'project-runtime.json'), '{"probeMaxOutputBytes":1024}')
+  expect(await runner.report()).toMatchObject({ stale: false })
+  expect(spawn).toHaveBeenCalledTimes(3)
+  await importEnvironment(dataDir, { PATH: '/usr/bin:/bin' })
+  expect(await runner.report()).toMatchObject({ stale: false })
+  expect(spawn).toHaveBeenCalledTimes(4)
+  await writePrivateFileAtomic(join(dataDir, 'project-runtime.json'), 'invalid')
+  expect(await Promise.all(Array.from({ length: 8 }, () => runner.report()))).toEqual(Array(8).fill(undefined))
+  const probe = vi.spyOn(runner, 'probe')
+  for (let i = 0; i < 20; i++) expect(await runner.report()).toBeUndefined()
+  expect(probe).not.toHaveBeenCalled()
+  now += 5000
+  expect(await runner.report()).toBeUndefined()
+  expect(probe).toHaveBeenCalledTimes(1)
+})
 
 it('probes the existing Runtime source CLI using only an empty local credential directory', async () => {
   const manager = await open('idle', true)

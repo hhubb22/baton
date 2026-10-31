@@ -3,7 +3,14 @@ import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Effect, Option, Tracer } from 'effect'
 import type * as Scope from 'effect/Scope'
-import type { NodeIdentity, RuntimeAgent, ThreadCommand, WorkerCommandResult, WorkerRequest } from '@baton/protocol'
+import type {
+  NodeIdentity,
+  RuntimeAgent,
+  ThreadCommand,
+  ThreadReport,
+  WorkerCommandResult,
+  WorkerRequest,
+} from '@baton/protocol'
 import { expect, it } from 'vite-plus/test'
 import { makeNodeLedger } from './ledger.ts'
 import { initializeBrowseRoots } from '../devices/roots.ts'
@@ -147,6 +154,99 @@ it('queries authenticated Worker status for every new activity challenge without
       ).toMatchObject({ ok: false, activity_check_seq: 2, code: 'activity_not_verified' })
       expect(checks).toBe(2)
       expect(yield* ledger.pendingCommands()).toEqual([])
+    }),
+  )
+})
+
+it('backs off idle polling, wakes on commands and durably collects late reports before ACK', async () => {
+  await withService(({ commandId, command, host, path, setHandler }) =>
+    Effect.gen(function* () {
+      const ledger = yield* makeNodeLedger(join(path, 'node.db'))
+      let now = 0,
+        pending = 0,
+        status = 0,
+        generation = '',
+        idle = true,
+        unreachable = false,
+        ensured = 0
+      const reports: ThreadReport[] = []
+      setHandler(async (_id, req) => {
+        if (req.type === 'thread_open') {
+          generation = req.storage_generation!
+          return accepted(req)
+        }
+        if (req.type === 'thread_pending') {
+          pending++
+          if (unreachable) throw new IPCError('unreachable', 'Offline Worker')
+          return {
+            type: 'result',
+            ok: true,
+            worker_ready: true,
+            worker_idle: idle,
+            session_id: command.thread_id,
+            storage_generation: generation,
+            runtime_mode: 'full-access',
+            thread_reports: [...reports],
+          }
+        }
+        if (req.type === 'thread_ack') {
+          expect((await Effect.runPromise(ledger.pendingReports())).map((r) => r.event_id)).toContain(req.event_id)
+          reports.splice(0)
+          return { type: 'result', ok: true }
+        }
+        return accepted(req)
+      })
+      const service = makeThreadService({
+        dataDirectory: path,
+        identity: { node_id: randomUUID() } as NodeIdentity,
+        ledger,
+        capability: () => capability,
+        now: () => now,
+        host: {
+          ensureWorker: async (id) => {
+            ensured++
+            await host.ensureWorker(id)
+          },
+          request: async (id, req, options) => {
+            if (req.type === 'status') status++
+            return host.request(id, req, options)
+          },
+        },
+      })
+      expect((yield* Effect.promise(() => service.command(commandId, command))).ok).toBe(true)
+      yield* Effect.promise(() => service.discover())
+      const baseline = status
+      for (let i = 0; i < 120; i++) {
+        now = i * 250
+        yield* Effect.promise(() => service.collectReports())
+      }
+      expect(pending).toBeLessThanOrEqual(10)
+      expect(status - baseline).toBe(0)
+      reports.push({
+        type: 'thread.report',
+        thread_id: command.thread_id,
+        storage_generation: generation,
+        event_id: randomUUID(),
+        worker_seq: 1,
+        kind: 'thread.stopped',
+      })
+      now += 5000
+      yield* Effect.promise(() => service.collectReports())
+      expect(yield* ledger.pendingReports()).toHaveLength(1)
+      expect(reports).toEqual([])
+      idle = false
+      yield* Effect.promise(() =>
+        service.command(randomUUID(), { ...command, action: 'settings', execution_timeout_seconds: 120 }),
+      )
+      const previous = pending
+      expect(yield* Effect.promise(() => service.collectReports())).toBe(250)
+      expect(pending).toBe(previous + 1)
+      now += 250
+      unreachable = true
+      yield* Effect.promise(() => service.collectReports())
+      expect(status).toBeGreaterThan(baseline)
+      // A reachable status keeps recovery from spawning a duplicate Worker.
+      expect(ensured).toBe(1)
     }),
   )
 })
