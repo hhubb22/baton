@@ -865,8 +865,8 @@ describe('threads', () => {
 
     await advance(scheduler, browserLatency.read + browserLatency.run)
     expect(await within(detail).findByText('空闲')).toBeInTheDocument()
-    // 流式回复的文字按字符拆开渲染，这里比较文本内容。
-    expect(detail).toHaveTextContent('Done. The change is ready for review.')
+    // 流式回复的文字按字符拆开渲染并逐步显示，这里等待完整文本。
+    await waitFor(() => expect(detail).toHaveTextContent('Done. The change is ready for review.'))
     await waitFor(() =>
       expect(screen.getByRole('link', { name: /Add a health check/ })).not.toHaveAccessibleName(/Unread/),
     )
