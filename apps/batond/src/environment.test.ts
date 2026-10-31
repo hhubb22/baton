@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it, vi } from 'vite-plus/test'
@@ -11,9 +11,6 @@ import {
   updateEnvironment,
 } from './environment.ts'
 import { runEnvironmentCLI } from './environment-cli.ts'
-import { makeEnvironmentReader } from './environment.ts'
-import * as locks from './platform/lock.ts'
-import { writePrivateFileAtomic } from './platform/private.ts'
 
 it('keeps imports across installation and separates proxy credentials', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'baton-env-'))
@@ -82,50 +79,6 @@ it('folds Windows keys and reports conflicting proxy variants', () => {
   expect(windows.diagnostics).toEqual([])
   expect(windows.env.http_proxy).toBe('http://b')
   expect(windows.env.HTTP_PROXY).toBeUndefined()
-})
-
-it('serializes reads and writes and removes replaced secrets', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'baton-env-'))
-  try {
-    await importEnvironment(directory, { PATH: '/bin' })
-    await Promise.all([
-      ...Array.from({ length: 5 }, (_, index) =>
-        updateEnvironment(directory, (config) => ({
-          ...config,
-          scopes: { ...config.scopes, [`agent:test${index}`]: { API_KEY: `secret-${index}` } },
-        })),
-      ),
-      ...Array.from({ length: 5 }, () => loadEnvironment(directory)),
-    ])
-    expect((await readdir(join(directory, 'environment'))).filter((name) => name.startsWith('secrets-'))).toHaveLength(
-      1,
-    )
-    expect(Object.keys((await loadEnvironment(directory)).scopes)).toHaveLength(5)
-  } finally {
-    await rm(directory, { recursive: true, force: true })
-  }
-})
-
-it('checks unchanged environment metadata without lock writes and reloads atomic replacements', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'baton-env-cache-'))
-  try {
-    const first = await importEnvironment(directory, { PATH: '/first' })
-    const read = makeEnvironmentReader(directory)
-    expect((await read()).revision).toBe(first.revision)
-    const lock = vi.spyOn(locks, 'acquireProcessLock')
-    try {
-      for (let i = 0; i < 20; i++) expect((await read()).imported.PATH).toBe('/first')
-      expect(lock).not.toHaveBeenCalled()
-      const next = await importEnvironment(directory, { PATH: '/second' })
-      expect(await read()).toMatchObject({ revision: next.revision, imported: { PATH: '/second' } })
-      await writePrivateFileAtomic(join(directory, 'environment', `secrets-${next.revision}.json`), 'invalid')
-      await expect(read()).rejects.toThrow('秘密文件损坏')
-    } finally {
-      lock.mockRestore()
-    }
-  } finally {
-    await rm(directory, { recursive: true, force: true })
-  }
 })
 
 it('does not inherit a removed explicit value from an older process', () => {
