@@ -14,7 +14,9 @@ const styles = stylex.create({
     display: 'flex',
     flexDirection: 'column',
     gap: '1px',
-    width: '304px',
+    width: 'max-content',
+    minWidth: '96px',
+    maxWidth: '304px',
     maxHeight: 'var(--available-height)',
     overflowY: 'auto',
     padding: space.xs,
@@ -27,7 +29,12 @@ const styles = stylex.create({
     color: semantic.foreground,
     outline: 'none',
   },
-  narrow: { width: '232px' },
+  // 两行说明需要足够的行宽，固定宽度
+  wide: { width: '304px' },
+  // 带搜索框的短列表：下限足够宽，过滤时宽度基本不跳动，长名称仍可撑开
+  search: { minWidth: '240px' },
+  // 收起的侧栏里触发器很窄，此时由 minWidth 保证可读
+  trigger: { width: 'var(--anchor-width)', minWidth: '160px', maxWidth: 'none' },
   option: {
     display: 'flex',
     alignItems: 'center',
@@ -70,14 +77,14 @@ const styles = stylex.create({
 export function Menu({
   trigger,
   children,
-  narrow,
+  width = 'content',
   align = 'start',
   side = 'bottom',
   onOpenChange,
 }: {
   trigger: ReactElement
   children: ReactNode
-  narrow?: boolean
+  width?: 'content' | 'search' | 'wide' | 'trigger'
   align?: 'start' | 'center' | 'end'
   side?: 'top' | 'bottom' | 'left' | 'right'
   onOpenChange?: (open: boolean) => void
@@ -87,7 +94,16 @@ export function Menu({
       <BaseMenu.Trigger render={trigger} />
       <BaseMenu.Portal>
         <BaseMenu.Positioner side={side} align={align} sideOffset={4} {...stylex.props(styles.positioner)}>
-          <BaseMenu.Popup {...stylex.props(styles.popup, narrow && styles.narrow)}>{children}</BaseMenu.Popup>
+          <BaseMenu.Popup
+            {...stylex.props(
+              styles.popup,
+              width === 'search' && styles.search,
+              width === 'wide' && styles.wide,
+              width === 'trigger' && styles.trigger,
+            )}
+          >
+            {children}
+          </BaseMenu.Popup>
         </BaseMenu.Positioner>
       </BaseMenu.Portal>
     </BaseMenu.Root>

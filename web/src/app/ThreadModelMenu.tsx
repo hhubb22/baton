@@ -134,6 +134,7 @@ export function ThreadModelMenu({
   return (
     <>
       <Menu
+        width="search"
         side={side}
         onOpenChange={(open) => {
           if (!open) setSearch('')

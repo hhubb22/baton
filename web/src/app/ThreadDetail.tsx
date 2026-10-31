@@ -119,7 +119,7 @@ const styles = stylex.create({
     color: semantic.brandForeground,
     textDecoration: { default: 'none', ':hover': 'underline' },
   },
-  info: { color: semantic.brandForeground },
+  agentText: { color: semantic.agentForeground },
   muted: { color: semantic.mutedForeground },
   danger: { color: semantic.destructiveForeground },
   attention: { color: semantic.warningForeground },
@@ -210,12 +210,12 @@ const styles = stylex.create({
 })
 
 const toneText: Partial<Record<Tone, stylex.StyleXStyles>> = {
-  info: styles.info,
+  agent: styles.agentText,
   danger: styles.danger,
   attention: styles.attention,
 }
 
-// 状态文字的颜色：执行中蓝色、停止红色、状态未知橙色，其余灰色。
+// 状态文字的颜色：运行中用 Agent 色、失败红色、需要处理橙色，其余灰色。
 export function statusTextStyle(tone: Tone) {
   return toneText[tone] ?? styles.muted
 }
@@ -913,7 +913,7 @@ export function ThreadDetail({
     ),
   ].filter(Boolean)
   const more = menuItems.length > 0 && (
-    <Menu align="end" narrow trigger={<IconButton icon="dots" label="对话操作" />}>
+    <Menu align="end" trigger={<IconButton icon="dots" label="对话操作" />}>
       {menuItems}
     </Menu>
   )

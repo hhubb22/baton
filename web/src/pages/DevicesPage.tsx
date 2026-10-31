@@ -346,7 +346,6 @@ function DeviceDetails({
             </div>
             {connected && (
               <Menu
-                narrow
                 align="end"
                 trigger={
                   <Button small aria-label={`管理 ${sub.provider}`}>

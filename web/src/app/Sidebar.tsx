@@ -258,7 +258,7 @@ export function Sidebar() {
       <div {...stylex.props(styles.footer)}>
         {account && (
           <Menu
-            narrow
+            width="trigger"
             side="top"
             trigger={
               <button

@@ -33,6 +33,7 @@ export function ThreadAccessMenu({
   const noSandbox = agent && (agent.kind === 'pi' || agent.kind === 'kiro')
   return (
     <Menu
+      width="wide"
       side={side}
       trigger={
         <Chip icon="shield" composer>

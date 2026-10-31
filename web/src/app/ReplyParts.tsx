@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { activityLine, baseName, clockTime, fileSize, runTimer } from '../data/derive'
+import { activityLine, baseName, clockTime, fileSize, runTimer, threadStatusTones } from '../data/derive'
 import { useClient, useLiveTrace, useTrace } from '../data/queries'
 import type { Attachment, Device, LiveOutput as LiveOutputData, Message, Thread } from '../data/types'
 import { fonts, fontSize } from '../theme/base.stylex'
@@ -41,7 +41,7 @@ const styles = stylex.create({
     borderLeftColor: semantic.border,
   },
   muted: { color: semantic.mutedForeground },
-  info: { color: semantic.brandForeground },
+  agentText: { color: semantic.agentForeground },
   link: {
     padding: 0,
     borderWidth: 0,
@@ -427,8 +427,8 @@ export function LiveOutput({
   return (
     <div {...stylex.props(styles.live)}>
       {live ? (
-        <span {...stylex.props(text.small, styles.liveHead, styles.info)}>
-          <StatusDot tone="info" />
+        <span {...stylex.props(text.small, styles.liveHead, thread.pending ? styles.muted : styles.agentText)}>
+          <StatusDot tone={thread.pending ? threadStatusTones.waiting : threadStatusTones.running} />
           {thread.pending ? '正在停止' : '运行中'} ·{' '}
           <span {...stylex.props(text.mono)}>{runTimer(thread.runStartedAt!, now)}</span>
         </span>

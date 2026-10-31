@@ -583,7 +583,8 @@ describe('HTTP thread contracts', () => {
           unknownDelivery: failedMessages.some((item) => item.delivery === 'unknown'),
         }),
       ).toEqual({
-        status: { tone: 'neutral', label: '空闲' },
+        status: { tone: 'hollow', label: '空闲' },
+        mark: 'idle',
         group: 'idle',
         notice: null,
         composer: true,

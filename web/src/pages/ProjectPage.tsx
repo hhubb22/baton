@@ -82,7 +82,8 @@ import { JumpToLatest } from '../ui/JumpToLatest'
 import { useChatScroll } from '../ui/useChatScroll'
 import { Menu, MenuOption, MenuRule } from '../ui/Menu'
 import { ResizablePane } from '../ui/ResizablePane'
-import { StatusChip, type Tone } from '../ui/Status'
+import { StatusChip } from '../ui/Status'
+import { ThreadStatusIcon } from '../ui/ThreadStatusIcon'
 import { Tabs } from '../ui/Tabs'
 
 const styles = stylex.create({
@@ -97,7 +98,6 @@ const styles = stylex.create({
   },
   title: { display: 'flex', alignItems: 'center', gap: space.sm },
   headerStatus: { display: 'inline-flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' },
-  agentText: { color: semantic.agentForeground },
   muted: { color: semantic.mutedForeground },
   faint: { color: semantic.faintForeground },
   danger: { color: semantic.destructiveForeground },
@@ -812,7 +812,7 @@ function Overview({
     const view = views.get(thread.id)!
     const lead = (
       <>
-        <Icon name="message" size={16} style={styles.muted} />
+        <ThreadStatusIcon status={view.mark} />
         <span {...stylex.props(styles.threadTitle, text.truncate)}>{thread.title}</span>
         <span {...stylex.props(text.caption, statusTextStyle(view.status.tone))}>{view.status.label}</span>
         <span {...stylex.props(text.caption, styles.rowTime)}>{relativeTime(thread.updatedAt, now)}</span>
@@ -1031,10 +1031,6 @@ function threadCounts(threads: Thread[], devices: Device[]) {
     running: groups.filter((group) => group === 'running' || group === 'stopping').length,
     waiting: groups.filter((group) => group === 'waiting' || group === 'stopRequested').length,
   }
-}
-
-function headerTone(tone: Tone) {
-  return tone === 'agent' ? styles.agentText : statusTextStyle(tone)
 }
 
 export function ProjectPage() {
@@ -1582,7 +1578,7 @@ export function ProjectPage() {
         status={
           <>
             {project.attention !== 'failing' && (status.label !== '空闲' || waitingMessages > 0) && (
-              <span {...stylex.props(text.caption, styles.headerStatus, headerTone(status.tone))}>
+              <span {...stylex.props(text.caption, styles.headerStatus, statusTextStyle(status.tone))}>
                 {status.label}
                 {waitingMessages > 0 && ` · ${waitingMessages} 条消息待发送`}
               </span>
@@ -1625,7 +1621,7 @@ export function ProjectPage() {
         }
         actions={
           <>
-            <Menu narrow align="end" trigger={<IconButton icon="dots" label="项目操作" />}>
+            <Menu align="end" trigger={<IconButton icon="dots" label="项目操作" />}>
               <MenuOption onSelect={() => settings(true)}>设置</MenuOption>
               <MenuOption
                 onSelect={() => {
@@ -1696,7 +1692,7 @@ export function ProjectPage() {
             </div>
             {search.thread && (counts.running > 0 || counts.waiting > 0) && (
               <div aria-label="项目对话" {...stylex.props(styles.chips)}>
-                {counts.running > 0 && <StatusChip tone="info" label="运行中" count={counts.running} />}
+                {counts.running > 0 && <StatusChip tone="agent" label="运行中" count={counts.running} />}
                 {counts.waiting > 0 && <StatusChip tone="hollow" label="等待设备" count={counts.waiting} />}
               </div>
             )}

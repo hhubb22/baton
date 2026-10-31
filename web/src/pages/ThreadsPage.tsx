@@ -41,12 +41,13 @@ import { text } from '../theme/text'
 import { semantic } from '../theme/semantic.stylex'
 import { radius, size, space } from '../theme/tokens.stylex'
 import { Avatar } from '../ui/Avatar'
-import { UnreadDot } from '../ui/Badge'
 import { Banner } from '../ui/Banner'
 import { Button, focusRing } from '../ui/Button'
 import { Chip } from '../ui/Chip'
 import { Composer } from '../ui/Composer'
 import { Icon } from '../ui/Icon'
+import { UnreadDot } from '../ui/Badge'
+import { ThreadStatusIcon } from '../ui/ThreadStatusIcon'
 import { Menu, MenuHeading, MenuOption, MenuRule } from '../ui/Menu'
 
 const styles = stylex.create({
@@ -99,6 +100,7 @@ const styles = stylex.create({
     maxWidth: '960px',
     marginInline: 'auto',
     paddingLeft: space.xs,
+    paddingRight: space.md,
   },
   count: { marginLeft: 'auto', color: semantic.faintForeground },
   group: { display: 'flex', flexDirection: 'column', width: '100%', maxWidth: '960px', marginInline: 'auto' },
@@ -117,33 +119,33 @@ const styles = stylex.create({
   },
   groupChevron: { color: semantic.mutedForeground },
   groupCount: { color: semantic.mutedForeground },
+  // 状态图标和分组箭头同一中线，标题和分组名同一左边
   row: {
     display: 'flex',
     alignItems: 'center',
     gap: space.md,
     minHeight: '48px',
     paddingInline: space.md,
-    paddingLeft: '24px',
+    paddingLeft: '10px',
     borderRadius: radius.md,
     color: semantic.foreground,
     textDecoration: 'none',
     backgroundColor: { default: 'transparent', ':hover': semantic.muted },
   },
   rowSelected: { backgroundColor: { default: semantic.accent, ':hover': semantic.accent } },
-  unreadSlot: { display: 'inline-flex', flexShrink: 0, width: size.dot, height: size.dot },
   rowIcon: {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
-    width: '24px',
+    width: '16px',
     height: '24px',
-    color: semantic.mutedForeground,
+    marginRight: '-6px',
   },
-  rowIconAttention: { color: semantic.warningForeground },
-  rowIconRunning: { color: semantic.agentForeground },
   title: { display: 'inline-flex', alignItems: 'center', gap: space.xs, flexGrow: 1, flexBasis: 0, minWidth: 0 },
   titleText: { minWidth: 0 },
+  titleUnread: { fontWeight: 500 },
+  unreadSlot: { display: 'inline-flex', justifyContent: 'center', flexShrink: 0, width: '16px' },
   project: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: '20px' },
   timer: {
     display: 'inline-flex',
@@ -254,6 +256,7 @@ function LocationMenus({
         ))}
       </Menu>
       <Menu
+        width="wide"
         side="bottom"
         onOpenChange={(open) => {
           if (!open) setSearch('')
@@ -342,16 +345,6 @@ function ThreadListRow({
   now: number
 }) {
   const timer = group.live && thread.runStartedAt !== null ? runTimer(thread.runStartedAt, now) : null
-  const statusIcon =
-    group.group === 'attention'
-      ? thread.status === 'stopped'
-        ? 'stop'
-        : 'alert'
-      : group.group === 'waiting' || group.group === 'stopRequested'
-        ? 'offline'
-        : group.group === 'archived'
-          ? 'archive'
-          : 'message'
   return (
     <Link
       to="/threads"
@@ -360,19 +353,13 @@ function ThreadListRow({
       aria-label={`${thread.title}, ${group.status.label}, ${project?.name ?? '无项目'}${thread.unread ? '，未读' : ''}${timer ? `，运行时间 ${timer}` : ''}，最近活动 ${relativeTime(thread.updatedAt, now)}`}
       {...stylex.props(text.small, styles.row, selected && styles.rowSelected, focusRing.ring)}
     >
-      <span {...stylex.props(styles.unreadSlot)}>{thread.unread && <UnreadDot />}</span>
-      <span
-        title={group.status.label}
-        {...stylex.props(
-          styles.rowIcon,
-          group.group === 'attention' && thread.status !== 'stopped' && styles.rowIconAttention,
-          group.group === 'running' && styles.rowIconRunning,
-        )}
-      >
-        <Icon name={statusIcon} size={16} />
+      <span title={group.status.label} {...stylex.props(styles.rowIcon)}>
+        <ThreadStatusIcon status={group.mark} />
       </span>
       <span {...stylex.props(styles.title)}>
-        <span {...stylex.props(styles.titleText, text.truncate)}>{thread.title}</span>
+        <span {...stylex.props(styles.titleText, text.truncate, thread.unread && styles.titleUnread)}>
+          {thread.title}
+        </span>
         {timer && (
           <span title={`运行时间：${timer}`} {...stylex.props(text.caption, styles.timer)}>
             <Icon name="clock" size={12} />
@@ -383,6 +370,7 @@ function ThreadListRow({
       <span title={project?.name} {...stylex.props(styles.project)}>
         {project && <Avatar name={project.name} hue={project.hue} emoji={project.emoji} />}
       </span>
+      <span {...stylex.props(styles.unreadSlot)}>{thread.unread && <UnreadDot />}</span>
       <span title="最近活动" {...stylex.props(text.caption, styles.time)}>
         {relativeTime(thread.updatedAt, now)}
       </span>

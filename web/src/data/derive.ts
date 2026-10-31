@@ -1,6 +1,7 @@
 // 由多个查询组合出的界面状态。设备、Thread、Project 各自只存原始状态，
 // 页面显示时在这里合并，所以设备状态一变，所有用到它的页面一起更新。
 import type { Tone } from '../ui/Status'
+import type { ThreadStatus } from '../ui/ThreadStatusIcon'
 import type {
   ActivitySummary,
   AgentKind,
@@ -44,8 +45,20 @@ export interface ThreadNotice {
   action: ThreadAction | null
 }
 
+// 紧凑位置的状态点颜色，和同一状态的 16px 图标对应。
+export const threadStatusTones: Record<ThreadStatus, Tone> = {
+  running: 'agent',
+  attention: 'attention',
+  stopped: 'neutral',
+  waiting: 'hollow',
+  idle: 'hollow',
+  archived: 'hollow',
+}
+
 export interface ThreadView {
   status: StatusView
+  // 全站显示这个对话时用的状态符号，status.tone 由它决定。
+  mark: ThreadStatus
   group: ThreadGroup
   // 时间线末尾说明当前状态和恢复办法；状态正常时为 null。
   notice: ThreadNotice | null
@@ -86,25 +99,38 @@ export function threadView(
   const reachable = device?.connection === 'online'
   const away = device?.connection === 'syncing' ? '正在同步' : '已离线'
   const view = (
-    status: StatusView,
+    label: string,
     group: ThreadGroup,
     note: ThreadNotice | null = null,
     composer = true,
     live = false,
-  ): ThreadView => ({
-    status,
-    group,
-    notice: note,
-    composer,
-    live,
-  })
+  ): ThreadView => {
+    const mark: ThreadStatus =
+      group === 'attention'
+        ? thread.status === 'stopped'
+          ? 'stopped'
+          : 'attention'
+        : group === 'running' && live
+          ? 'running'
+          : group === 'idle' || group === 'archived'
+            ? group
+            : 'waiting'
+    return {
+      status: { tone: threadStatusTones[mark], label },
+      mark,
+      group,
+      notice: note,
+      composer,
+      live,
+    }
+  }
 
   if (thread.status === 'archived') {
-    return view({ tone: 'hollow', label: '已归档' }, 'archived', notice('已归档', ''), false)
+    return view('已归档', 'archived', notice('已归档', ''), false)
   }
   if (thread.stopFailed && thread.status === 'running') {
     return view(
-      { tone: 'attention', label: '停止失败' },
+      '停止失败',
       'attention',
       notice(`无法停止 ${agent}`, `${agent} 可能仍在运行。`, null, 'attention'),
       true,
@@ -114,7 +140,7 @@ export function threadView(
   if (thread.pending === 'archive') {
     if (reachable) {
       return view(
-        { tone: 'info', label: '正在归档…' },
+        '正在归档…',
         'stopping',
         notice('正在停止后归档…', canceledNote(thread.stopCanceled).trim()),
         false,
@@ -122,48 +148,35 @@ export function threadView(
       )
     }
     return view(
-      { tone: 'neutral', label: '等待归档' },
+      '等待归档',
       'stopRequested',
       notice(`等待 ${name}`, `${canceledNote(thread.stopCanceled)}${agent} may still be running.`, 'viewDevices'),
       false,
     )
   }
   if (thread.pending === 'stop') {
-    if (reachable) return view({ tone: 'info', label: '正在停止…' }, 'stopping', null, true, true)
+    if (reachable) return view('正在停止…', 'stopping', null, true, true)
     return view(
-      { tone: 'neutral', label: '等待停止' },
+      '等待停止',
       'stopRequested',
       notice(`等待 ${name} 停止`, `${canceledNote(thread.stopCanceled)}${agent} may still be running.`, 'viewDevices'),
       false,
     )
   }
   if (thread.resumePending) {
-    return view(
-      { tone: 'info', label: '正在恢复…' },
-      'waiting',
-      notice(`正在恢复 ${agent}…`, `等待 ${name} 确认对话已恢复。`),
-      false,
-    )
+    return view('正在恢复…', 'waiting', notice(`正在恢复 ${agent}…`, `等待 ${name} 确认对话已恢复。`), false)
   }
   if (thread.starting) {
     return reachable
-      ? view(
-          { tone: 'info', label: '正在启动…' },
-          'waiting',
-          notice(`正在启动 ${agent}…`, `消息已保存，正在等待 ${agent} 在 ${name} 上启动。`),
-        )
-      : view(
-          { tone: 'neutral', label: '等待设备' },
-          'waiting',
-          notice(`等待 ${name}`, `消息已保存，${agent} 尚未打开此对话。`, 'viewDevices'),
-        )
+      ? view('正在启动…', 'waiting', notice(`正在启动 ${agent}…`, `消息已保存，正在等待 ${agent} 在 ${name} 上启动。`))
+      : view('等待设备', 'waiting', notice(`等待 ${name}`, `消息已保存，${agent} 尚未打开此对话。`, 'viewDevices'))
   }
   switch (thread.status) {
     case 'stopped':
-      return view({ tone: 'danger', label: '已停止' }, 'attention', ...stoppedNotice(thread, name, agent, options))
+      return view('已停止', 'attention', ...stoppedNotice(thread, name, agent, options))
     case 'unknown':
       return view(
-        { tone: 'attention', label: '状态未知' },
+        '状态未知',
         'attention',
         options.unknownDelivery
           ? notice(`${agent} 可能未收到上一条消息`, '', 'viewActivity', 'attention')
@@ -176,21 +189,13 @@ export function threadView(
       )
     case 'running':
       if (!reachable) {
-        return view(
-          { tone: 'hollow', label: '上次运行中' },
-          'running',
-          notice(`${name} ${away}`, `${agent} 可能仍在运行。`, 'viewDevices'),
-        )
+        return view('上次运行中', 'running', notice(`${name} ${away}`, `${agent} 可能仍在运行。`, 'viewDevices'))
       }
-      return view({ tone: 'info', label: '运行中' }, 'running', null, true, true)
+      return view('运行中', 'running', null, true, true)
     case 'waiting':
-      return view({ tone: 'neutral', label: '等待设备' }, 'waiting', notice(`${name} ${away}`, '', 'viewDevices'))
+      return view('等待设备', 'waiting', notice(`${name} ${away}`, '', 'viewDevices'))
     case 'idle':
-      return view(
-        { tone: 'neutral', label: '空闲' },
-        'idle',
-        reachable ? null : notice(`${name} ${away}`, '新消息将在设备连接后发送。'),
-      )
+      return view('空闲', 'idle', reachable ? null : notice(`${name} ${away}`, '新消息将在设备连接后发送。'))
   }
 }
 
@@ -255,18 +260,20 @@ export function projectAgentStatus(project: Project, devices: Device[]): StatusV
     case 'blocked':
       return { tone: 'attention', label: '待处理' }
     case 'notStarted':
-      return { tone: 'neutral', label: '尚未开始' }
+      return { tone: threadStatusTones.idle, label: '尚未开始' }
     case 'running':
-      return { tone: 'agent', label: device ? `在 ${device.name} 上运行` : '运行中' }
+      return { tone: threadStatusTones.running, label: device ? `在 ${device.name} 上运行` : '运行中' }
     case 'stopping':
-      return { tone: 'agent', label: device ? `正在 ${device.name} 上停止…` : '正在停止…' }
+      return { tone: threadStatusTones.waiting, label: device ? `正在 ${device.name} 上停止…` : '正在停止…' }
     case 'waitingDevice':
-      return { tone: 'neutral', label: '等待设备' }
+      return { tone: threadStatusTones.waiting, label: '等待设备' }
     case 'stopped':
       // 你停止的运行没有原因，之后发消息就会重新运行，和空闲一样显示。
-      return project.agent.reason ? { tone: 'danger', label: '已停止' } : { tone: 'neutral', label: '空闲' }
+      return project.agent.reason
+        ? { tone: threadStatusTones.stopped, label: '已停止' }
+        : { tone: threadStatusTones.idle, label: '空闲' }
     case 'idle':
-      return { tone: 'neutral', label: '空闲' }
+      return { tone: threadStatusTones.idle, label: '空闲' }
   }
 }
 
@@ -366,8 +373,8 @@ export function assistantWait(project: Project, devices: Device[]): AssistantWai
 export function threadCardStatus(threads: Thread[]) {
   const running = threads.filter((item) => item.status === 'running' || item.pending === 'stop').length
   const waiting = threads.filter((item) => item.status === 'waiting').length
-  if (running > 0) return { tone: 'info' as const, label: `${running} 个运行中` }
-  if (waiting > 0) return { tone: 'neutral' as const, label: `${waiting} 个等待设备` }
+  if (running > 0) return { tone: threadStatusTones.running, label: `${running} 个运行中` }
+  if (waiting > 0) return { tone: threadStatusTones.waiting, label: `${waiting} 个等待设备` }
   if (threads.some((item) => item.status === 'stopped')) return { tone: 'neutral' as const, label: '已完成' }
   return { tone: 'success' as const, label: '已全部回复' }
 }

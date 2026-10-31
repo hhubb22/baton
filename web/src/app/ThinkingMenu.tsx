@@ -44,7 +44,6 @@ export function ThinkingMenu({
   return (
     <Menu
       side={side}
-      narrow
       trigger={
         <Chip icon="reasoning" composer aria-label={`思考强度：${label}`}>
           {label}

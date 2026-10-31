@@ -36,6 +36,8 @@ import { Select } from '../ui/Select'
 import { StatusChip, StatusDot, StatusPill, type Tone } from '../ui/Status'
 import { Segmented, Tabs } from '../ui/Tabs'
 import { Toggle } from '../ui/Toggle'
+import { threadStatusTones } from '../data/derive'
+import { ThreadStatusIcon, type ThreadStatus } from '../ui/ThreadStatusIcon'
 import { Tooltip } from '../ui/Tooltip'
 
 const styles = stylex.create({
@@ -102,6 +104,22 @@ const styles = stylex.create({
   muted: { color: semantic.mutedForeground },
   faint: { color: semantic.faintForeground },
   settingRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space.lg },
+  statusLegend: { display: 'inline-flex', alignItems: 'center', gap: space.xs },
+  threadList: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 },
+  threadListSample: { maxWidth: '640px' },
+  threadGroup: {
+    paddingBlock: space.xs,
+    paddingInline: space.sm,
+    borderRadius: radius.sm,
+    backgroundColor: semantic.muted,
+    color: semantic.mutedForeground,
+  },
+  threadRow: { display: 'flex', alignItems: 'center', gap: space.sm, height: '36px', paddingInline: space.sm },
+  threadUnreadTitle: { fontWeight: 500 },
+  threadTitle: { flexGrow: 1, minWidth: 0 },
+  threadUnreadSlot: { display: 'inline-flex', justifyContent: 'center', flexShrink: 0, width: '16px' },
+  threadTime: { flexShrink: 0, color: semantic.mutedForeground, fontVariantNumeric: 'tabular-nums' },
+  compactStatus: { display: 'inline-flex', alignItems: 'center', gap: '6px' },
 })
 
 const swatchNames = [
@@ -145,6 +163,64 @@ const radiusScales = [
   { value: 'normal', label: '默认 Default', scale: 1 },
   { value: 'round', label: '圆 Round', scale: 1.5 },
 ] as const
+
+const threadStatuses: { status: ThreadStatus; label: string }[] = [
+  { status: 'running', label: '运行中' },
+  { status: 'attention', label: '需要你处理' },
+  { status: 'stopped', label: '已停止' },
+  { status: 'waiting', label: '等待设备' },
+  { status: 'idle', label: '空闲' },
+  { status: 'archived', label: '已归档' },
+]
+
+const threadSample: { group: string; status: ThreadStatus; rows: { title: string; unread?: boolean }[] }[] = [
+  { group: '待处理', status: 'attention', rows: [{ title: 'Upgrade batond on Windows', unread: true }] },
+  { group: '已停止', status: 'stopped', rows: [{ title: 'Run unit tests on Ubuntu' }] },
+  {
+    group: '运行中',
+    status: 'running',
+    rows: [
+      { title: 'Fix gateway reconnect race', unread: true },
+      { title: '整理设备端日志' },
+      { title: 'Rebuild web bundle' },
+    ],
+  },
+  { group: '等待设备', status: 'waiting', rows: [{ title: 'Run sleep tests on Windows' }] },
+  {
+    group: '空闲',
+    status: 'idle',
+    rows: [
+      { title: 'Organize release notes', unread: true },
+      { title: 'Write batond README', unread: true },
+      { title: '核对中文排版' },
+      { title: 'Run compat suite' },
+    ],
+  },
+]
+
+function ThreadStatusList() {
+  return (
+    <div {...stylex.props(styles.threadList, styles.threadListSample)}>
+      {threadSample.map(({ group, status, rows }) => (
+        <div key={group} {...stylex.props(styles.threadList)}>
+          <div {...stylex.props(text.small, styles.threadGroup)}>
+            {group} {rows.length}
+          </div>
+          {rows.map((row, index) => (
+            <div key={row.title} {...stylex.props(text.small, styles.threadRow)}>
+              <ThreadStatusIcon status={status} />
+              <span {...stylex.props(text.truncate, styles.threadTitle, row.unread && styles.threadUnreadTitle)}>
+                {row.title}
+              </span>
+              <span {...stylex.props(styles.threadUnreadSlot)}>{row.unread && <UnreadDot />}</span>
+              <span {...stylex.props(styles.threadTime)}>{index + 2} 分钟</span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -346,7 +422,7 @@ function Overlays() {
   const [selected, setSelected] = useState('all')
   return (
     <div {...stylex.props(styles.row)}>
-      <Menu trigger={<Button icon="dots">菜单 Menu</Button>}>
+      <Menu width="wide" trigger={<Button icon="dots">菜单 Menu</Button>}>
         <MenuHeading>Thread</MenuHeading>
         <MenuOption leading={<Icon name="pen" size={15} />} note="R">
           重命名 Rename
@@ -618,6 +694,26 @@ export function Gallery() {
             <PersonAvatar name="Kaken" />
             <AgentMark />
           </div>
+        </Section>
+
+        <Section title="对话状态 Thread status">
+          <div {...stylex.props(styles.row)}>
+            {threadStatuses.map(({ status, label }) => (
+              <span key={status} {...stylex.props(text.small, styles.statusLegend)}>
+                <ThreadStatusIcon status={status} label={label} />
+                {label}
+              </span>
+            ))}
+          </div>
+          <div {...stylex.props(styles.row)}>
+            {threadStatuses.map(({ status, label }) => (
+              <span key={status} {...stylex.props(text.small, styles.compactStatus)}>
+                <StatusDot tone={threadStatusTones[status]} />
+                {label}
+              </span>
+            ))}
+          </div>
+          <ThreadStatusList />
         </Section>
 
         <Section title="场景：长 Thread">
