@@ -9,7 +9,7 @@ import type { ComponentProps, MouseEvent, PointerEvent, ReactElement, ReactNode 
 import { createPortal } from 'react-dom'
 import { weight } from '../../theme/base.stylex'
 import { semantic } from '../../theme/semantic.stylex'
-import { motion, radius, shadow, space } from '../../theme/tokens.stylex'
+import { motion, radius, shadow, size, space } from '../../theme/tokens.stylex'
 import { focusRing } from '../Button'
 import {
   type ComposerEditorOptions,
@@ -33,11 +33,11 @@ const styles = stylex.create({
     flexDirection: 'column',
     minWidth: 0,
     minHeight: 0,
-    paddingBottom: '7px',
+    paddingBottom: '5px',
     borderWidth: '1px',
     borderStyle: 'solid',
     borderColor: { default: semantic.input, ':focus-within': semantic.ring },
-    borderRadius: radius.xl,
+    borderRadius: radius.lg,
     backgroundColor: semantic.card,
     boxShadow: { default: shadow.control, ':focus-within': shadow.focus },
     color: semantic.foreground,
@@ -51,7 +51,7 @@ const styles = stylex.create({
     minWidth: 0,
     minHeight: 0,
     maxHeight: 'min(var(--composer-max-height, 240px), 50dvh)',
-    paddingTop: '7px',
+    paddingTop: '6px',
     overflowY: 'auto',
     fontSize: '14px',
   },
@@ -129,7 +129,7 @@ const styles = stylex.create({
     justifyContent: 'space-between',
     flexShrink: 0,
     gap: space.sm,
-    marginInline: '7px',
+    marginInline: '5px',
   },
   group: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: space.xs, minWidth: 0 },
   groupEnd: { justifyContent: 'flex-end', marginInlineStart: 'auto' },
@@ -138,11 +138,11 @@ const styles = stylex.create({
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
-    width: '32px',
-    height: '32px',
+    width: size.compact,
+    height: size.compact,
     padding: 0,
     borderWidth: 0,
-    borderRadius: radius.md,
+    borderRadius: radius.sm,
     backgroundColor: { default: semantic.primary, ':hover': semantic.primaryHover, ':disabled': semantic.secondary },
     boxShadow: { default: shadow.filled, ':disabled': 'none' },
     color: { default: semantic.primaryForeground, ':disabled': semantic.faintForeground },

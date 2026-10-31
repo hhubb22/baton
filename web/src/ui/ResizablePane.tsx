@@ -80,7 +80,7 @@ const styles = stylex.create({
     maskImage:
       'linear-gradient(to bottom, transparent 5%, rgba(0,0,0,0.1) 11.4%, rgba(0,0,0,0.2) 17.2%, rgba(0,0,0,0.3) 22.2%, rgba(0,0,0,0.4) 26.6%, rgba(0,0,0,0.5) 30.3%, rgba(0,0,0,0.6) 33.4%, rgba(0,0,0,0.7) 35.7%, rgba(0,0,0,0.8) 37.4%, rgba(0,0,0,0.9) 38.4%, black 38.75%, black 61.25%, rgba(0,0,0,0.9) 61.6%, rgba(0,0,0,0.8) 62.6%, rgba(0,0,0,0.7) 64.3%, rgba(0,0,0,0.6) 66.6%, rgba(0,0,0,0.5) 69.7%, rgba(0,0,0,0.4) 73.4%, rgba(0,0,0,0.3) 77.8%, rgba(0,0,0,0.2) 82.9%, rgba(0,0,0,0.1) 88.6%, transparent 95%)',
   },
-  lineInset: { top: radius.lg, bottom: radius.lg },
+  lineInset: { top: radius.xl, bottom: radius.xl },
   lineVisible: { opacity: 1 },
 })
 

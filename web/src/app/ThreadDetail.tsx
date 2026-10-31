@@ -36,7 +36,7 @@ import { radius, shadow, size, space } from '../theme/tokens.stylex'
 import { AgentMark } from '../ui/Avatar'
 import { Banner } from '../ui/Banner'
 import { Button, focusRing, IconButton } from '../ui/Button'
-import { Composer } from '../ui/Composer'
+import { Composer, ComposerTrayEnd, ComposerTrayItem } from '../ui/Composer'
 import { Dialog, DialogClose } from '../ui/Dialog'
 import { Icon } from '../ui/Icon'
 import { JumpToLatest } from '../ui/JumpToLatest'
@@ -130,7 +130,7 @@ const styles = stylex.create({
     flexShrink: 0,
     maxHeight: '55%',
     overflowY: 'auto',
-    paddingTop: space.md,
+    paddingTop: space.sm,
     paddingInline: space.xl,
     paddingBottom: space.md,
   },
@@ -142,7 +142,7 @@ const styles = stylex.create({
     width: '100%',
     maxWidth: size.measure,
   },
-  dockPanel: { paddingInline: space.lg },
+  dockPanel: { paddingInline: space.md },
   notice: {
     display: 'flex',
     alignItems: 'flex-start',
@@ -177,34 +177,34 @@ const styles = stylex.create({
   footer: {
     display: 'flex',
     alignItems: 'center',
-    gap: space.md,
+    gap: '2px',
     width: '100%',
     maxWidth: size.measure,
-    color: semantic.faintForeground,
+    paddingInline: space.xs,
+    color: semantic.mutedForeground,
   },
-  footerItem: { display: 'inline-flex', alignItems: 'center', gap: '4px', minWidth: 0 },
   segmented: {
     display: 'inline-flex',
     padding: '2px',
-    borderRadius: radius.pill,
+    borderRadius: radius.md,
     backgroundColor: semantic.secondary,
   },
   segment: {
     height: '24px',
     paddingInline: '10px',
     borderWidth: 0,
-    borderRadius: radius.pill,
+    borderRadius: radius.sm,
     backgroundColor: 'transparent',
     color: semantic.mutedForeground,
   },
   segmentOn: { backgroundColor: semantic.card, color: semantic.foreground, boxShadow: shadow.control },
   stop: {
-    width: '32px',
-    height: '32px',
+    width: size.compact,
+    height: size.compact,
     borderWidth: '1px',
     borderStyle: 'solid',
     borderColor: semantic.input,
-    borderRadius: radius.pill,
+    borderRadius: radius.sm,
   },
   empty: { padding: space.xl, color: semantic.mutedForeground },
 })
@@ -1145,6 +1145,19 @@ export function ThreadDetail({
                     </>
                   )
                 }
+                footer={
+                  <>
+                    <ComposerTrayItem icon="laptop">{device?.name ?? '设备已移除'}</ComposerTrayItem>
+                    <ComposerTrayItem icon="folder">
+                      <span title={thread.folder} {...stylex.props(text.mono, text.truncate)}>
+                        {thread.folder}
+                      </span>
+                    </ComposerTrayItem>
+                    <ComposerTrayEnd>
+                      <LocalThreadActions key={thread.id} thread={thread} />
+                    </ComposerTrayEnd>
+                  </>
+                }
               />
             )}
             {status && (
@@ -1159,19 +1172,19 @@ export function ThreadDetail({
                 {status}
               </span>
             )}
-            <div {...stylex.props(text.caption, styles.footer)}>
-              <span {...stylex.props(styles.footerItem)}>
-                <Icon name="laptop" size={12} />
-                {device?.name ?? '设备已移除'}
-              </span>
-              <span {...stylex.props(styles.footerItem)}>
-                <Icon name="folder" size={12} />
-                <span title={thread.folder} {...stylex.props(text.mono, text.truncate)}>
-                  {thread.folder}
-                </span>
-              </span>
-              <LocalThreadActions key={thread.id} thread={thread} />
-            </div>
+            {!view.composer && (
+              <div {...stylex.props(text.caption, styles.footer)}>
+                <ComposerTrayItem icon="laptop">{device?.name ?? '设备已移除'}</ComposerTrayItem>
+                <ComposerTrayItem icon="folder">
+                  <span title={thread.folder} {...stylex.props(text.mono, text.truncate)}>
+                    {thread.folder}
+                  </span>
+                </ComposerTrayItem>
+                <ComposerTrayEnd>
+                  <LocalThreadActions key={thread.id} thread={thread} />
+                </ComposerTrayEnd>
+              </div>
+            )}
           </div>
         </div>
       </div>

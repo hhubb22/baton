@@ -12,7 +12,7 @@ export const pane = stylex.create({
     borderWidth: '1px',
     borderStyle: 'solid',
     borderColor: semantic.border,
-    borderRadius: radius.lg,
+    borderRadius: radius.xl,
   },
 })
 

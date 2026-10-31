@@ -39,7 +39,7 @@ import { SyncStatus } from '../app/SyncStatus'
 import type { Device, Project, Thread } from '../data/types'
 import { text } from '../theme/text'
 import { semantic } from '../theme/semantic.stylex'
-import { radius, size, space } from '../theme/tokens.stylex'
+import { size, space } from '../theme/tokens.stylex'
 import { Avatar } from '../ui/Avatar'
 import { Banner } from '../ui/Banner'
 import { Button, focusRing } from '../ui/Button'
@@ -47,6 +47,7 @@ import { Chip } from '../ui/Chip'
 import { Composer } from '../ui/Composer'
 import { Icon } from '../ui/Icon'
 import { UnreadDot } from '../ui/Badge'
+import { threadList } from '../ui/ThreadList'
 import { ThreadStatusIcon } from '../ui/ThreadStatusIcon'
 import { Menu, MenuHeading, MenuOption, MenuRule } from '../ui/Menu'
 
@@ -63,25 +64,10 @@ const styles = stylex.create({
     paddingBottom: space.xl,
   },
   composerGroup: { width: '100%', maxWidth: '840px' },
-  threadList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: space.lg,
-  },
-  composerFrame: { position: 'relative', zIndex: 1 },
-  locationBar: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: '2px',
-    marginInline: '12px',
-    marginTop: '-8px',
-    paddingTop: '12px',
-    paddingBottom: '4px',
-    paddingInline: '8px',
-    borderBottomLeftRadius: '16px',
-    borderBottomRightRadius: '16px',
-    backgroundColor: semantic.secondary,
+  listColumn: {
+    width: '100%',
+    maxWidth: '840px',
+    marginInline: 'auto',
   },
   status: {
     width: '100%',
@@ -91,62 +77,6 @@ const styles = stylex.create({
     color: semantic.mutedForeground,
   },
   danger: { color: semantic.destructiveForeground },
-  filters: {
-    display: 'flex',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: space.xs,
-    width: '100%',
-    maxWidth: '960px',
-    marginInline: 'auto',
-    paddingLeft: space.xs,
-    paddingRight: space.md,
-  },
-  count: { marginLeft: 'auto', color: semantic.faintForeground },
-  group: { display: 'flex', flexDirection: 'column', width: '100%', maxWidth: '960px', marginInline: 'auto' },
-  groupLabel: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space.sm,
-    minHeight: '36px',
-    width: '100%',
-    paddingInline: space.md,
-    borderWidth: 0,
-    borderRadius: radius.md,
-    textAlign: 'left',
-    color: semantic.foreground,
-    backgroundColor: { default: semantic.secondary, ':hover': semantic.muted, ':active': semantic.accent },
-  },
-  groupChevron: { color: semantic.mutedForeground },
-  groupCount: { color: semantic.mutedForeground },
-  // 状态图标和分组箭头同一中线，标题和分组名同一左边
-  row: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space.md,
-    minHeight: '48px',
-    paddingInline: space.md,
-    paddingLeft: '10px',
-    borderRadius: radius.md,
-    color: semantic.foreground,
-    textDecoration: 'none',
-    backgroundColor: { default: 'transparent', ':hover': semantic.muted },
-  },
-  rowSelected: { backgroundColor: { default: semantic.accent, ':hover': semantic.accent } },
-  rowIcon: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-    width: '16px',
-    height: '24px',
-    marginRight: '-6px',
-  },
-  title: { display: 'inline-flex', alignItems: 'center', gap: space.xs, flexGrow: 1, flexBasis: 0, minWidth: 0 },
-  titleText: { minWidth: 0 },
-  titleUnread: { fontWeight: 500 },
-  unreadSlot: { display: 'inline-flex', justifyContent: 'center', flexShrink: 0, width: '16px' },
-  project: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: '20px' },
   timer: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -156,7 +86,6 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
     '@media (max-width: 700px)': { display: 'none' },
   },
-  time: { flexShrink: 0, width: '72px', textAlign: 'right', color: semantic.faintForeground, whiteSpace: 'nowrap' },
   empty: {
     display: 'flex',
     flexDirection: 'column',
@@ -351,13 +280,13 @@ function ThreadListRow({
       search={(prev: ThreadsSearch) => ({ ...prev, thread: thread.id })}
       aria-current={selected ? 'true' : undefined}
       aria-label={`${thread.title}, ${group.status.label}, ${project?.name ?? '无项目'}${thread.unread ? '，未读' : ''}${timer ? `，运行时间 ${timer}` : ''}，最近活动 ${relativeTime(thread.updatedAt, now)}`}
-      {...stylex.props(text.small, styles.row, selected && styles.rowSelected, focusRing.ring)}
+      {...stylex.props(text.small, threadList.row, selected && threadList.rowSelected, focusRing.ring)}
     >
-      <span title={group.status.label} {...stylex.props(styles.rowIcon)}>
+      <span title={group.status.label} {...stylex.props(threadList.rowIconSlot)}>
         <ThreadStatusIcon status={group.mark} />
       </span>
-      <span {...stylex.props(styles.title)}>
-        <span {...stylex.props(styles.titleText, text.truncate, thread.unread && styles.titleUnread)}>
+      <span {...stylex.props(threadList.title)}>
+        <span {...stylex.props(threadList.titleText, text.truncate, thread.unread && threadList.titleUnread)}>
           {thread.title}
         </span>
         {timer && (
@@ -367,11 +296,11 @@ function ThreadListRow({
           </span>
         )}
       </span>
-      <span title={project?.name} {...stylex.props(styles.project)}>
+      <span title={project?.name} {...stylex.props(threadList.projectSlot)}>
         {project && <Avatar name={project.name} hue={project.hue} emoji={project.emoji} />}
       </span>
-      <span {...stylex.props(styles.unreadSlot)}>{thread.unread && <UnreadDot />}</span>
-      <span title="最近活动" {...stylex.props(text.caption, styles.time)}>
+      <span {...stylex.props(threadList.unreadSlot)}>{thread.unread && <UnreadDot />}</span>
+      <span title="最近活动" {...stylex.props(text.caption, threadList.time)}>
         {relativeTime(thread.updatedAt, now)}
       </span>
     </Link>
@@ -558,40 +487,46 @@ export function ThreadsPage() {
       </div>
     )
   } else {
-    list = groups.map((group) => (
-      <section key={group.id} aria-label={group.label} {...stylex.props(styles.group)}>
-        <h2>
-          <button
-            type="button"
-            aria-expanded={!collapsedGroups.includes(group.id)}
-            onClick={() =>
-              setCollapsedGroups((current) =>
-                current.includes(group.id) ? current.filter((id) => id !== group.id) : [...current, group.id],
-              )
-            }
-            {...stylex.props(text.captionMedium, styles.groupLabel, focusRing.ring)}
-          >
-            <Icon
-              name={collapsedGroups.includes(group.id) ? 'chevron-right' : 'chevron-down'}
-              size={12}
-              style={styles.groupChevron}
-            />
-            {group.label} <span {...stylex.props(styles.groupCount)}>{group.threads.length}</span>
-          </button>
-        </h2>
-        {!collapsedGroups.includes(group.id) &&
-          group.threads.map((thread) => (
-            <ThreadListRow
-              key={thread.id}
-              thread={thread}
-              project={projects.data?.find((item) => item.id === thread.projectId)}
-              group={views.get(thread.id)!}
-              selected={thread.id === search.thread}
-              now={now}
-            />
-          ))}
-      </section>
-    ))
+    list = groups.map((group) => {
+      const isCollapsed = collapsedGroups.includes(group.id)
+      return (
+        <section key={group.id} aria-label={group.label} {...stylex.props(threadList.group)}>
+          <h2>
+            <button
+              type="button"
+              aria-expanded={!isCollapsed}
+              onClick={() =>
+                setCollapsedGroups((current) =>
+                  current.includes(group.id) ? current.filter((id) => id !== group.id) : [...current, group.id],
+                )
+              }
+              {...stylex.props(
+                text.captionMedium,
+                threadList.groupHeader,
+                !isCollapsed && threadList.groupHeaderExpanded,
+                focusRing.ring,
+              )}
+            >
+              <span {...stylex.props(threadList.groupIconSlot)}>
+                <Icon name={isCollapsed ? 'chevron-right' : 'chevron-down'} size={12} />
+              </span>
+              {group.label} <span {...stylex.props(threadList.groupCount)}>{group.threads.length}</span>
+            </button>
+          </h2>
+          {!isCollapsed &&
+            group.threads.map((thread) => (
+              <ThreadListRow
+                key={thread.id}
+                thread={thread}
+                project={projects.data?.find((item) => item.id === thread.projectId)}
+                group={views.get(thread.id)!}
+                selected={thread.id === search.thread}
+                now={now}
+              />
+            ))}
+        </section>
+      )
+    })
   }
 
   return (
@@ -643,66 +578,64 @@ export function ThreadsPage() {
           ) : (
             <div {...stylex.props(styles.composerArea)}>
               <div {...stylex.props(styles.composerGroup)}>
-                <div {...stylex.props(styles.composerFrame)}>
-                  <Composer
-                    roomy
-                    label="新对话消息"
-                    inputRef={inputRef}
-                    value={draft}
-                    onChange={setDraft}
-                    onSend={onSend}
-                    placeholder={choice && device ? `给 ${agentNames[choice.agent]} 发消息…` : '选择文件夹和模型后开始'}
-                    chips={
-                      <>
-                        <ModelMenu
-                          device={device}
-                          choice={choice}
-                          onSelect={(next) => {
+                <Composer
+                  roomy
+                  label="新对话消息"
+                  inputRef={inputRef}
+                  value={draft}
+                  onChange={setDraft}
+                  onSend={onSend}
+                  placeholder={choice && device ? `给 ${agentNames[choice.agent]} 发消息…` : '选择文件夹和模型后开始'}
+                  chips={
+                    <>
+                      <ModelMenu
+                        device={device}
+                        choice={choice}
+                        onSelect={(next) => {
+                          setError(null)
+                          setAgentChoice(next)
+                        }}
+                        onUnavailable={setError}
+                      />
+                      <ThinkingMenu
+                        capability={thinking}
+                        selection={validThinking}
+                        onSelect={(value) => setThinkingChoice({ key: thinkingKey, value })}
+                      />
+                      {chosenAgent && (
+                        <ThreadAccessMenu
+                          agent={chosenAgent}
+                          mode={runtimeMode}
+                          onSelect={(mode) => {
                             setError(null)
-                            setAgentChoice(next)
+                            setRuntimeChoice(mode)
                           }}
-                          onUnavailable={setError}
                         />
-                        <ThinkingMenu
-                          capability={thinking}
-                          selection={validThinking}
-                          onSelect={(value) => setThinkingChoice({ key: thinkingKey, value })}
-                        />
-                        {chosenAgent && (
-                          <ThreadAccessMenu
-                            agent={chosenAgent}
-                            mode={runtimeMode}
-                            onSelect={(mode) => {
-                              setError(null)
-                              setRuntimeChoice(mode)
-                            }}
-                          />
-                        )}
-                      </>
-                    }
-                  />
-                </div>
-                <div {...stylex.props(styles.locationBar)}>
-                  <LocationMenus
-                    location={current}
-                    threads={allThreads}
-                    devices={allDevices}
-                    onSelect={(next) => {
-                      setError(null)
-                      setLocation(next)
-                    }}
-                    onBrowse={() => setBrowseDevice(current?.deviceId ?? allDevices[0]?.id ?? null)}
-                    onError={setError}
-                  />
-                </div>
+                      )}
+                    </>
+                  }
+                  footer={
+                    <LocationMenus
+                      location={current}
+                      threads={allThreads}
+                      devices={allDevices}
+                      onSelect={(next) => {
+                        setError(null)
+                        setLocation(next)
+                      }}
+                      onBrowse={() => setBrowseDevice(current?.deviceId ?? allDevices[0]?.id ?? null)}
+                      onError={setError}
+                    />
+                  }
+                />
               </div>
               <span role="status" {...stylex.props(text.caption, styles.status, error !== null && styles.danger)}>
                 {statusLine}
               </span>
             </div>
           )}
-          <div {...stylex.props(styles.threadList)}>
-            <div {...stylex.props(styles.filters)}>
+          <div {...stylex.props(threadList.stack, styles.listColumn)}>
+            <div {...stylex.props(threadList.filters)}>
               <Menu trigger={<Chip icon="laptop">{filterDevice?.name ?? '所有设备'}</Chip>}>
                 <MenuOption selected={!search.device} onSelect={() => setSearch({ device: undefined })}>
                   所有设备
@@ -753,7 +686,7 @@ export function ThreadsPage() {
                 </MenuOption>
               </Menu>
               {threads.data && (
-                <span {...stylex.props(text.caption, styles.count)}>
+                <span {...stylex.props(text.caption, threadList.count)}>
                   {filtering ? `显示 ${filtered.length} 条对话` : `${filtered.length} 条对话`}
                 </span>
               )}

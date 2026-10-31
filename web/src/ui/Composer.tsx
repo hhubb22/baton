@@ -1,7 +1,8 @@
 import * as stylex from '@stylexjs/stylex'
 import { useState, type MouseEvent, type ReactNode, type RefObject } from 'react'
 import { semantic } from '../theme/semantic.stylex'
-import { motion, radius, shadow, space } from '../theme/tokens.stylex'
+import { text } from '../theme/text'
+import { motion, radius, shadow, size, space } from '../theme/tokens.stylex'
 import { focusRing } from './Button'
 import {
   Composer as ComposerEditor,
@@ -10,10 +11,48 @@ import {
   getComposerText,
   type ComposerValue,
 } from './composer-editor'
-import { Icon } from './Icon'
+import { Icon, type IconName } from './Icon'
 
 const styles = stylex.create({
   composer: { width: '100%', maxWidth: '712px' },
+  // 方案 B 托盘底座：外框 16px 圆角 + 4px 内边距，包裹内层 12px 圆角输入卡片与下部设备/目录栏。
+  tray: {
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    maxWidth: '712px',
+    padding: space.xs,
+    borderRadius: radius.xl,
+    backgroundColor: semantic.secondary,
+  },
+  composerInTray: { width: '100%', maxWidth: 'none' },
+  trayFooter: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: '2px',
+    minHeight: '30px',
+    paddingTop: space.xs,
+    paddingBottom: space.xxs,
+    paddingInline: '6px',
+    color: semantic.mutedForeground,
+  },
+  trayItem: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    height: '24px',
+    minWidth: 0,
+    paddingInline: '6px',
+    color: semantic.mutedForeground,
+  },
+  trayItemIcon: { color: semantic.faintForeground },
+  trayEnd: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space.xs,
+    marginLeft: 'auto',
+  },
   // 没有工具栏时，输入和发送按钮排在同一行。
   compact: {
     display: 'grid',
@@ -25,7 +64,7 @@ const styles = stylex.create({
   header: { paddingTop: space.sm, paddingInline: space.sm, cursor: 'auto' },
   compactHeader: { gridColumn: '1 / -1' },
   input: { lineHeight: '24px' },
-  roomyInput: { minHeight: '104px' },
+  roomyInput: { minHeight: '96px' },
   chips: {
     display: 'flex',
     flexWrap: 'wrap',
@@ -33,7 +72,6 @@ const styles = stylex.create({
     gap: '2px',
     flexGrow: 1,
     minWidth: 0,
-    marginLeft: '-4px',
     cursor: 'default',
   },
   actions: { display: 'flex', alignItems: 'center', gap: space.sm, flexShrink: 0, marginLeft: 'auto' },
@@ -42,11 +80,11 @@ const styles = stylex.create({
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
-    width: '32px',
-    height: '32px',
+    width: size.compact,
+    height: size.compact,
     padding: 0,
     borderWidth: 0,
-    borderRadius: radius.md,
+    borderRadius: radius.sm,
     backgroundColor: { default: semantic.primary, ':hover': semantic.primaryHover },
     boxShadow: shadow.filled,
     color: semantic.primaryForeground,
@@ -66,6 +104,20 @@ const toParts = (value: string): ComposerValue => (value ? [{ type: 'text', text
 
 const keepFocus = (event: MouseEvent) => event.stopPropagation()
 
+// 下部托盘里的只读位置信息项（设备名、工作目录），与上方 Chip 图标共用同一条 16px 左基准线。
+export function ComposerTrayItem({ icon, children }: { icon?: IconName; children: ReactNode }) {
+  return (
+    <span {...stylex.props(text.caption, styles.trayItem)}>
+      {icon && <Icon name={icon} size={14} style={styles.trayItemIcon} />}
+      {children}
+    </span>
+  )
+}
+
+export function ComposerTrayEnd({ children }: { children: ReactNode }) {
+  return <span {...stylex.props(styles.trayEnd)}>{children}</span>
+}
+
 // 页面用的输入区：页面只管文字，编辑器负责草稿结构。Enter 发送，Shift+Enter 换行，输入法组合时不发送。
 export function Composer({
   value,
@@ -75,6 +127,7 @@ export function Composer({
   chips,
   actions,
   header,
+  footer,
   label = '消息',
   inputRef,
   style,
@@ -90,6 +143,8 @@ export function Composer({
   actions?: ReactNode
   // 输入框上方的内容，例如要一起发送的引用。
   header?: ReactNode
+  // 输入卡片下方的托盘栏（方案 B），例如设备与目录选择或当前 Thread 所在位置。
+  footer?: ReactNode
   label?: string
   inputRef?: RefObject<HTMLDivElement | null>
   style?: stylex.StyleXStyles
@@ -101,7 +156,7 @@ export function Composer({
   const current = getComposerText(parts) === value ? parts : toParts(value)
   const compact = !chips && !actions
 
-  return (
+  const editor = (
     // 工具栏里有按钮和菜单，根节点用 div，避免它们触发表单提交。
     <ComposerEditor
       render={<div />}
@@ -112,7 +167,13 @@ export function Composer({
       }}
       onSubmit={onSend}
       allowEmpty
-      style={[styles.composer, compact && styles.compact, roomy && styles.roomy, project && styles.project, style]}
+      style={[
+        footer ? styles.composerInTray : styles.composer,
+        compact && styles.compact,
+        !footer && roomy && styles.roomy,
+        !footer && project && styles.project,
+        !footer && style,
+      ]}
     >
       {header && (
         <div
@@ -143,10 +204,19 @@ export function Composer({
             onClick={onSend}
             {...stylex.props(styles.send, value.trim() === '' && styles.sendIdle, focusRing.ring)}
           >
-            <Icon name="arrow-up" size={16} />
+            <Icon name="arrow-up" size={15} />
           </button>
         </div>
       </ComposerActions>
     </ComposerEditor>
+  )
+
+  if (!footer) return editor
+
+  return (
+    <div {...stylex.props(styles.tray, roomy && styles.roomy, project && styles.project, style)}>
+      {editor}
+      <div {...stylex.props(text.caption, styles.trayFooter)}>{footer}</div>
+    </div>
   )
 }

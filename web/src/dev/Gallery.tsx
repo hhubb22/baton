@@ -10,10 +10,10 @@ import { AgentMark, PersonAvatar } from '../ui/Avatar'
 import { Count, Tag, UnreadDot } from '../ui/Badge'
 import { Banner } from '../ui/Banner'
 import { branch } from '../ui/Branch'
-import { Button, IconButton } from '../ui/Button'
+import { Button, focusRing, IconButton } from '../ui/Button'
 import { Chip } from '../ui/Chip'
 import { CommandDialog } from '../ui/Command'
-import { Composer as PageComposer } from '../ui/Composer'
+import { Composer as PageComposer, ComposerTrayEnd, ComposerTrayItem } from '../ui/Composer'
 import {
   Composer,
   ComposerActionGroup,
@@ -35,6 +35,7 @@ import { Menu, MenuHeading, MenuOption, MenuRule } from '../ui/Menu'
 import { Select } from '../ui/Select'
 import { StatusChip, StatusDot, StatusPill, type Tone } from '../ui/Status'
 import { Segmented, Tabs } from '../ui/Tabs'
+import { threadList } from '../ui/ThreadList'
 import { Toggle } from '../ui/Toggle'
 import { threadStatusTones } from '../data/derive'
 import { ThreadStatusIcon, type ThreadStatus } from '../ui/ThreadStatusIcon'
@@ -105,21 +106,9 @@ const styles = stylex.create({
   faint: { color: semantic.faintForeground },
   settingRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space.lg },
   statusLegend: { display: 'inline-flex', alignItems: 'center', gap: space.xs },
-  threadList: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 },
   threadListSample: { maxWidth: '640px' },
-  threadGroup: {
-    paddingBlock: space.xs,
-    paddingInline: space.sm,
-    borderRadius: radius.sm,
-    backgroundColor: semantic.muted,
-    color: semantic.mutedForeground,
-  },
-  threadRow: { display: 'flex', alignItems: 'center', gap: space.sm, height: '36px', paddingInline: space.sm },
-  threadUnreadTitle: { fontWeight: 500 },
-  threadTitle: { flexGrow: 1, minWidth: 0 },
-  threadUnreadSlot: { display: 'inline-flex', justifyContent: 'center', flexShrink: 0, width: '16px' },
-  threadTime: { flexShrink: 0, color: semantic.mutedForeground, fontVariantNumeric: 'tabular-nums' },
   compactStatus: { display: 'inline-flex', alignItems: 'center', gap: '6px' },
+  trayActionIcon: { width: '20px', height: '20px' },
 })
 
 const swatchNames = [
@@ -199,25 +188,75 @@ const threadSample: { group: string; status: ThreadStatus; rows: { title: string
 ]
 
 function ThreadStatusList() {
+  const [collapsed, setCollapsed] = useState<string[]>([])
+  const [selectedTitle, setSelectedTitle] = useState('Fix gateway reconnect race')
+  const total = threadSample.reduce((sum, item) => sum + item.rows.length, 0)
   return (
-    <div {...stylex.props(styles.threadList, styles.threadListSample)}>
-      {threadSample.map(({ group, status, rows }) => (
-        <div key={group} {...stylex.props(styles.threadList)}>
-          <div {...stylex.props(text.small, styles.threadGroup)}>
-            {group} {rows.length}
-          </div>
-          {rows.map((row, index) => (
-            <div key={row.title} {...stylex.props(text.small, styles.threadRow)}>
-              <ThreadStatusIcon status={status} />
-              <span {...stylex.props(text.truncate, styles.threadTitle, row.unread && styles.threadUnreadTitle)}>
-                {row.title}
-              </span>
-              <span {...stylex.props(styles.threadUnreadSlot)}>{row.unread && <UnreadDot />}</span>
-              <span {...stylex.props(styles.threadTime)}>{index + 2} 分钟</span>
-            </div>
-          ))}
-        </div>
-      ))}
+    <div {...stylex.props(threadList.stack, styles.threadListSample)}>
+      <div {...stylex.props(threadList.filters)}>
+        <Chip icon="laptop">所有设备</Chip>
+        <Chip icon="projects">所有项目</Chip>
+        <Chip icon="archive">进行中</Chip>
+        <span {...stylex.props(text.caption, threadList.count)}>{total} 条对话</span>
+      </div>
+      {threadSample.map(({ group, status, rows }) => {
+        const isCollapsed = collapsed.includes(group)
+        return (
+          <section key={group} aria-label={group} {...stylex.props(threadList.group)}>
+            <h2>
+              <button
+                type="button"
+                aria-expanded={!isCollapsed}
+                onClick={() =>
+                  setCollapsed((current) =>
+                    current.includes(group) ? current.filter((item) => item !== group) : [...current, group],
+                  )
+                }
+                {...stylex.props(
+                  text.captionMedium,
+                  threadList.groupHeader,
+                  !isCollapsed && threadList.groupHeaderExpanded,
+                  focusRing.ring,
+                )}
+              >
+                <span {...stylex.props(threadList.groupIconSlot)}>
+                  <Icon name={isCollapsed ? 'chevron-right' : 'chevron-down'} size={12} />
+                </span>
+                {group} <span {...stylex.props(threadList.groupCount)}>{rows.length}</span>
+              </button>
+            </h2>
+            {!isCollapsed &&
+              rows.map((row, index) => {
+                const selected = row.title === selectedTitle
+                return (
+                  <a
+                    key={row.title}
+                    href={`#gallery-thread-${encodeURIComponent(row.title)}`}
+                    aria-current={selected ? 'true' : undefined}
+                    onClick={(event) => {
+                      event.preventDefault()
+                      setSelectedTitle(row.title)
+                    }}
+                    {...stylex.props(text.small, threadList.row, selected && threadList.rowSelected, focusRing.ring)}
+                  >
+                    <span {...stylex.props(threadList.rowIconSlot)}>
+                      <ThreadStatusIcon status={status} />
+                    </span>
+                    <span {...stylex.props(threadList.title)}>
+                      <span
+                        {...stylex.props(threadList.titleText, text.truncate, row.unread && threadList.titleUnread)}
+                      >
+                        {row.title}
+                      </span>
+                    </span>
+                    <span {...stylex.props(threadList.unreadSlot)}>{row.unread && <UnreadDot />}</span>
+                    <span {...stylex.props(text.caption, threadList.time)}>{index + 2} 分钟前</span>
+                  </a>
+                )
+              })}
+          </section>
+        )
+      })}
     </div>
   )
 }
@@ -370,25 +409,70 @@ function SuggestionPopup() {
 }
 
 function ComposerGallery() {
-  const [plain, setPlain] = useState('')
+  const [newChat, setNewChat] = useState('')
+  const [reply, setReply] = useState('')
   return (
     <div {...stylex.props(styles.stack)}>
       <PageComposer
-        value={plain}
-        onChange={setPlain}
-        onSend={() => setPlain('')}
-        placeholder="给 Agent 发消息 Message the agent"
+        roomy
+        value={newChat}
+        onChange={setNewChat}
+        onSend={() => setNewChat('')}
+        placeholder="给 Kiro 发消息…"
         chips={
           <>
-            <Chip composer icon="laptop">
-              MacBook
-            </Chip>
             <Chip composer icon="sparkle">
-              gpt-6.1-sol
+              gpt-5.6-sol
+            </Chip>
+            <Chip composer icon="reasoning">
+              默认
+            </Chip>
+            <Chip composer icon="shield">
+              Full access
             </Chip>
           </>
         }
-        actions={<IconButton icon="plus" label="添加附件" />}
+        footer={
+          <>
+            <Chip composer icon="device">
+              macmini.local
+            </Chip>
+            <Chip composer icon="folder">
+              hejiajian
+            </Chip>
+          </>
+        }
+      />
+      <PageComposer
+        value={reply}
+        onChange={setReply}
+        onSend={() => setReply('')}
+        placeholder="给 Kiro 发消息…"
+        chips={
+          <>
+            <Chip composer icon="sparkle">
+              gpt-5.6-sol
+            </Chip>
+            <Chip composer icon="reasoning">
+              默认
+            </Chip>
+            <Chip composer icon="shield">
+              Full access
+            </Chip>
+          </>
+        }
+        footer={
+          <>
+            <ComposerTrayItem icon="laptop">macmini.local</ComposerTrayItem>
+            <ComposerTrayItem icon="folder">
+              <span {...stylex.props(text.mono, text.truncate)}>/Users/hejiajian/src/baton</span>
+            </ComposerTrayItem>
+            <ComposerTrayEnd>
+              <IconButton icon="folder" label="在 Finder 中显示" style={styles.trayActionIcon} />
+              <IconButton icon="editor" label="在编辑器中打开" style={styles.trayActionIcon} />
+            </ComposerTrayEnd>
+          </>
+        }
       />
       <Composer
         triggers={[
@@ -406,7 +490,7 @@ function ComposerGallery() {
           </ComposerActionGroup>
           <ComposerActionGroup align="end">
             <ComposerSubmit aria-label="发送">
-              <Icon name="arrow-up" size={16} />
+              <Icon name="arrow-up" size={15} />
             </ComposerSubmit>
           </ComposerActionGroup>
         </ComposerActions>

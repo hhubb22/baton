@@ -165,8 +165,8 @@ export function WorkspaceLayout() {
             animateCollapse
             label="调整侧栏宽度"
             storageKey="baton.width.sidebar"
-            defaultWidth={228}
-            min={200}
+            defaultWidth={192}
+            min={168}
             max={400}
             reserve={480}
             collapsed={collapsed}
