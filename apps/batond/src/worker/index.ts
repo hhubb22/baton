@@ -1770,7 +1770,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       if (request.type === 'thread_ack') {
         const entry = state.outbox[(request.worker_seq ?? 0) - 1]
         if (!entry || entry.report.worker_seq !== request.worker_seq || entry.report.event_id !== request.event_id)
-          return reject('invalid_ack', 'Report sequence and event ID do not match')
+          return yield* Effect.fail(new WorkerFailure('invalid_ack', 'Report sequence and event ID do not match'))
         if (!entry.acked) {
           yield* ledger
             .ack(entry.report.worker_seq, entry.report.event_id)
