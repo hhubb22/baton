@@ -159,7 +159,8 @@ export async function runEnvironmentCLI(args: string[]): Promise<void> {
       /^(NODE_OPTIONS|NODE_TLS_REJECT_UNAUTHORIZED|LD_PRELOAD|DYLD_.*|BASH_ENV|BATON_.*|OTEL_.*)$/i.test(name)
     )
       throw new Error('环境变量名称无效或受禁止')
-    if (!/^(device|agent:(cursor|pi|codex|kiro|antigravity)|project:.+)$/.test(values.scope!)) throw new Error('环境作用范围无效')
+    if (!/^(device|agent:(cursor|pi|codex|kiro|antigravity)|project:.+)$/.test(values.scope!))
+      throw new Error('环境作用范围无效')
     let input = ''
     if (action === 'set')
       for await (const chunk of process.stdin) {

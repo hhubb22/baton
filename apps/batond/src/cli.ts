@@ -548,7 +548,9 @@ export async function runLocalCLI(
   }
   if (action === 'probe') {
     const { probeAgents } = await import('./agents/probe.ts')
-    const agent = Schema.decodeUnknownSync(Schema.Literals(['cursor', 'pi', 'codex', 'kiro', 'antigravity']))(values.agent ?? 'cursor')
+    const agent = Schema.decodeUnknownSync(Schema.Literals(['cursor', 'pi', 'codex', 'kiro', 'antigravity']))(
+      values.agent ?? 'cursor',
+    )
     const [report] = await probeAgents({ dataDirectory, agentTypes: [agent] })
     console.log(JSON.stringify(report, null, 2))
     return
