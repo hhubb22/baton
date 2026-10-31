@@ -5,7 +5,9 @@ import { ThinkingCapability } from '@baton/protocol'
 /** Preserve the thinking choices advertised by the provider for this model. */
 export function thinkingCapability(capabilities: ModelCapabilities | null | undefined) {
   const descriptor = capabilities?.optionDescriptors?.find(
-    (option) => option.type === 'select' && (option.id === 'thinking' || option.id === 'reasoningEffort'),
+    (option) =>
+      option.type === 'select' &&
+      (option.id === 'thinking' || option.id === 'reasoningEffort' || option.id === 'effortLevel'),
   )
   if (!descriptor || descriptor.type !== 'select' || descriptor.options.length === 0) return undefined
   const decoded = Schema.decodeUnknownOption(ThinkingCapability)({

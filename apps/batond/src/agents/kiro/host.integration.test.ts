@@ -416,10 +416,17 @@ describe('Kiro Agent host', () => {
       ),
     )
     try {
-      expect(await effect(host.probe)).toMatchObject({
+      const probe = await effect(host.probe)
+      expect(probe).toMatchObject({
         authenticated: 'unknown',
         details: { installed: true, version: '2.32.0' },
       })
+      expect(probe.model_thinking?.map((entry) => entry.model)).toEqual([
+        'gpt-5.6-sol',
+        'gpt-5.6-terra',
+        'gpt-5.6-luna',
+      ])
+      expect(probe.model_thinking?.[0]?.thinking).toMatchObject({ id: 'effortLevel', current_value: 'high' })
       await consumed(path, transcript)
     } finally {
       controller.abort()

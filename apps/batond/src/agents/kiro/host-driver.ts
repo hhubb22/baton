@@ -17,6 +17,7 @@ import { resolveSelfInvocation } from '@t3tools/shared/nodeRuntime'
 import { makeProviderHostDriver } from '../../agent-host/driver.ts'
 import type { AgentHostPaths } from '../../agent-host/paths.ts'
 import { AgentHostDriver, AgentHostError, type ProbeResult } from '../../agent-host/protocol.ts'
+import { thinkingCapability } from '../thinking.ts'
 import { kiroVersion, type KiroVersionResult } from './version.ts'
 import { kiroTurnFailure } from './failure.ts'
 
@@ -79,6 +80,10 @@ const kiroProbe = (paths: AgentHostPaths, versionProbe = kiroVersion({ cwd: path
         ...status.models.filter((model) => model.isDefault),
         ...status.models.filter((model) => !model.isDefault),
       ].map((model) => model.slug),
+      model_thinking: status.models.flatMap((model) => {
+        const thinking = thinkingCapability(model.capabilities)
+        return thinking ? [{ model: model.slug, thinking }] : []
+      }),
       ...(reason ? { reason } : {}),
       details: {
         version: version.version,

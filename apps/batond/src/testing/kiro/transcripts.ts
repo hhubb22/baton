@@ -109,7 +109,48 @@ export const missingOnly = (transcript: Transcript): Transcript => {
   }
 }
 
-/** Discovery opens an empty default-model session and sends no prompt. */
+const effortLevelOption = {
+  type: 'select',
+  id: 'effortLevel',
+  name: 'Effort',
+  category: 'thought_level',
+  currentValue: 'high',
+  options: ['none', 'low', 'medium', 'high', 'xhigh', 'max'].map((value) => ({ value, name: value })),
+}
+
+/** Derived from a Kiro 2.32.0 session: switching the model replaces its options, and only GPT models offer effort. */
+const modelSwitches = (configOptions: readonly unknown[]): Transcript['entries'] => {
+  const modelOption = configOptions.find((option) => Predicate.hasProperty(option, 'id') && option.id === 'model')
+  const models = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ value: Schema.String })))(
+    Predicate.hasProperty(modelOption, 'options') ? modelOption.options : [],
+  )
+  return models.flatMap(({ value }): Transcript['entries'] => [
+    {
+      type: 'expect_outbound',
+      label: `session.set_model.${value}`,
+      frame: {
+        kind: 'request',
+        method: 'session/set_config_option',
+        params: { sessionId: 'native-session-1', configId: 'model', value },
+      },
+    },
+    {
+      type: 'emit_inbound',
+      label: `session.model_set.${value}`,
+      frame: {
+        kind: 'response',
+        method: 'session/set_config_option',
+        result: {
+          configOptions: [...configOptions, ...(value.startsWith('gpt-') ? [effortLevelOption] : [])].map((option) =>
+            option === modelOption && Predicate.isObject(option) ? { ...option, currentValue: value } : option,
+          ),
+        },
+      },
+    },
+  ])
+}
+
+/** Discovery opens an empty default-model session, reads each model's options and sends no prompt. */
 export const probeOnly = (transcript: Transcript): Transcript => {
   const first = segment(transcript, 0)
   const prompt = first.entries.findIndex(
@@ -136,6 +177,16 @@ export const probeOnly = (transcript: Transcript): Transcript => {
         const { _meta, ...params } = entry.frame.params
         return { ...entry, frame: { ...entry.frame, params } }
       }),
+      ...first.entries
+        .slice(0, prompt)
+        .flatMap((entry) =>
+          entry.type === 'emit_inbound' &&
+          frameMethod(entry) === 'session/new' &&
+          Predicate.hasProperty(entry.frame, 'result') &&
+          Predicate.hasProperty(entry.frame.result, 'configOptions')
+            ? modelSwitches(Schema.decodeUnknownSync(Schema.Array(Schema.Unknown))(entry.frame.result.configOptions))
+            : [],
+        ),
       { type: 'runtime_exit', status: 'success' },
     ],
   }

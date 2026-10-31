@@ -225,7 +225,7 @@ export const NodeRevocation = Schema.Struct({
 export type NodeRevocation = typeof NodeRevocation.Type
 
 export const ThinkingCapability = Schema.Struct({
-  id: Schema.Literals(['reasoningEffort', 'thinking']),
+  id: Schema.Literals(['reasoningEffort', 'thinking', 'effortLevel']),
   options: Schema.Array(
     Schema.Struct({
       id: nonemptyText(128),
@@ -238,7 +238,7 @@ export const ThinkingCapability = Schema.Struct({
 export type ThinkingCapability = typeof ThinkingCapability.Type
 
 export const ThinkingSelection = Schema.Struct({
-  id: Schema.Literals(['reasoningEffort', 'thinking']),
+  id: Schema.Literals(['reasoningEffort', 'thinking', 'effortLevel']),
   value: nonemptyText(128),
 })
 export type ThinkingSelection = typeof ThinkingSelection.Type
