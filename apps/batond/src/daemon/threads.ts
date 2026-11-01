@@ -12,7 +12,8 @@ import {
   type ThreadCommandResult,
   type WorkerIPCMessage,
 } from '@baton/protocol'
-import { authorizeDirectory } from '../devices/roots.ts'
+import { authorizeDirectory, updateBrowseRoots } from '../devices/roots.ts'
+import { DeviceError } from '../devices/errors.ts'
 import { upgradePaused, readUpgradeState } from './upgrade.ts'
 import { workerPaths } from './paths.ts'
 import { contentHash, type NodeLedger, type NodeCommand } from './ledger.ts'
@@ -69,6 +70,7 @@ export function makeThreadService(options: {
   capability: () => RuntimeAgent | readonly RuntimeAgent[]
   pollIntervalMs?: number
   onActivity?: () => void
+  onRootsChanged?: () => void
   now?: () => number
 }) {
   const { ledger, host } = options
@@ -247,8 +249,19 @@ export function makeThreadService(options: {
         if (!cmd.working_directory) throw new AdmissionRejected('invalid_working_directory')
         let cwd: string
         try {
+          if (cmd.allow_directory_registration) {
+            try {
+              await updateBrowseRoots(options.dataDirectory, { action: 'add', path: cmd.working_directory })
+            } catch (error) {
+              if (error instanceof DeviceError && error.code === 'invalid_path')
+                throw new AdmissionRejected('working_directory_missing', error.message)
+              throw error
+            }
+            options.onRootsChanged?.()
+          }
           cwd = await authorizeDirectory(options.dataDirectory, cmd.working_directory)
-        } catch {
+        } catch (error) {
+          if (error instanceof AdmissionRejected) throw error
           throw new AdmissionRejected('working_directory_forbidden')
         }
         const generation = cmd.storage_generation ?? randomUUID()

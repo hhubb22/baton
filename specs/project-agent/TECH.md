@@ -330,7 +330,7 @@ batond 通过 Gateway 的控制队列传送 `node.runtime_report`，正文为 `{
 
 ### 9. Thread 操作与回复回收
 
-**新建。** `threads.create` 在 `call_tool` 的事务里调用与员工 API 相同的 Store 入口：`client_thread_id` 为 `pa:{conversation_id}:{tool_call_id}`，第一条消息的 `client_message_id` 为 `pa:{conversation_id}:{tool_call_id}:0`，并写入 `project_id`、`origin_conversation_id`、`origin_tool_call_id`。目标节点、目录、Agent 和模型的校验与员工新建相同（Baton R-07）；直接命令通过 `nodes.exec` 创建 Execution。事务只保存 Thread、消息意图和 outbox，设备收到后才开始执行；工具结果返回 Thread ID 和状态，不等待回复。
+**新建。** `threads.create` 在 `call_tool` 的事务里调用与员工 API 相同的 Store 入口：`client_thread_id` 为 `pa:{conversation_id}:{tool_call_id}`，第一条消息的 `client_message_id` 为 `pa:{conversation_id}:{tool_call_id}:0`，并写入 `project_id`、`origin_conversation_id`、`origin_tool_call_id`。目标节点、Agent 和模型的校验与员工新建相同（Baton R-07）。中心不按已上报的目录清单拒绝工作目录，只校验它是绝对路径，并在启动命令中标明允许登记；设备解析真实路径并确认目录存在后，先幂等登记再启动 Worker，随后上报最新目录清单。Project Agent 新建的 Thread 在后续发消息和恢复时同样只校验绝对路径，因为中心保存的是传入路径，设备登记的是真实路径，上报也可能尚未到达。目录不存在时 Thread 启动失败，原因作为 Thread 反馈交给 Project Agent。直接命令通过 `nodes.exec` 创建 Execution。事务只保存 Thread、消息意图和 outbox，设备收到后才开始执行；工具结果返回 Thread ID 和状态，不等待回复。
 
 **发消息、停止、归档。** `threads.send` 的 `client_message_id` 为 `pa:{conversation_id}:{tool_call_id}`。目标 Thread 必须属于本 Project。`mode=steer` 在 Agent 不支持时返回 `is_error`。`threads.stop`、`threads.archive` 与员工操作走同一入口，操作者记为 Project Agent。
 

@@ -100,6 +100,7 @@ export const claimCommands = (): DB<ClaimedCommand[]> =>
                 agent_type: t.agent_type,
                 model: o.payload.model || '',
                 working_directory: t.working_directory,
+                ...(t.created_by === 'project_agent' ? { allow_directory_registration: true } : {}),
                 execution_timeout_seconds: o.payload.execution_timeout_seconds,
                 ...(t.project_id
                   ? {

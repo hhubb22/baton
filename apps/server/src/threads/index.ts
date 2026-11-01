@@ -15,6 +15,7 @@ import {
   normalizeMessage,
   readThread,
   stopFailure,
+  threadAdmission,
   touch,
   uuid,
   type DB,
@@ -91,6 +92,7 @@ export const create = (
         valid.model || '',
         'create',
         runtimeMode,
+        source !== undefined,
       )
       const id = uuid()
       yield* sql`INSERT INTO threads(id,employee_id,client_thread_id,request_hash,node_id,agent_type,runtime_mode,model,working_directory,created_by,project_id,origin_conversation_id,origin_tool_call_id,execution_timeout_seconds) VALUES(${id},${employeeID},${valid.client_thread_id},${hash},${node},${valid.agent_type},${runtimeMode},${model},${valid.working_directory},${source ? 'project_agent' : 'employee'},${source?.projectId ?? null},${source?.conversationId ?? null},${source?.toolCallId ?? null},${executionTimeoutSeconds})`
@@ -208,15 +210,7 @@ export const resume = (employeeID: string, threadID: string, source?: ProjectThr
         yield* sql`SELECT id FROM thread_outbox WHERE employee_id=${employeeID} AND thread_id=${threadID} AND (action='resume' OR (action='open' AND payload->>'retry_open'='true')) AND completed_at IS NULL AND next_attempt_at<>'infinity'`
       if (pending.length) return t
       if (yield* canRetryOpen(t)) {
-        const model = yield* admission(
-          employeeID,
-          t.node_id,
-          t.agent_type,
-          t.working_directory,
-          t.model,
-          'create',
-          t.runtime_mode,
-        )
+        const model = yield* threadAdmission(t, t.model, 'create')
         yield* sql`UPDATE threads SET status='waiting_device',status_reason='',stop_code=NULL,stop_requested_at=NULL,stop_confirmed_at=NULL WHERE id=${t.id}`
         yield* enqueue(t, 'open', {
           model,
@@ -231,7 +225,7 @@ export const resume = (employeeID: string, threadID: string, source?: ProjectThr
       if (!t.opened_at || !t.storage_generation) return yield* Effect.fail(failure('thread_not_opened', 422))
       if (!['idle', 'stopped', 'unknown'].includes(t.status)) return yield* Effect.fail(failure())
       if (t.stop_requested_at && !t.stop_confirmed_at) return yield* Effect.fail(failure('stop_pending'))
-      yield* admission(employeeID, t.node_id, t.agent_type, t.working_directory, '', 'resume', t.runtime_mode)
+      yield* threadAdmission(t, '', 'resume')
       yield* enqueue(t, 'resume', { runtime_mode: t.runtime_mode })
       yield* audit(t, 'resume.requested', {}, actor, actorID)
       yield* touch(threadID)
@@ -266,8 +260,7 @@ export const setModel = (employeeID: string, threadID: string, input: P.SetThrea
         supported: boolean
       }>`SELECT COALESCE((SELECT (a->'capabilities'->>'switch_model')::boolean FROM node_runtime_reports r CROSS JOIN LATERAL jsonb_array_elements(r.report->'agents') a WHERE r.node_id=${t.node_id} AND r.employee_id=${employeeID} AND a->>'agent_type'=${t.agent_type}),false) AS supported`
       if (!rows[0]!.supported) return yield* Effect.fail(failure('model_switch_unsupported', 422))
-      if (valid.model)
-        yield* admission(employeeID, t.node_id, t.agent_type, t.working_directory, valid.model, 'queue', t.runtime_mode)
+      if (valid.model) yield* threadAdmission(t, valid.model, 'queue')
       yield* sql`UPDATE threads SET next_model=${valid.model} WHERE id=${t.id}`
       yield* audit(t, 'model.updated', { model: valid.model })
       yield* touch(t.id)

@@ -195,6 +195,7 @@ export const ThreadCommand = Schema.Struct({
   model: Schema.optionalKey(summary(512)),
   thinking: Schema.optionalKey(ThinkingSelection),
   working_directory: Schema.optionalKey(boundedText(4096).check(Schema.isMinLength(1))),
+  allow_directory_registration: Schema.optionalKey(Schema.Boolean),
   execution_timeout_seconds: Schema.optionalKey(ExecutionTimeoutSeconds),
   client_message_id: Schema.optionalKey(ClientMessageID),
   content: Schema.optionalKey(boundedText(64 * 1024)),

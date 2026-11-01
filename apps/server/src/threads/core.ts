@@ -14,7 +14,7 @@ import { AppError } from '../errors.ts'
 
 import type { DatabaseEffect } from '../database.ts'
 import { recordThreadNotification } from '../desktop-notifications.ts'
-import { directoryAllowed } from '../directories.ts'
+import { absoluteDirectory, directoryAllowed } from '../directories.ts'
 import { canonical } from '../json.ts'
 
 export type DB<A> = DatabaseEffect<A>
@@ -90,6 +90,7 @@ export const admission = (
   model: string,
   operation: 'create' | 'queue' | 'steer' | 'resume',
   runtimeMode: RuntimeMode,
+  allowDirectoryRegistration = false,
 ) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -99,8 +100,10 @@ export const admission = (
     }>`SELECT n.system_name,r.report FROM nodes n LEFT JOIN node_runtime_reports r ON r.node_id=n.id AND r.employee_id=n.employee_id WHERE n.id=${node} AND n.employee_id=${employee} AND n.revoked_at IS NULL`
     if (!rows.length) return yield* Effect.fail(failure('not_found', 404))
     const row = rows[0]!
-    if (!directoryAllowed(row.system_name, directory, row.report?.roots))
-      return yield* Effect.fail(failure('directory_not_allowed', 422))
+    const directoryValid = allowDirectoryRegistration
+      ? absoluteDirectory(row.system_name, directory)
+      : directoryAllowed(row.system_name, directory, row.report?.roots)
+    if (!directoryValid) return yield* Effect.fail(failure('directory_not_allowed', 422))
     const capability = row.report?.agents?.find((a) => a.agent_type === agent && a.status === 'available')
     if (!capability || !capability.capabilities[operation])
       return yield* Effect.fail(
@@ -130,6 +133,23 @@ export const admission = (
       return yield* Effect.fail(failure('model_switch_unsupported', 422))
     return model || (operation === 'create' ? capability.default_model : '')
   })
+
+export const threadAdmission = (
+  t: Thread,
+  model: string,
+  operation: 'create' | 'queue' | 'steer' | 'resume',
+) =>
+  admission(
+    t.employee_id,
+    t.node_id,
+    t.agent_type,
+    t.working_directory,
+    model,
+    operation,
+    t.runtime_mode,
+    t.created_by === 'project_agent',
+  )
+
 export const normalizeMessage = (input: ThreadMessageInput) =>
   Effect.gen(function* () {
     const mode = input.mode || 'queue'
@@ -194,7 +214,7 @@ export const insertMessage = (t: Thread, input: ThreadMessageInput, source?: Pro
     if (t.status === 'archived' || t.archive_requested_at) return yield* Effect.fail(failure('thread_archived'))
     if (t.status === 'stopped' && !t.opened_at) return yield* Effect.fail(failure('thread_not_opened', 422))
     const selected = m.model || t.next_model || ''
-    yield* admission(t.employee_id, t.node_id, t.agent_type, t.working_directory, selected, m.mode, t.runtime_mode)
+    yield* threadAdmission(t, selected, m.mode)
     if (m.thinking) {
       const reports = yield* sql<{ report: RuntimeReport }>`SELECT report FROM node_runtime_reports
         WHERE employee_id=${t.employee_id} AND node_id=${t.node_id}`

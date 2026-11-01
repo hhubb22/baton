@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { rm } from 'node:fs/promises'
+import { realpath, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Effect, Option, Tracer } from 'effect'
 import type * as Scope from 'effect/Scope'
@@ -13,7 +13,7 @@ import type {
 } from '@baton/protocol'
 import { expect, it } from 'vite-plus/test'
 import { makeNodeLedger } from './ledger.ts'
-import { initializeBrowseRoots } from '../devices/roots.ts'
+import { initializeBrowseRoots, loadBrowseRoots } from '../devices/roots.ts'
 import { CommandDeliveryUncertain, makeThreadService } from './threads.ts'
 import type { DaemonWorkerHost } from './host.ts'
 import { IPCError } from './ipc.ts'
@@ -450,6 +450,109 @@ it('retains the original trace across daemon ledger restart and accepts a retry 
       ])
       const dispatches = spans.filter((span) => span.name === 'baton.worker.dispatch')
       expect(dispatches.map((span) => Option.getOrUndefined(span.parent)?.spanId)).toEqual([original, original])
+    }),
+  )
+})
+
+it('registers only a flagged open directory idempotently and reports the roots change', async () => {
+  await withService(({ commandId, command, path }) =>
+    Effect.gen(function* () {
+      const cwd = join(path, 'parent', 'workspace')
+      yield* Effect.promise(async () => {
+        await ensurePrivateDirectory(join(path, 'parent'))
+        await ensurePrivateDirectory(cwd)
+        await writePrivateFileAtomic(join(path, 'browse-roots.json'), '{"roots":[]}')
+      })
+      const ledger = yield* makeNodeLedger(join(path, 'node.db'))
+      const running = new Set<string>()
+      const generations = new Map<string, string>()
+      const host: DaemonWorkerHost = {
+        async ensureWorker(id) {
+          running.add(id)
+        },
+        async request(id, request) {
+          if (request.type === 'status') {
+            const generation = generations.get(id)
+            return {
+              type: 'result',
+              ok: true,
+              worker_ready: running.has(id),
+              ...(generation
+                ? { storage_generation: generation, session_id: id, runtime_mode: 'full-access' as const }
+                : {}),
+            }
+          }
+          if (request.type === 'thread_open') generations.set(id, request.storage_generation!)
+          return accepted(request)
+        },
+      }
+      let rootsChanged = 0
+      const service = makeThreadService({
+        dataDirectory: path,
+        identity: { node_id: randomUUID() } as NodeIdentity,
+        ledger,
+        host,
+        capability: () => capability,
+        onRootsChanged: () => {
+          rootsChanged++
+        },
+      })
+      const denied = yield* Effect.promise(() =>
+        service.command(randomUUID(), { ...command, working_directory: cwd }),
+      )
+      expect(denied).toMatchObject({ ok: false, code: 'working_directory_forbidden' })
+      const opened = yield* Effect.promise(() =>
+        service.command(commandId, { ...command, working_directory: cwd, allow_directory_registration: true }),
+      )
+      expect(opened.ok).toBe(true)
+      const registered = yield* Effect.promise(() => realpath(cwd))
+      expect((yield* Effect.promise(() => loadBrowseRoots(path))).map((root) => root.path)).toEqual([registered])
+      expect(rootsChanged).toBe(1)
+      const again = yield* Effect.promise(() =>
+        service.command(randomUUID(), {
+          ...command,
+          thread_id: randomUUID(),
+          working_directory: cwd,
+          allow_directory_registration: true,
+        }),
+      )
+      expect(again.ok).toBe(true)
+      expect((yield* Effect.promise(() => loadBrowseRoots(path))).map((root) => root.path)).toEqual([registered])
+    }),
+  )
+})
+
+it('fails a flagged open without starting a Worker when the directory does not exist', async () => {
+  await withService(({ commandId, command, host, path, setHandler }) =>
+    Effect.gen(function* () {
+      yield* Effect.promise(() => writePrivateFileAtomic(join(path, 'browse-roots.json'), '{"roots":[]}'))
+      const ledger = yield* makeNodeLedger(join(path, 'node.db'))
+      let deliveries = 0
+      setHandler(async (_id, request) => {
+        deliveries++
+        return accepted(request)
+      })
+      const service = makeThreadService({
+        dataDirectory: path,
+        identity: { node_id: randomUUID() } as NodeIdentity,
+        ledger,
+        host,
+        capability: () => capability,
+      })
+      const result = yield* Effect.promise(() =>
+        service.command(commandId, {
+          ...command,
+          working_directory: join(path, 'missing'),
+          allow_directory_registration: true,
+        }),
+      )
+      expect(result).toMatchObject({
+        ok: false,
+        code: 'working_directory_missing',
+        reason: '目录不存在或无法访问',
+      })
+      expect(deliveries).toBe(0)
+      expect(yield* Effect.promise(() => loadBrowseRoots(path))).toEqual([])
     }),
   )
 })

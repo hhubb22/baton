@@ -7,6 +7,53 @@ import { projectToolFixture, callProjectTool } from '../testing/project-tools.ts
 import { withTestDatabase } from '../testing/database.ts'
 import * as threads from '../threads/index.ts'
 
+it('lets Project agent register an absolute open directory while browser creation stays within saved roots', async () =>
+  withTestDatabase(async (db) => {
+    const { context: c, nodeId } = await projectToolFixture(db)
+    const created = await db.run(
+      callProjectTool(c, 'threads.create', {
+        node_id: nodeId,
+        agent_type: 'cursor',
+        working_directory: '/outside/repo',
+        message: 'start',
+      }),
+    )
+    expect(created.value).toMatchObject({ thread_id: expect.any(String) })
+    const id = (created.value as { thread_id: string }).thread_id
+    const commands = await db.run(threads.claimCommands())
+    expect(commands.find((command) => command.body.thread_id === id)?.body).toMatchObject({
+      action: 'open',
+      working_directory: '/outside/repo',
+      allow_directory_registration: true,
+    })
+    expect(
+      await db.run(
+        threads.addMessage(c.employeeId, id, { client_message_id: 'after-create', content: 'continue' }),
+      ),
+    ).toMatchObject({ status: 'accepted', content: 'continue' })
+    await expect(
+      db.run(
+        threads.create(c.employeeId, {
+          client_thread_id: randomUUID(),
+          node_id: nodeId,
+          agent_type: 'cursor',
+          working_directory: '/outside/browser',
+          message: { client_message_id: randomUUID(), content: 'browser' },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'directory_not_allowed', status: 422 })
+    expect(
+      await db.run(
+        callProjectTool({ ...c, toolCallId: 'relative-directory' }, 'threads.create', {
+          node_id: nodeId,
+          agent_type: 'cursor',
+          working_directory: 'relative/repo',
+          message: 'invalid',
+        }),
+      ),
+    ).toMatchObject({ isError: true, value: { code: 'directory_not_allowed' } })
+  }))
+
 it('keeps Project agent audit identity through create, messages, stop and deferred archive while preserving employee identity', async () =>
   withTestDatabase(async (db) => {
     const { context: c, nodeId, source } = await projectToolFixture(db)

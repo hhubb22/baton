@@ -1006,6 +1006,9 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
               onActivity: () => {
                 Effect.runSync(Queue.offer(reportWake, undefined))
               },
+              onRootsChanged: () => {
+                devicesDirty = true
+              },
             })
             const executions = makeExecutionService({
               dataDirectory: options.dataDirectory,
