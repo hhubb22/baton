@@ -27,9 +27,7 @@ it('lets Project agent register an absolute open directory while browser creatio
       allow_directory_registration: true,
     })
     expect(
-      await db.run(
-        threads.addMessage(c.employeeId, id, { client_message_id: 'after-create', content: 'continue' }),
-      ),
+      await db.run(threads.addMessage(c.employeeId, id, { client_message_id: 'after-create', content: 'continue' })),
     ).toMatchObject({ status: 'accepted', content: 'continue' })
     await expect(
       db.run(

@@ -134,11 +134,7 @@ export const admission = (
     return model || (operation === 'create' ? capability.default_model : '')
   })
 
-export const threadAdmission = (
-  t: Thread,
-  model: string,
-  operation: 'create' | 'queue' | 'steer' | 'resume',
-) =>
+export const threadAdmission = (t: Thread, model: string, operation: 'create' | 'queue' | 'steer' | 'resume') =>
   admission(
     t.employee_id,
     t.node_id,

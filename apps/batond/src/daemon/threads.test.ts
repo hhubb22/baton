@@ -497,9 +497,7 @@ it('registers only a flagged open directory idempotently and reports the roots c
           rootsChanged++
         },
       })
-      const denied = yield* Effect.promise(() =>
-        service.command(randomUUID(), { ...command, working_directory: cwd }),
-      )
+      const denied = yield* Effect.promise(() => service.command(randomUUID(), { ...command, working_directory: cwd }))
       expect(denied).toMatchObject({ ok: false, code: 'working_directory_forbidden' })
       const opened = yield* Effect.promise(() =>
         service.command(commandId, { ...command, working_directory: cwd, allow_directory_registration: true }),
