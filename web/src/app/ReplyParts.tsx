@@ -2,7 +2,7 @@ import * as stylex from '@stylexjs/stylex'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { activityLine, baseName, clockTime, fileSize, runTimer, threadStatusTones } from '../data/derive'
 import { useClient, useLiveTrace, useTrace } from '../data/queries'
-import type { Attachment, Device, LiveOutput as LiveOutputData, Message, Thread } from '../data/types'
+import type { Attachment, Device, LiveOutput as LiveOutputData, Message, Thread, TraceStep } from '../data/types'
 import { fonts, fontSize } from '../theme/base.stylex'
 import { text } from '../theme/text'
 import { semantic } from '../theme/semantic.stylex'
@@ -10,9 +10,12 @@ import { radius, space } from '../theme/tokens.stylex'
 import { Button, focusRing } from '../ui/Button'
 import { Disclosure, DisclosureChevron, DisclosurePanel, DisclosureTrigger } from '../ui/Disclosure'
 import { Icon } from '../ui/Icon'
+import { useArrivals } from '../ui/motion'
 import { StatusDot } from '../ui/Status'
+import { Tooltip } from '../ui/Tooltip'
 import { copyText } from './SelectionMenu'
-import { ActivityStep } from './ActivityStep'
+import { ActivityStep, activityStepLabel } from './ActivityStep'
+import { LiveLabel, Shimmer, usePacedCount, useQuietSeconds } from './LiveProgress'
 import { MessageBody } from './MessageBody'
 
 const styles = stylex.create({
@@ -173,7 +176,7 @@ export function ActivityTrace({
 
   return (
     <Disclosure open={open} onOpenChange={setOpen} {...stylex.props(styles.trace)}>
-      <DisclosureTrigger {...stylex.props(text.caption, styles.toggle, focusRing.ring)}>
+      <DisclosureTrigger {...stylex.props(text.body, styles.toggle, focusRing.ring)}>
         <DisclosureChevron open={open} />
         {message.activity
           ? activityLine(message.activity)
@@ -197,6 +200,7 @@ export function TurnActivityTrace({
   messageId,
   runningSteps = [],
   runningStepsTruncated = false,
+  outputSize = 0,
 }: {
   threadId: string
   turnSeq: number
@@ -204,8 +208,9 @@ export function TurnActivityTrace({
   live?: boolean
   count?: number
   messageId?: string
-  runningSteps?: import('../data/types').TraceStep[]
+  runningSteps?: TraceStep[]
   runningStepsTruncated?: boolean
+  outputSize?: number
 }) {
   const [open, setOpen] = useState(live)
   // 运行中默认展开，这一轮结束后自动收起；用户动过开关后以用户的选择为准。
@@ -236,47 +241,112 @@ export function TurnActivityTrace({
     .sort((a, b) => a.ordinal - b.ordinal)
   if (steps.length === 0 && activeSteps.length === 0 && !(count && count > 0)) return null
   return (
-    <Disclosure
+    <TraceDisclosure
+      steps={[...steps, ...activeSteps]}
+      live={live}
+      count={count}
+      loading={trace.isPending}
+      signal={`${activeSteps.map((step) => step.status).join()}:${outputSize}`}
       open={open}
       onOpenChange={(next) => {
         setTouched(true)
         setSettling(false)
         setOpen(next)
       }}
-      {...stylex.props(styles.trace)}
+      settling={settling}
+      threadId={threadId}
+      device={device}
     >
-      <DisclosureTrigger {...stylex.props(text.caption, styles.toggle, focusRing.ring)}>
+      {runningStepsTruncated && <p {...stylex.props(text.caption, styles.muted)}>部分进行中的步骤未完整显示。</p>}
+      {trace.isPending && <p {...stylex.props(text.small, styles.muted)}>正在加载执行过程…</p>}
+      {trace.hasNextPage && (
+        <Button
+          small
+          onClick={() => {
+            if (!trace.isFetching) void trace.fetchNextPage()
+          }}
+        >
+          加载更多活动
+        </Button>
+      )}
+      {trace.isError && (
+        <>
+          <p role="status" {...stylex.props(text.small, styles.muted)}>
+            无法加载执行过程。
+          </p>
+          <Button small onClick={() => void trace.refetch()}>
+            重试
+          </Button>
+        </>
+      )}
+    </TraceDisclosure>
+  )
+}
+
+// 一轮的执行过程。运行中时步骤逐条出现，最新一步和标题走微光，长时间没有新事件时微光停下并显示等了多久。
+export function TraceDisclosure({
+  steps,
+  live,
+  count,
+  loading = false,
+  signal = '',
+  open,
+  onOpenChange,
+  settling = false,
+  threadId,
+  device,
+  quietAfterMs,
+  children,
+}: {
+  steps: TraceStep[]
+  live: boolean
+  count?: number
+  // 第一批数据还没到。到达后直接全部显示，不逐条放出历史步骤。
+  loading?: boolean
+  // 步骤数之外能说明还在进展的信号，例如实时输出的长度。
+  signal?: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  settling?: boolean
+  threadId: string
+  device: Device | undefined
+  quietAfterMs?: number
+  children?: ReactNode
+}) {
+  const paced = usePacedCount(loading ? 0 : steps.length)
+  const shown = live ? paced : steps.length
+  const visible = steps.slice(0, shown)
+  const quiet = useQuietSeconds(`${steps.length}:${signal}`, live, quietAfterMs)
+  const arrived = useArrivals(threadId).sync(visible.map((step) => step.item_id))
+  const latest = live ? visible.at(-1) : undefined
+  const summary = `执行过程 · ${Math.max(0, (count ?? steps.length) - (steps.length - shown))} 个步骤`
+  return (
+    <Disclosure open={open} onOpenChange={onOpenChange} {...stylex.props(styles.trace)}>
+      <DisclosureTrigger {...stylex.props(text.body, styles.toggle, focusRing.ring)}>
         <DisclosureChevron open={open} />
-        执行过程 · {count ?? steps.length + activeSteps.length} 个步骤
+        {!live ? (
+          summary
+        ) : open || !latest ? (
+          <Shimmer active={quiet === null}>{summary}</Shimmer>
+        ) : (
+          <LiveLabel label={`${summary}　${activityStepLabel(latest)}`} quietSeconds={quiet} />
+        )}
       </DisclosureTrigger>
       <DisclosurePanel settling={settling}>
         <div {...stylex.props(styles.steps)}>
           {/* 同一个列表：步骤从进行中变为已保存时不重新挂载，保留展开状态。 */}
-          {[...steps, ...activeSteps].map((step) => (
-            <ActivityStep key={step.item_id} step={step} threadId={threadId} device={device} />
+          {visible.map((step) => (
+            <ActivityStep
+              key={step.item_id}
+              step={step}
+              threadId={threadId}
+              device={device}
+              current={step === latest}
+              quietSeconds={quiet}
+              arriving={arrived.has(step.item_id)}
+            />
           ))}
-          {runningStepsTruncated && <p {...stylex.props(text.caption, styles.muted)}>部分进行中的步骤未完整显示。</p>}
-          {trace.isPending && <p {...stylex.props(text.small, styles.muted)}>正在加载执行过程…</p>}
-          {trace.hasNextPage && (
-            <Button
-              small
-              onClick={() => {
-                if (!trace.isFetching) void trace.fetchNextPage()
-              }}
-            >
-              加载更多活动
-            </Button>
-          )}
-          {trace.isError && (
-            <>
-              <p role="status" {...stylex.props(text.small, styles.muted)}>
-                无法加载执行过程。
-              </p>
-              <Button small onClick={() => void trace.refetch()}>
-                重试
-              </Button>
-            </>
-          )}
+          {children}
         </div>
       </DisclosurePanel>
     </Disclosure>
@@ -333,9 +403,9 @@ function FileRow({
         <Icon name="file" size={14} />
       </span>
       <div {...stylex.props(styles.attachmentBody)}>
-        <span title={item.path} {...stylex.props(text.small, text.truncate)}>
-          {name}
-        </span>
+        <Tooltip label={item.path} align="start">
+          <span {...stylex.props(text.small, text.truncate)}>{name}</span>
+        </Tooltip>
         <span {...stylex.props(text.caption, styles.muted)}>{detail}</span>
       </div>
       {device?.connection === 'online' && (
@@ -365,27 +435,32 @@ function CommitRow({ item }: { item: Extract<Attachment, { kind: 'commit' }> }) 
         <Icon name="commit" size={14} />
       </span>
       <div {...stylex.props(styles.attachmentBody)}>
-        <code title={item.sha} aria-label={item.sha} {...stylex.props(text.mono, text.truncate)}>
-          {item.sha.length > 12 ? `${item.sha.slice(0, 12)}…` : item.sha}
-        </code>
-        <span title={item.subject} {...stylex.props(text.caption, styles.muted, text.truncate)}>
-          {item.repo} · {item.subject}
-        </span>
+        <Tooltip label={item.sha} align="start">
+          <code aria-label={item.sha} {...stylex.props(text.mono, text.truncate)}>
+            {item.sha.length > 12 ? `${item.sha.slice(0, 12)}…` : item.sha}
+          </code>
+        </Tooltip>
+        <Tooltip label={item.subject} align="start">
+          <span {...stylex.props(text.caption, styles.muted, text.truncate)}>
+            {item.repo} · {item.subject}
+          </span>
+        </Tooltip>
         {copied === false && (
           <span role="status" {...stylex.props(text.caption, text.danger)}>
             无法访问剪贴板，请手动复制。
           </span>
         )}
       </div>
-      <button
-        type="button"
-        aria-label={copied ? '已复制提交 SHA' : '复制提交 SHA'}
-        title={copied ? '已复制提交 SHA' : '复制提交 SHA'}
-        onClick={() => void copy()}
-        {...stylex.props(styles.attachmentAction, focusRing.ring)}
-      >
-        <Icon name={copied ? 'check' : 'copy'} size={14} />
-      </button>
+      <Tooltip label={copied ? '已复制提交 SHA' : '复制提交 SHA'}>
+        <button
+          type="button"
+          aria-label={copied ? '已复制提交 SHA' : '复制提交 SHA'}
+          onClick={() => void copy()}
+          {...stylex.props(styles.attachmentAction, focusRing.ring)}
+        >
+          <Icon name={copied ? 'check' : 'copy'} size={14} />
+        </button>
+      </Tooltip>
     </li>
   )
 }

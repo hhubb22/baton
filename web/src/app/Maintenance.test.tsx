@@ -1,6 +1,7 @@
 import { createMemoryHistory } from '@tanstack/react-router'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { chooseOption } from '../test/select'
 import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vite-plus/test'
 import { ClientError } from '../data/client'
 import { createMockClient } from '../data/mock/client'
@@ -336,9 +337,9 @@ describe('project maintenance', () => {
     const { client } = setup('/projects/prj-baton?settings=true')
     await screen.findByRole('heading', { name: '项目设置' })
     expect(screen.getByText('更改将在下次运行时生效。')).toBeInTheDocument()
-    await user.selectOptions(screen.getByLabelText('模型来源'), '|Claude')
-    expect(screen.getByLabelText('项目助手模型')).toHaveValue('claude-opus-5-5')
-    await user.selectOptions(screen.getByLabelText('项目助手模型'), 'claude-sonnet-5-5')
+    await chooseOption(user, screen.getByLabelText('模型来源'), 'Claude')
+    expect(screen.getByLabelText('项目助手模型')).toHaveTextContent('claude-opus-5-5')
+    await chooseOption(user, screen.getByLabelText('项目助手模型'), 'claude-sonnet-5-5')
     await save(user)
     await waitFor(() => expect(settingsStatus()).toHaveTextContent('已保存'))
     await back(user)
@@ -350,7 +351,7 @@ describe('project maintenance', () => {
       agent: { state: 'running', deviceId: 'dev-ubuntu' },
     })
     await openSettings(user)
-    expect(screen.getByLabelText('项目助手模型')).toHaveValue('claude-sonnet-5-5')
+    expect(screen.getByLabelText('项目助手模型')).toHaveTextContent('claude-sonnet-5-5')
   })
 
   it('recovers failed project and memory reads with Retry project and Retry memory', async () => {

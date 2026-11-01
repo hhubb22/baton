@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vite-plus/test'
 import { ClientProvider } from '../data/queries'
@@ -206,10 +206,12 @@ it('renders typed steps, gap sizes and full output actions while the device is o
   expect(screen.getByLabelText('任务进度')).toHaveTextContent('Reading source')
   expect(screen.getByLabelText('任务结果')).toHaveTextContent('Found the race')
   expect(screen.getByLabelText('错误详情')).toHaveTextContent('Command interrupted')
-  expect(screen.getByText('原始大小 96 KB，内容已截断 · 完整输出保存在 Windows Desktop')).toHaveAttribute(
-    'title',
-    '98304 字节',
-  )
+  fireEvent.pointerEnter(screen.getByText('原始大小 96 KB，内容已截断 · 完整输出保存在 Windows Desktop'), {
+    pointerType: 'mouse',
+  })
+  fireEvent.mouseEnter(screen.getByText('原始大小 96 KB，内容已截断 · 完整输出保存在 Windows Desktop'))
+  fireEvent.mouseMove(screen.getByText('原始大小 96 KB，内容已截断 · 完整输出保存在 Windows Desktop'))
+  expect(await screen.findByText('98304 字节', undefined, { timeout: 1500 })).toBeInTheDocument()
   expect(screen.getByText('原始大小 2 KB，内容已截断')).toBeInTheDocument()
   expect(screen.getByText('此步骤的其余内容不可用。')).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: '读取完整输出' }))

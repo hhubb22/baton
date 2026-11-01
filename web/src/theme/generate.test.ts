@@ -34,12 +34,14 @@ function parse(value: string): Rgba {
   }
 }
 
-const over = (top: Rgba, bottom: Rgba): Rgba => ({
-  r: top.r * top.a + bottom.r * (1 - top.a),
-  g: top.g * top.a + bottom.g * (1 - top.a),
-  b: top.b * top.a + bottom.b * (1 - top.a),
-  a: 1,
-})
+const encode = (channel: number) => (channel <= 0.0031308 ? 12.92 * channel : 1.055 * channel ** (1 / 2.4) - 0.055)
+const decode = (channel: number) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4)
+
+// 浏览器在 sRGB 编码值上混合半透明色，这里按同样的方式计算。
+const over = (top: Rgba, bottom: Rgba): Rgba => {
+  const mix = (front: number, back: number) => decode(encode(front) * top.a + encode(back) * (1 - top.a))
+  return { r: mix(top.r, bottom.r), g: mix(top.g, bottom.g), b: mix(top.b, bottom.b), a: 1 }
+}
 
 const luminance = ({ r, g, b }: Rgba) => 0.2126 * r + 0.7152 * g + 0.0722 * b
 
@@ -69,6 +71,15 @@ describe('语义颜色', () => {
     expect(ratio(palette.destructiveForeground, palette.destructiveSoft)).toBeGreaterThanOrEqual(4.5)
     expect(ratio(palette.warningForeground, palette.warningSoft)).toBeGreaterThanOrEqual(4.5)
     expect(ratio(palette.agentForeground, palette.agentSoft)).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it.each<[Scheme]>([['light'], ['dark']])('%s 主题的组件能从背景上分辨出来', (scheme) => {
+    const palette = generateColors(defaultInputs, scheme)
+    const high = generateColors(highContrastInputs, scheme)
+    expect(ratio(palette.fieldBorder, palette.card)).toBeGreaterThanOrEqual(2)
+    expect(ratio(high.fieldBorder, high.card)).toBeGreaterThanOrEqual(3)
+    expect(ratio(palette.card, palette.background)).toBeGreaterThanOrEqual(1.08)
+    expect(ratio(palette.accent, palette.background)).toBeGreaterThan(ratio(palette.muted, palette.background) + 0.1)
   })
 
   it.each<[Scheme]>([['light'], ['dark']])('%s 主题提高 contrast 后文字和边框都更明显', (scheme) => {

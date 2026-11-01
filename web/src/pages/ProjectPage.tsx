@@ -72,7 +72,11 @@ import type {
 import { fonts, fontSize } from '../theme/base.stylex'
 import { text } from '../theme/text'
 import { semantic } from '../theme/semantic.stylex'
-import { radius, shadow, size, space } from '../theme/tokens.stylex'
+import { enter } from '../theme/motion'
+import { motion, radius, shadow, size, space } from '../theme/tokens.stylex'
+import { LiveLabel, QuietNote, Shimmer, usePacedCount, useQuietSeconds } from '../app/LiveProgress'
+import { useArrivals } from '../ui/motion'
+import { Tooltip } from '../ui/Tooltip'
 import { Avatar } from '../ui/Avatar'
 import { Banner } from '../ui/Banner'
 import { Button, focusRing, IconButton } from '../ui/Button'
@@ -293,14 +297,12 @@ const styles = stylex.create({
     paddingBottom: space.md,
     opacity: 1,
     transform: 'translateY(0)',
-    transition: 'opacity 180ms cubic-bezier(0.23, 1, 0.32, 1), transform 180ms cubic-bezier(0.23, 1, 0.32, 1)',
-    '@media (prefers-reduced-motion: reduce)': { transition: 'opacity 120ms ease', transform: 'none' },
+    transition: `opacity ${motion.popover} ${motion.easeOut}, transform ${motion.popover} ${motion.easeOut}`,
   },
   dockHidden: {
     opacity: 0,
     transform: 'translateY(12px)',
-    transition: 'opacity 280ms ease, transform 280ms cubic-bezier(0.23, 1, 0.32, 1)',
-    '@media (prefers-reduced-motion: reduce)': { transition: 'opacity 120ms ease', transform: 'none' },
+    transition: `opacity ${motion.modal} ${motion.easeOut}, transform ${motion.modal} ${motion.easeOut}`,
   },
   jumpToLatest: { bottom: 'calc(var(--project-dock-height, 160px) + 8px)' },
   dockInteractive: { pointerEvents: 'auto' },
@@ -421,16 +423,23 @@ function ProcessItem({
   devices,
   executions,
   onOpen,
+  current = false,
+  quietSeconds = null,
+  arriving = false,
 }: {
   step: ProcessStep
   devices: Device[]
   executions: Execution[]
   onOpen: (id: string) => void
+  // 正在等结果的那一步。
+  current?: boolean
+  quietSeconds?: number | null
+  arriving?: boolean
 }) {
   const [open, setOpen] = useState(false)
   if (step.kind === 'note') {
     return (
-      <div {...stylex.props(text.small, styles.noteRow)}>
+      <div {...stylex.props(text.small, styles.noteRow, arriving && enter.settle)}>
         <Icon name="details" size={16} style={styles.stepIcon} />
         <div {...stylex.props(styles.noteBody)}>
           <RestrictedMarkdown body={step.body} muted small />
@@ -458,15 +467,18 @@ function ProcessItem({
         )
       : undefined
   return (
-    <div {...stylex.props(styles.step)}>
+    <div {...stylex.props(styles.step, arriving && enter.settle)}>
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        {...stylex.props(text.small, styles.stepToggle, focusRing.ring)}
+        {...stylex.props(text.body, styles.stepToggle, focusRing.ring)}
       >
         <Icon name={isShell ? 'terminal' : 'tool'} size={16} style={styles.stepIcon} />
-        <span {...stylex.props(styles.stepName, isShell && text.mono)}>{label}</span>
+        <span {...stylex.props(styles.stepName, isShell && text.mono)}>
+          <Shimmer active={current && quietSeconds === null}>{label}</Shimmer>
+        </span>
+        {current && <QuietNote seconds={quietSeconds} />}
         <span {...stylex.props(text.caption, styles.stepStatus, failed && styles.danger)}>{status}</span>
         <Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} style={styles.stepIcon} />
       </button>
@@ -506,36 +518,60 @@ function ProcessItem({
   )
 }
 
-function ProcessLine({
+// 项目助手一轮的执行过程。有工具在等结果时步骤逐条出现，标题和那一步走微光，长时间没有新事件时显示等了多久。
+export function ProcessLine({
   steps,
   devices,
   executions,
   onOpen,
   children,
+  scope = 'project',
 }: {
   steps: ProcessStep[]
   devices: Device[]
   executions: Execution[]
   onOpen: (id: string) => void
   children?: ReactNode
+  scope?: string
 }) {
   const [open, setOpen] = useState(false)
-  const awaiting = steps.filter((step) => step.kind === 'tool' && step.status === 'pending').length
+  const live = steps.some((step) => step.kind === 'tool' && step.status === 'pending')
+  const paced = usePacedCount(steps.length)
+  // 工具结束后步骤已经全部到齐，直接显示，不再继续放出积压。
+  const visible = live ? steps.slice(0, paced) : steps
+  const quiet = useQuietSeconds(steps.length, live)
+  const arrived = useArrivals(scope).sync(visible.map((_, index) => String(index)))
+  const current = live ? visible.findLast((step) => step.kind === 'tool' && step.status === 'pending') : undefined
   return (
-    <div data-live-activity={awaiting > 0 ? '' : undefined} {...stylex.props(styles.process)}>
+    <div data-live-activity={live ? '' : undefined} {...stylex.props(styles.process)}>
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        {...stylex.props(text.caption, styles.processToggle, focusRing.ring)}
+        {...stylex.props(text.body, styles.processToggle, focusRing.ring)}
       >
-        {awaiting > 0 ? '正在处理' : '执行过程'}
+        {!live ? (
+          '执行过程'
+        ) : open || current?.kind !== 'tool' ? (
+          <Shimmer active={quiet === null}>正在处理</Shimmer>
+        ) : (
+          <LiveLabel label={`正在处理　${current.name}`} quietSeconds={quiet} />
+        )}
         <Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} />
       </button>
       {open && (
         <div {...stylex.props(styles.steps)}>
-          {steps.map((step, index) => (
-            <ProcessItem key={index} step={step} devices={devices} executions={executions} onOpen={onOpen} />
+          {visible.map((step, index) => (
+            <ProcessItem
+              key={index}
+              step={step}
+              devices={devices}
+              executions={executions}
+              onOpen={onOpen}
+              current={step === current}
+              quietSeconds={quiet}
+              arriving={arrived.has(String(index))}
+            />
           ))}
           {children}
         </div>
@@ -820,26 +856,27 @@ function Overview({
     )
     return localNode === thread.deviceId ? (
       <div key={thread.id} {...stylex.props(stylex.defaultMarker(), text.small, styles.overviewRow)}>
-        <button
-          type="button"
-          title={thread.title}
-          onClick={() => onOpenThread(thread.id)}
-          {...stylex.props(text.small, styles.threadOpen, focusRing.ring)}
-        >
-          {lead}
-        </button>
+        <Tooltip label={thread.title} align="start">
+          <button
+            type="button"
+            onClick={() => onOpenThread(thread.id)}
+            {...stylex.props(text.small, styles.threadOpen, focusRing.ring)}
+          >
+            {lead}
+          </button>
+        </Tooltip>
         <LocalThreadActions thread={thread} />
       </div>
     ) : (
-      <button
-        key={thread.id}
-        type="button"
-        title={thread.title}
-        onClick={() => onOpenThread(thread.id)}
-        {...stylex.props(stylex.defaultMarker(), text.small, styles.overviewRow, focusRing.ring)}
-      >
-        {lead}
-      </button>
+      <Tooltip key={thread.id} label={thread.title} align="start">
+        <button
+          type="button"
+          onClick={() => onOpenThread(thread.id)}
+          {...stylex.props(stylex.defaultMarker(), text.small, styles.overviewRow, focusRing.ring)}
+        >
+          {lead}
+        </button>
+      </Tooltip>
     )
   }
 
@@ -1037,6 +1074,7 @@ export function ProjectPage() {
   const client = useClient()
   const queryClient = useQueryClient()
   const { projectId } = useParams({ from: '/workspace/projects/$projectId' })
+  const arrivals = useArrivals(projectId)
   const search: ProjectSearch = useSearch({ from: '/workspace/projects/$projectId' })
   const navigate = useNavigate()
   const projects = useProjects()
@@ -1503,6 +1541,7 @@ export function ProjectPage() {
           ]
         : []),
     ].sort((a, b) => a.at - b.at || a.id.localeCompare(b.id))
+    const arrived = arrivals.sync(timeline.map(({ id }) => id))
     const groups: (typeof timeline)[] = []
     for (const item of timeline) {
       const group = groups.at(-1)
@@ -1546,7 +1585,11 @@ export function ProjectPage() {
           {group
             .filter(({ entry }) => entry.kind !== 'assistant' || entry.body)
             .map(({ id: entryKey, entry, streaming }) => (
-              <div key={entryKey} data-entry-id={entry.id}>
+              <div
+                key={entryKey}
+                data-entry-id={entry.id}
+                {...stylex.props(entry.kind === 'user' && arrived.has(entryKey) && enter.rise)}
+              >
                 <Entry
                   entry={entry}
                   threads={projectThreads}
@@ -1671,7 +1714,7 @@ export function ProjectPage() {
               )}
             </div>
           </div>
-          {awayFromLatest && <JumpToLatest style={styles.jumpToLatest} onClick={jumpToLatest} />}
+          <JumpToLatest visible={awayFromLatest} style={styles.jumpToLatest} onClick={jumpToLatest} />
           <div
             ref={dockRef}
             inert={hideDock || undefined}

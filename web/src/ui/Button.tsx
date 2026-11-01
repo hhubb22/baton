@@ -4,6 +4,7 @@ import { weight } from '../theme/base.stylex'
 import { semantic } from '../theme/semantic.stylex'
 import { motion, radius, shadow, size } from '../theme/tokens.stylex'
 import { Icon, type IconName } from './Icon'
+import { Tooltip } from './Tooltip'
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'dangerSolid'
 
@@ -142,14 +143,15 @@ type IconButtonProps = Omit<ComponentProps<'button'>, 'className' | 'style' | 'c
 
 export function IconButton({ icon, label, iconSize = 16, active, style, type = 'button', ...rest }: IconButtonProps) {
   return (
-    <button
-      type={type}
-      aria-label={label}
-      title={label}
-      {...rest}
-      {...stylex.props(styles.base, styles.icon, active && styles.iconActive, focusRing.ring, style)}
-    >
-      <Icon name={icon} size={iconSize} />
-    </button>
+    <Tooltip label={label}>
+      <button
+        type={type}
+        aria-label={label}
+        {...rest}
+        {...stylex.props(styles.base, styles.icon, active && styles.iconActive, focusRing.ring, style)}
+      >
+        <Icon name={icon} size={iconSize} />
+      </button>
+    </Tooltip>
   )
 }

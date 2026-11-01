@@ -20,7 +20,8 @@ const styles = stylex.create({
     color: semantic.foreground,
     fontSize: '12px',
     lineHeight: 1.45,
-    textWrap: 'balance',
+    overflowWrap: 'anywhere',
+    whiteSpace: 'pre-line',
     transformOrigin: 'var(--transform-origin)',
     transitionProperty: 'opacity, transform',
     transitionDuration: motion.popover,
@@ -46,8 +47,9 @@ export function Tooltip({
   side?: 'top' | 'bottom' | 'left' | 'right'
   align?: 'start' | 'center' | 'end'
 }) {
+  // 没有内容时只关掉提示，保持同一棵树，触发元素不会因为提示有无而重新挂载。
   return (
-    <BaseTooltip.Root>
+    <BaseTooltip.Root disabled={label === null || label === undefined || label === ''}>
       <BaseTooltip.Trigger render={children} />
       <BaseTooltip.Portal>
         <BaseTooltip.Positioner side={side} align={align} sideOffset={4} {...stylex.props(styles.positioner)}>

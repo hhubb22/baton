@@ -14,7 +14,7 @@ Baton 网页的视觉和组件以 `web/` 的代码为准，不维护单独的设
 
 `theme/generate.ts` 生成颜色，`theme/colors.css` 保存默认输入的结果，测试核对两边一致和 WCAG 对比度。每个值是 `light-dark()` 形式的 CSS 变量，由 `<html>` 的 `color-scheme` 决定显示哪一套；圆角和字体也是 CSS 变量，调节面板和高对比模式直接改写变量。
 
-组件只使用语义 token（`theme/semantic.stylex.ts`），命名沿用 coss ui：`background`、`foreground`、`card`、`popover`、`primary`、`secondary`、`muted`、`accent`、`border`、`input`、`ring`、`destructive`、`info`、`success`、`warning` 及对应的 `-foreground`，侧栏使用 `sidebar` 一组。Baton 另有 `agent`（Agent 运行状态）和 `faintForeground`（三级文字）。页面代码里的 `colors` 是 `tokens.stylex.ts` 中指向这些变量的旧名称，新代码用 `semantic`。
+组件只使用语义 token（`theme/semantic.stylex.ts`），命名沿用 coss ui：`background`、`foreground`、`card`、`popover`、`primary`、`secondary`、`muted`、`accent`、`border`、`input`、`ring`、`destructive`、`info`、`success`、`warning` 及对应的 `-foreground`，侧栏使用 `sidebar` 一组。Baton 另有 `agent`（Agent 运行状态）和 `faintForeground`（三级文字）。
 
 每种颜色有固定职责：
 
@@ -22,12 +22,15 @@ Baton 网页的视觉和组件以 `web/` 的代码为准，不维护单独的设
 |---|---|
 | 页面和面板背景 | `background`、`card`；浮层用 `popover` |
 | 组件背景的静止、悬停、选中 | `muted`、`accent` 等半透明中性色 |
-| 边框 | `border` 用于分隔，`input` 用于可交互控件，`ring` 用于焦点 |
+| 边框 | `border` 用于分隔，`input` 用于按钮这类有底色的控件，`ring` 用于焦点 |
+| 输入控件 | `field` 底色，`fieldBorder` 边框，悬停用 `fieldBorderHover`，默认和卡片至少 2:1，高对比主题至少 3:1 |
 | 主按钮 | `primary`，中性色 |
 | 品牌蓝 | 焦点、选中和链接，不用于大面积填充 |
 | 状态 | `success`、`warning`、`destructive`、`info`，只表示状态 |
 
 半透明色只用在背景会透出来的位置，其他位置用不透明色。同一条边界只画一次边框。
+
+浅色和深色的层级分别调整。浅色靠灰底上的白色卡片和阴影区分；深色的阴影在暗底上几乎看不出来，靠表面逐级提亮（背景 0.16、卡片 0.215、浮层 0.25）和顶部高光区分，输入框再叠一层 5% 的白色。分隔线保持克制，只有可操作的控件和状态加强。
 
 ## 字体
 
@@ -52,17 +55,53 @@ Baton 网页的视觉和组件以 `web/` 的代码为准，不维护单独的设
 
 ## 动效
 
-使用频率决定动效。每天用上百次的操作不加动画：命令面板、键盘触发的操作和右键菜单直接出现，连续悬停的第二个 Tooltip 不再延迟。
+使用频率决定动效。每天用上百次的操作不加动画：命令面板、键盘触发的操作、菜单和右键菜单直接出现，切换 Thread 和页面没有转场，连续悬停的第二个 Tooltip 不再延迟。
 
-需要动效时，进出场用 ease-out，屏幕内移动用 ease-in-out，从 0.9 以上的缩放开始，弹层从触发点展开。微交互 100–150 ms，Tooltip 和菜单 150–250 ms，弹窗 200–300 ms，退场比进场快约 20%。按钮按下时缩放到 0.97。系统开启减少动态效果时关闭位移和缩放。
+每个动画都由一件事引起：用户的操作，或者状态真的变了。首屏加载和向上翻历史不播放进场，一整列表不会一起动。Agent 回复由流式文字呈现，保存后替换同一条回复时不再播放。
+
+时长和曲线只来自 `motion` token，取值是 `global.css` 里的 CSS 变量，`theme/motion.test.ts` 检查页面代码里没有字面值。
+
+| Token | 取值 | 用途 |
+|---|---|---|
+| `micro` | 120 ms | 按钮、开关、悬停、小符号 |
+| `exit` | 140 ms | 退场 |
+| `popover` | 180 ms | Tooltip、Select、折叠、消息和横幅进场 |
+| `modal` | 240 ms | 弹窗 |
+| `layout` | 260 ms | 面板宽度 |
+| `hoverDelay` | 100 ms | 拖拽手柄悬停后才显示的延迟 |
+| `activity` | 420 ms | 活动记录里新出现的步骤 |
+| `shimmer` | 2800 ms | 进行中步骤文字上的微光，循环一轮 |
+| `easeOut` | `cubic-bezier(0.23, 1, 0.32, 1)` | 进场和退场 |
+| `easeInOut` | `cubic-bezier(0.77, 0, 0.175, 1)` | 屏幕内移动：分段滑块、Tab 下划线、系统自动收起 |
+| `easeDrawer` | `cubic-bezier(0.16, 1, 0.3, 1)` | 侧栏和面板展开收起 |
+
+弹层从触发点展开，从 0.98 缩放开始；按钮按下时缩放到 0.97；整行内容只上移 6px；16px 以内的小符号从 0.6 缩放弹入。系统开启减少动态效果时，所有时长变成 1 ms，位移和缩放不可见，循环动画静止。
+
+共用的进退场样式在 `theme/motion.ts`（`enter.fade`、`enter.rise`、`enter.pop`、`leave.fade`），带逻辑的部分在 `ui/motion.tsx`：
+
+| 工具 | 用途 | 使用位置 |
+|---|---|---|
+| `usePresence` | 让内容多留一段退场时间 | 跳到最新 |
+| `Swap` | 值变化时新内容弹入，首次渲染不播放 | 状态图标、复制对勾 |
+| `Appear` | 从无到有时弹入，一开始就有的直接显示 | 未读点 |
+| `useArrivals` | 找出列表末尾新到的条目 | Thread 和 Project 的用户消息 |
+| `useSlidingIndicator` | 测量选中项，让同一个滑块在选项间移动 | Tabs、Segmented |
+
+活动记录的标题和步骤行用正文字号加灰色，读起来是回复的一部分；工具输出、输入和 diff 保持小字。
+
+进行中的步骤用 `app/LiveProgress.tsx` 表示还在收到新事件：`Shimmer` 让「执行过程」标题走微光，`LiveLabel` 让当前这一步走微光，已完成的步骤保持静止；折叠时标题和当前步骤在同一行，光带连续扫过。浅色模式的光带向背景色提亮，深色模式向前景色提亮。活动记录的显示不追求实时：`usePacedCount` 让成批到达的步骤逐条出现，每条至少隔 700 ms，积压超过 4 条时跳过中间的。`useQuietSeconds` 计算浏览器多久没收到新事件，满 30 秒后微光停下，改为显示「45 秒没有新进展」。长命令可能几分钟没有输出，所以这里只陈述事实，不改变 Thread 状态。这套表现目前只在画廊的「进行中 Live」里演示，还没有接入 Thread 页。
 
 ## 组件
 
 组件从 coss ui（MIT）转写为 Base UI + StyleX，保留其结构和交互；已有组件保留 Baton 的 prop 名称，页面调用不变。Tailwind 中无法直接表达的后代和 `has-` 选择器，改写成 prop、`stylex.when` 或少量全局 CSS。图标沿用 `web/src/ui/Icon`。
 
-`web/src/ui` 的现有组件已转写，并增加了 Frame、Select、Tooltip、Command，其余组件在页面需要时转写。
+`web/src/ui` 的现有组件已转写，并增加了 Frame、Select、Tooltip、Command，其余组件在页面需要时转写。页面的下拉选择统一用 `Select`，不使用原生 select。悬停提示统一用 `Tooltip`，不使用原生 `title`；Markdown 链接的 title 属于内容，保持原样。
+
+运行中的执行过程由 `app/LiveProgress.tsx` 提供节奏：第一批步骤直接显示，之后每条至少隔 700ms，积压超过 4 条时跳过中间的。标题和最新一步走微光，30 秒没有新事件时微光停下并显示等了多久。Thread 用 `TraceDisclosure`，步骤数和实时输出都算新事件；项目助手用 `ProcessLine`，有工具在等结果时才算运行中。
 
 菜单默认按内容定宽，最小 96px、最大 304px，超长文字截断。单栏模型菜单最小 240px，过滤时宽度基本不跳动，长模型名与右侧 provider 前缀可撑到 340px；多 Agent 模型菜单采用左栏 Agent 列表加右栏搜索与模型的双栏布局，按内容定宽（最小 320px、最大 440px）。带两行说明的菜单固定 304px，文件夹和执行权限菜单属于这一类。侧栏账号菜单和账号按钮同宽，侧栏收起时最小 160px。Select 的触发器撑满容器，弹层最小和触发器同宽。弹窗按内容分为三档宽度：确认与短表单 420px，常规设置与文件夹浏览 600px（`wide`），左栏列表加右栏详情的主从弹窗 680px（`split`）；需要第三层交互时原位替换当前弹窗内容，不叠加多层弹窗。
+
+表单组件在 `ui/Field.tsx`。设置页用属性表：`FormSection` 是一块带分隔线的面板，宽度不超过 544px；`Field layout="row"` 是 40px 高的属性行，左边 128px 放标签，右边放值。行内控件没有边框，整行就是控件：悬停时整行加底色，获得焦点时整行描边，点标签也能把焦点放进控件。多行文本从一行开始随内容长高。说明和错误写在值的下方，错误带图标并把标签和焦点描边变成红色，提交失败时焦点移到第一个出错的字段。只读的值用灰色文字，悬停没有底色。有未保存修改的行在标签前标一个品牌色小点。开关用 `SwitchField`，靠行尾，整行可点；说明和操作按钮用 `FormRow`。弹窗保持纵向的 `Field` 和带边框的控件，同一字段内间距 6px。路径和 URL 用等宽字体（`Input mono`）。保存按钮放在 `SaveBar` 里，有修改时贴在滚动区底部出现，并写明当前状态。
 
 状态只有一份定义：`data/derive.ts` 的 `threadView` 给出状态符号 `mark`，颜色由 `threadStatusTones` 决定，页面不各自指定。
 
@@ -77,7 +116,7 @@ Baton 网页的视觉和组件以 `web/` 的代码为准，不维护单独的设
 
 列表行首用 `ui/ThreadStatusIcon.tsx` 的 16px 图标，每行都有符号；紧挨文字的位置用 `StatusDot`，旁边必须写状态文字。已停止用灰色，确实需要用户处理的失败由时间线提示用红色说明。系统开启减少动态效果时，像素环保持静止。
 
-未读和状态分开：蓝点放在行尾固定列，紧贴时间左侧，侧栏项目同样放在行尾；标题同时用 500 字重。分组列表共用纵向对齐线：状态图标和分组箭头同一中线，标题和分组名同一左边。分组标题已写明状态，所以每行不再写状态文字，只保留悬停提示和读屏文字。
+未读和状态分开：蓝点放在行尾固定列，紧贴时间左侧，侧栏项目同样放在行尾；标题同时用 500 字重。分组列表和上方筛选共用纵向对齐线：筛选图标、状态图标和分组箭头同一中线，筛选文字、标题和分组名同一左边，第一个筛选的左缘贴齐列表卡片，右侧计数和时间同一右边。筛选和列表卡片同样带底色和边框，未选条件时文字用灰色，选了具体条件才用前景色并加深底色。分组头高 32px、行高 40px，分组头底色比选中行浅，靠底色和行分开，不加分隔线。分组标题已写明状态，所以每行不再写状态文字，只保留悬停提示和读屏文字。
 
 Composer 分两层。`ui/composer-editor/` 是完整转写的结构化编辑器，包括草稿、提及和斜杠命令；`ui/Composer.tsx` 在它之上提供页面用的输入区，页面只管文字，Enter 发送，Shift+Enter 换行。提及和斜杠命令目前只在画廊中演示，页面没有接入：Baton 没有斜杠命令的数据来源，也还没有可提及文件的数据来源。
 
@@ -85,4 +124,4 @@ Chat UI 只取跳到最新（`ui/JumpToLatest.tsx`），Thread 和 Project 的�
 
 ## 组件画廊
 
-画廊展示全部组件的各个状态，并提供调节 base、accent、contrast、圆角和字体的面板。真实页面验收用这些压力场景：含代码和 diff 的长 Thread、侧栏、Project 概览、设置表单、菜单和对话框，每个场景都核对浅色、深色和高对比主题，以及中文和英文内容。这些场景已在 macOS 上验收，Windows 上还没有验收。
+画廊展示全部组件的各个状态，并提供调节 base、accent、contrast、圆角和字体的面板，动效可以放慢 4 倍检查。动效区有一段用真实组件演出的 Thread 过程、token 标本和可重放的模式。执行过程的模式和场景直接渲染页面用的 `TraceDisclosure` 与 `ProcessLine`，只换假数据。真实页面验收用这些压力场景：含代码和 diff 的长 Thread、侧栏、Project 概览、设置表单、菜单和对话框，每个场景都核对浅色、深色和高对比主题，以及中文和英文内容。这些场景已在 macOS 上验收，Windows 上还没有验收。

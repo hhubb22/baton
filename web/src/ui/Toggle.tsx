@@ -6,6 +6,7 @@ import { focusRing } from './Button'
 
 const styles = stylex.create({
   track: {
+    display: 'block',
     position: 'relative',
     flexShrink: 0,
     width: '30px',

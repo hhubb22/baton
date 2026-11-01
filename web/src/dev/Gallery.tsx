@@ -9,7 +9,6 @@ import { radius, space } from '../theme/tokens.stylex'
 import { AgentMark, PersonAvatar } from '../ui/Avatar'
 import { Count, Tag, UnreadDot } from '../ui/Badge'
 import { Banner } from '../ui/Banner'
-import { branch } from '../ui/Branch'
 import { Button, focusRing, IconButton } from '../ui/Button'
 import { Chip } from '../ui/Chip'
 import { CommandDialog } from '../ui/Command'
@@ -27,8 +26,8 @@ import {
   type ComposerItemValue,
 } from '../ui/composer-editor'
 import { Dialog } from '../ui/Dialog'
-import { Field, Input, TextArea } from '../ui/Field'
-import { Frame, FrameDescription, FrameFooter, FrameHeader, FramePanel, FrameTitle } from '../ui/Frame'
+import { Field, FormSection, Input, SaveBar, SwitchField, TextArea } from '../ui/Field'
+import { Frame, FramePanel } from '../ui/Frame'
 import { Icon } from '../ui/Icon'
 import { Kbd } from '../ui/Kbd'
 import { Menu, MenuHeading, MenuOption, MenuRule } from '../ui/Menu'
@@ -40,9 +39,13 @@ import { Toggle } from '../ui/Toggle'
 import { DeviceAgentsPanel } from '../app/DeviceAgentsDialog'
 import { ThreadModelMenu, type ThreadModelChoice } from '../app/ThreadModelMenu'
 import { agentNames, threadStatusTones } from '../data/derive'
-import type { AgentKind, DeviceAgent } from '../data/types'
+import { TraceDisclosure } from '../app/ReplyParts'
+import { RestrictedMarkdown } from '../app/RestrictedMarkdown'
+import { ProcessLine } from '../pages/ProjectPage'
+import type { AgentKind, DeviceAgent, ProcessStep, TraceStep } from '../data/types'
 import { ThreadStatusIcon, type ThreadStatus } from '../ui/ThreadStatusIcon'
 import { Tooltip } from '../ui/Tooltip'
+import { MotionGallery } from './MotionGallery'
 
 const styles = stylex.create({
   page: {
@@ -96,20 +99,12 @@ const styles = stylex.create({
   sliderHead: { display: 'flex', justifyContent: 'space-between', color: semantic.mutedForeground, fontSize: '12px' },
   range: { width: '100%' },
   prose: { maxWidth: '65ch' },
-  code: {
-    padding: space.md,
-    borderRadius: radius.md,
-    backgroundColor: semantic.code,
-    overflowX: 'auto',
-    whiteSpace: 'pre',
-  },
-  added: { color: semantic.successForeground },
-  removed: { color: semantic.destructiveForeground },
   muted: { color: semantic.mutedForeground },
   faint: { color: semantic.faintForeground },
   settingRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: space.lg },
   statusLegend: { display: 'inline-flex', alignItems: 'center', gap: space.xs },
   threadListSample: { maxWidth: '640px' },
+  settingsScene: { display: 'flex', flexDirection: 'column', gap: space.lg, maxWidth: '544px' },
   compactStatus: { display: 'inline-flex', alignItems: 'center', gap: '6px' },
   trayActionIcon: { width: '20px', height: '20px' },
 })
@@ -197,9 +192,15 @@ function ThreadStatusList() {
   return (
     <div {...stylex.props(threadList.stack, styles.threadListSample)}>
       <div {...stylex.props(threadList.filters)}>
-        <Chip icon="laptop">所有设备</Chip>
-        <Chip icon="projects">所有项目</Chip>
-        <Chip icon="archive">进行中</Chip>
+        <Chip icon="laptop" filter="active">
+          MacBook Pro
+        </Chip>
+        <Chip icon="projects" filter="idle">
+          所有项目
+        </Chip>
+        <Chip icon="archive" filter="idle">
+          进行中
+        </Chip>
         <span {...stylex.props(text.caption, threadList.count)}>{total} 条对话</span>
       </div>
       {threadSample.map(({ group, status, rows }) => {
@@ -215,12 +216,7 @@ function ThreadStatusList() {
                     current.includes(group) ? current.filter((item) => item !== group) : [...current, group],
                   )
                 }
-                {...stylex.props(
-                  text.captionMedium,
-                  threadList.groupHeader,
-                  !isCollapsed && threadList.groupHeaderExpanded,
-                  focusRing.ring,
-                )}
+                {...stylex.props(text.captionMedium, threadList.groupHeader, focusRing.ring)}
               >
                 <span {...stylex.props(threadList.groupIconSlot)}>
                   <Icon name={isCollapsed ? 'chevron-right' : 'chevron-down'} size={12} />
@@ -312,6 +308,7 @@ function TuningPanel() {
   const [inputs, setInputs] = useState<ThemeInputs>(defaultInputs)
   const [radiusScale, setRadiusScale] = useState<(typeof radiusScales)[number]['value']>('normal')
   const [font, setFont] = useState<(typeof fontChoices)[number]['value']>('geist')
+  const [slowMotion, setSlowMotion] = useState(false)
 
   useEffect(() => {
     applyThemeInputs(inputs)
@@ -338,11 +335,26 @@ function TuningPanel() {
     }
   }, [font])
 
+  useEffect(() => {
+    const root = document.documentElement.style
+    const base = { micro: 120, popover: 180, modal: 240, layout: 260, exit: 140, activity: 420, shimmer: 2800 }
+    for (const [name, value] of Object.entries(base)) {
+      if (slowMotion) root.setProperty(`--motion-${name}`, `${value * 4}ms`)
+      else root.removeProperty(`--motion-${name}`)
+    }
+    return () => {
+      for (const name of Object.keys(base)) root.removeProperty(`--motion-${name}`)
+    }
+  }, [slowMotion])
+
   const set = (key: keyof ThemeInputs) => (value: number) => setInputs((current) => ({ ...current, [key]: value }))
 
   return (
     <aside {...stylex.props(styles.panel)}>
       <h2 {...stylex.props(text.label13Medium)}>调节面板 Tuning</h2>
+      <Field label="动效放慢 4 倍">
+        {() => <Toggle checked={slowMotion} onChange={setSlowMotion} label="动效放慢 4 倍" />}
+      </Field>
       <Segmented<ThemeMode>
         label="主题"
         value={mode}
@@ -651,53 +663,76 @@ function SettingsScene() {
   const [notify, setNotify] = useState(true)
   const [agent, setAgent] = useState<string | null>('codex')
   return (
-    <Frame style={stylex.create({ width: { maxWidth: '640px' } }).width}>
-      <FrameHeader>
-        <FrameTitle>设备 Device</FrameTitle>
-        <FrameDescription>这台设备上可用的 Agent 和通知方式。</FrameDescription>
-      </FrameHeader>
-      <FramePanel>
-        <div {...stylex.props(styles.stack)}>
-          <Field label="名称 Name" helper="显示在 Thread 的位置选择里。">
-            {(props) => <Input {...props} defaultValue="MacBook Pro" />}
-          </Field>
-          <Field label="默认 Agent">
-            {(props) => (
-              <Select
-                {...props}
-                value={agent}
-                onChange={setAgent}
-                options={[
-                  { value: 'codex', label: 'Codex' },
-                  { value: 'cursor', label: 'Cursor' },
-                  { value: 'pi', label: 'Pi' },
-                  { value: 'kiro', label: 'Kiro' },
-                  { value: 'antigravity', label: 'Antigravity' },
-                  { value: 'droid', label: 'Droid' },
-                ]}
-              />
-            )}
-          </Field>
-          <Field label="工作目录" error="目录不存在：/srv/baton">
-            {(props) => <Input {...props} defaultValue="/srv/baton" />}
-          </Field>
-          <Field label="说明 Notes" optional>
-            {(props) => <TextArea {...props} placeholder="给同事看的说明" />}
-          </Field>
-          <div {...stylex.props(styles.settingRow)}>
-            <span {...stylex.props(text.small)}>运行结束时通知 Notify when finished</span>
-            <Toggle checked={notify} onChange={setNotify} label="运行结束时通知" />
-          </div>
-        </div>
-      </FramePanel>
-      <FrameFooter>
-        <Button variant="primary">保存 Save</Button>
-      </FrameFooter>
-    </Frame>
+    <div {...stylex.props(styles.settingsScene)}>
+      <FormSection title="设备 Device" description="这台设备上可用的 Agent 和通知方式。">
+        <Field label="名称 Name" layout="row" changed helper="显示在 Thread 的位置选择里。">
+          {(props) => <Input {...props} defaultValue="MacBook Pro" />}
+        </Field>
+        <Field label="默认 Agent" layout="row">
+          {(props) => (
+            <Select
+              {...props}
+              value={agent}
+              onChange={setAgent}
+              options={[
+                { value: 'codex', label: 'Codex' },
+                { value: 'cursor', label: 'Cursor' },
+                { value: 'pi', label: 'Pi' },
+                { value: 'kiro', label: 'Kiro' },
+                { value: 'antigravity', label: 'Antigravity' },
+                { value: 'droid', label: 'Droid' },
+              ]}
+            />
+          )}
+        </Field>
+        <Field label="服务地址" layout="row" error="无法连接：https://models.example.com/v1">
+          {(props) => <Input {...props} mono defaultValue="https://models.example.com/v1" />}
+        </Field>
+        <Field label="只读字段 Read only" layout="row">
+          {(props) => <Input {...props} readOnly value="node-7f3a" />}
+        </Field>
+        <Field label="说明 Notes" layout="row" optional>
+          {(props) => <TextArea {...props} placeholder="给同事看的说明" />}
+        </Field>
+        <SwitchField label="运行结束时通知" helper="Notify when finished" checked={notify} onChange={setNotify} />
+      </FormSection>
+      <SaveBar
+        open
+        status="更改尚未保存"
+        actions={
+          <>
+            <Button>放弃 Discard</Button>
+            <Button variant="primary">保存 Save</Button>
+          </>
+        }
+      />
+    </div>
   )
 }
 
+const sceneStep = (index: number, step: Pick<TraceStep, 'type' | 'data'> & Partial<TraceStep>): TraceStep => ({
+  item_id: `scene-${index}`,
+  status: 'completed',
+  ordinal: index,
+  truncated: false,
+  original_bytes: 0,
+  ...step,
+})
+
+const threadSceneSteps = [
+  sceneStep(1, {
+    type: 'command_execution',
+    data: { input: 'pnpm test apps/batond/src/worker', output: '42 passed', exitCode: 0 },
+  }),
+  sceneStep(2, {
+    type: 'dynamic_tool',
+    title: '读取 outbox 账本',
+    data: { input: '{"limit":20}', output: '3 条未确认' },
+  }),
+]
+
 function ThreadScene() {
+  const [traceOpen, setTraceOpen] = useState(true)
   return (
     <div {...stylex.props(styles.stack)}>
       <h1 {...stylex.props(text.displaySmall)}>Fix websocket reconnect 修复重连</h1>
@@ -705,20 +740,14 @@ function ThreadScene() {
         节点断线后 Worker 会把未确认的命令留在 outbox，重连成功再按序号补发。The worker keeps unacknowledged commands in
         the outbox and replays them in sequence after reconnecting, so a dropped socket never loses a turn.
       </p>
-      <div {...stylex.props(branch.title, text.small)}>
-        <Icon name="tool" size={14} />
-        修改 2 个文件
-      </div>
-      <div {...stylex.props(branch.line)}>
-        <span {...stylex.props(text.mono)}>apps/batond/src/worker/outbox.ts</span>
-        <span {...stylex.props(text.mono)}>apps/batond/src/worker/index.ts</span>
-      </div>
-      <pre {...stylex.props(text.mono, styles.code)}>
-        <span {...stylex.props(styles.removed)}>{'- await socket.send(command)\n'}</span>
-        <span {...stylex.props(styles.added)}>{'+ await outbox.enqueue(command)\n'}</span>
-        <span {...stylex.props(styles.added)}>{'+ await outbox.flush(socket)\n'}</span>
-        {'  return receipt'}
-      </pre>
+      <TraceDisclosure
+        steps={threadSceneSteps}
+        live={false}
+        open={traceOpen}
+        onOpenChange={setTraceOpen}
+        threadId="gallery-thread"
+        device={undefined}
+      />
       <Banner title="等待设备上线" detail="MacBook Pro 离线，恢复后继续。" />
       <Banner
         attention
@@ -730,7 +759,34 @@ function ThreadScene() {
   )
 }
 
+const projectSceneSteps: ProcessStep[] = [
+  { kind: 'note', body: '先看 Windows 设备的 ACL 记录。' },
+  {
+    kind: 'tool',
+    name: 'threads.read',
+    input: '{"thread":"Add Windows ACL"}',
+    output: '已读取 12 条回复',
+    status: 'completed',
+  },
+  { kind: 'tool', name: 'memory.search', input: '{"query":"Windows ACL"}', output: null, status: 'pending' },
+]
+
 function ProjectScene() {
+  return (
+    <div {...stylex.props(styles.stack)}>
+      <RestrictedMarkdown body="我去看一下 Windows 这边的进展。" />
+      <ProcessLine
+        steps={projectSceneSteps}
+        devices={[]}
+        executions={[]}
+        onOpen={() => undefined}
+        scope="gallery-project"
+      />
+    </div>
+  )
+}
+
+function FrameSpecimen() {
   return (
     <Frame style={stylex.create({ width: { maxWidth: '640px' } }).width}>
       <FramePanel>
@@ -812,6 +868,10 @@ export function Gallery() {
           <Overlays />
         </Section>
 
+        <Section title="动效 Motion">
+          <MotionGallery />
+        </Section>
+
         <Section title="导航 Tabs">
           <div {...stylex.props(styles.row)}>
             <Tabs
@@ -879,10 +939,14 @@ export function Gallery() {
           <ThreadStatusList />
         </Section>
 
+        <Section title="面板 Frame">
+          <FrameSpecimen />
+        </Section>
+
         <Section title="场景：长 Thread">
           <ThreadScene />
         </Section>
-        <Section title="场景：Project 概览">
+        <Section title="场景：项目助手回复">
           <ProjectScene />
         </Section>
         <Section title="场景：设置表单">

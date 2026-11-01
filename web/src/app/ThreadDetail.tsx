@@ -40,6 +40,9 @@ import { Composer, ComposerTrayEnd, ComposerTrayItem } from '../ui/Composer'
 import { Dialog, DialogClose } from '../ui/Dialog'
 import { Icon } from '../ui/Icon'
 import { JumpToLatest } from '../ui/JumpToLatest'
+import { useArrivals } from '../ui/motion'
+import { Tooltip } from '../ui/Tooltip'
+import { enter } from '../theme/motion'
 import { useChatScroll } from '../ui/useChatScroll'
 import { Menu, MenuOption } from '../ui/Menu'
 import { StatusDot, type Tone } from '../ui/Status'
@@ -248,6 +251,7 @@ const MessageItem = memo(function MessageItem({
   reply,
   command = false,
   latest = false,
+  arriving = false,
   outputGap = false,
   traceInMessage = true,
   onOpen,
@@ -261,6 +265,8 @@ const MessageItem = memo(function MessageItem({
   reply: number | null
   command?: boolean
   latest?: boolean
+  // 用户消息刚发出时上移进场。Agent 回复已由流式文字呈现，保存后替换不再播放。
+  arriving?: boolean
   outputGap?: boolean
   traceInMessage?: boolean
   onOpen: (reply: number | null, deviceId: ID, path: string) => void
@@ -350,7 +356,7 @@ const MessageItem = memo(function MessageItem({
       break
   }
   return (
-    <article id={`message-${message.id}`} {...stylex.props(styles.userItem)}>
+    <article id={`message-${message.id}`} {...stylex.props(styles.userItem, arriving && enter.rise)}>
       <div {...stylex.props(styles.userLine)}>
         {message.sender === 'projectAgent' && <AgentMark label="来自项目助手" />}
         <div {...stylex.props(text.body, styles.user, message.delivery === 'withdrawn' && styles.withdrawn)}>
@@ -499,6 +505,7 @@ export function ThreadDetail({
   } | null>(null)
   const [preview, setPreview] = useState<{ deviceId: ID; path: string; reply: number | null } | null>(null)
   const timelineRef = useRef<HTMLDivElement | null>(null)
+  const arrivals = useArrivals(threadId)
   const workspace = useWorkspace()
   const resumeOperation = useOperation(resumeId)
   const openMessageFile = useCallback((reply: number | null, deviceId: ID, path: string) => {
@@ -809,6 +816,9 @@ export function ThreadDetail({
       },
     ]
   })
+  const arrived = arrivals.sync(
+    [...timelineMessages].sort((a, b) => a.at - b.at || a.order - b.order).map(({ id }) => id),
+  )
   const openFile = (reply: number | null) => (deviceId: ID, path: string) => setPreview({ deviceId, path, reply })
   const deviceList = devices.data ?? []
 
@@ -1010,6 +1020,14 @@ export function ThreadDetail({
                             ? liveOutput.data.runningStepsTruncated
                             : false
                         }
+                        outputSize={
+                          active
+                            ? liveOutput.data?.chunks.reduce(
+                                (size, chunk) => size + (chunk.kind === 'text' ? chunk.text.length : 1),
+                                0,
+                              )
+                            : 0
+                        }
                       />
                     )
                   if (!message) return null
@@ -1025,6 +1043,7 @@ export function ThreadDetail({
                       reply={reply}
                       command={false}
                       latest={message.id === latestReplyId}
+                      arriving={arrived.has(id)}
                       outputGap={message === liveReply && output?.chunks.some((chunk) => chunk.kind === 'gap')}
                       traceInMessage={message.workerTurnSeq === undefined || !activityTurns.has(message.workerTurnSeq)}
                       onOpen={openMessageFile}
@@ -1046,7 +1065,7 @@ export function ThreadDetail({
               />
             </SelectionArea>
           </div>
-          {awayFromLatest && <JumpToLatest onClick={jumpToLatest} />}
+          <JumpToLatest visible={awayFromLatest} onClick={jumpToLatest} />
         </div>
         <div {...stylex.props(styles.dock, layout === 'panel' && styles.dockPanel)}>
           <div {...stylex.props(styles.dockContent)}>
@@ -1149,9 +1168,9 @@ export function ThreadDetail({
                   <>
                     <ComposerTrayItem icon="laptop">{device?.name ?? '设备已移除'}</ComposerTrayItem>
                     <ComposerTrayItem icon="folder">
-                      <span title={thread.folder} {...stylex.props(text.mono, text.truncate)}>
-                        {thread.folder}
-                      </span>
+                      <Tooltip label={thread.folder}>
+                        <span {...stylex.props(text.mono, text.truncate)}>{thread.folder}</span>
+                      </Tooltip>
                     </ComposerTrayItem>
                     <ComposerTrayEnd>
                       <LocalThreadActions key={thread.id} thread={thread} />
@@ -1176,9 +1195,9 @@ export function ThreadDetail({
               <div {...stylex.props(text.caption, styles.footer)}>
                 <ComposerTrayItem icon="laptop">{device?.name ?? '设备已移除'}</ComposerTrayItem>
                 <ComposerTrayItem icon="folder">
-                  <span title={thread.folder} {...stylex.props(text.mono, text.truncate)}>
-                    {thread.folder}
-                  </span>
+                  <Tooltip label={thread.folder}>
+                    <span {...stylex.props(text.mono, text.truncate)}>{thread.folder}</span>
+                  </Tooltip>
                 </ComposerTrayItem>
                 <ComposerTrayEnd>
                   <LocalThreadActions key={thread.id} thread={thread} />

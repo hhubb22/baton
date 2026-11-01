@@ -8,7 +8,7 @@
   color: inherit;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 150ms ease;
+  transition: opacity var(--motion-micro) var(--ease-out);
 }
 
 .thread-reply-actions button {
@@ -28,11 +28,5 @@
   [data-thread-reply][data-latest-reply] .thread-reply-actions {
     opacity: 1;
     pointer-events: auto;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .thread-reply-actions {
-    transition: none;
   }
 }

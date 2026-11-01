@@ -1,13 +1,14 @@
 import * as stylex from '@stylexjs/stylex'
 import { Link } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import { assistantModels } from '../data/derive'
 import { useClient, useDevices } from '../data/queries'
 import { text } from '../theme/text'
 import { semantic } from '../theme/semantic.stylex'
-import { radius, size, space } from '../theme/tokens.stylex'
-import { Button, focusRing } from '../ui/Button'
-import { Field, Input } from '../ui/Field'
+import { space } from '../theme/tokens.stylex'
+import { Button } from '../ui/Button'
+import { Field, FormRow, Input } from '../ui/Field'
+import { Select } from '../ui/Select'
 
 type Catalog = { provider: string; models: string[]; sourceNodeId?: string | null; label?: string }[]
 type Selection = { subscription: string; model: string; sourceNodeId?: string | null }
@@ -15,18 +16,8 @@ type Selection = { subscription: string; model: string; sourceNodeId?: string | 
 const styles = stylex.create({
   fields: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: space.md },
   section: { display: 'flex', flexDirection: 'column', gap: space.sm },
-  select: {
-    width: '100%',
-    height: size.control,
-    paddingInline: '10px',
-    backgroundColor: semantic.card,
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: { default: semantic.input, ':focus': semantic.ring },
-    borderRadius: radius.sm,
-    outline: 'none',
-    color: semantic.foreground,
-  },
+  fieldsRow: { display: 'flex', flexDirection: 'column' },
+  sectionRow: { gap: 0 },
   link: { color: semantic.brand },
   action: { alignSelf: 'flex-start' },
 })
@@ -96,6 +87,8 @@ export function ProjectModelFields({
   creating = false,
   readOnly = false,
   loading = false,
+  layout = 'stack',
+  changed,
 }: {
   catalog: Catalog
   value: Selection
@@ -104,7 +97,11 @@ export function ProjectModelFields({
   creating?: boolean
   readOnly?: boolean
   loading?: boolean
+  layout?: 'stack' | 'row'
+  changed?: { source: boolean; model: boolean }
 }) {
+  const inRow = layout === 'row'
+  const Note = inRow ? FormRow : Fragment
   const [manual, setManual] = useState(false)
   const listed = catalog.some(
     (item) =>
@@ -125,27 +122,33 @@ export function ProjectModelFields({
     )?.models ?? []
 
   return (
-    <div {...stylex.props(styles.section)}>
+    <div {...stylex.props(styles.section, inRow && styles.sectionRow)}>
       {!readOnly && catalog.length === 0 && (
-        <p {...stylex.props(text.caption, text.muted)}>
-          {loading ? '正在加载模型…' : '设备上没有可用模型。'}{' '}
-          <Link to="/devices" search={{ connect: true }} {...stylex.props(styles.link)}>
-            连接设备
-          </Link>
-        </p>
+        <Note>
+          <p {...stylex.props(text.caption, text.muted)}>
+            {loading ? '正在加载模型…' : '设备上没有可用模型。'}{' '}
+            <Link to="/devices" search={{ connect: true }} {...stylex.props(styles.link)}>
+              连接设备
+            </Link>
+          </p>
+        </Note>
       )}
       {missingConnection && (
-        <p {...stylex.props(text.caption, text.muted)}>此 API 连接在设备上不可用。请选择其他模型来源以继续。</p>
+        <Note>
+          <p {...stylex.props(text.caption, text.muted)}>此 API 连接在设备上不可用。请选择其他模型来源以继续。</p>
+        </Note>
       )}
       {(readOnly || custom || catalog.length > 0) && (
         <div
-          {...stylex.props(styles.fields)}
+          {...stylex.props(inRow ? styles.fieldsRow : styles.fields)}
           onBlur={(event) => {
             if (!event.currentTarget.contains(event.relatedTarget)) onCommit?.()
           }}
         >
           <Field
             label={providerLabel}
+            layout={layout}
+            changed={changed?.source}
             helper={custom && !readOnly ? '服务商 ID，例如 openai-codex 或 xai。' : undefined}
           >
             {(props) =>
@@ -167,13 +170,11 @@ export function ProjectModelFields({
                   }}
                 />
               ) : (
-                <select
+                <Select
                   {...props}
                   value={`${value.sourceNodeId ?? ''}|${value.subscription}`}
-                  onChange={(event) => {
-                    const item = catalog.find(
-                      (entry) => `${entry.sourceNodeId ?? ''}|${entry.provider}` === event.target.value,
-                    )!
+                  onChange={(next) => {
+                    const item = catalog.find((entry) => `${entry.sourceNodeId ?? ''}|${entry.provider}` === next)!
                     onChange({
                       subscription: item.provider,
                       sourceNodeId: item.sourceNodeId ?? null,
@@ -181,34 +182,28 @@ export function ProjectModelFields({
                     })
                     onCommit?.()
                   }}
-                  {...stylex.props(text.small, styles.select, focusRing.ring)}
-                >
-                  <optgroup label="订阅">
-                    {catalog
-                      .filter((item) => !item.sourceNodeId)
-                      .map((item) => (
-                        <option key={item.provider} value={`|${item.provider}`}>
-                          {item.provider}
-                        </option>
-                      ))}
-                  </optgroup>
-                  <optgroup label="API 连接">
-                    {catalog
-                      .filter((item) => item.sourceNodeId)
-                      .map((item) => (
-                        <option
-                          key={`${item.sourceNodeId}|${item.provider}`}
-                          value={`${item.sourceNodeId}|${item.provider}`}
-                        >
-                          {item.label}
-                        </option>
-                      ))}
-                  </optgroup>
-                </select>
+                  groups={[
+                    {
+                      label: '订阅',
+                      options: catalog
+                        .filter((item) => !item.sourceNodeId)
+                        .map((item) => ({ value: `|${item.provider}`, label: item.provider })),
+                    },
+                    {
+                      label: 'API 连接',
+                      options: catalog
+                        .filter((item) => item.sourceNodeId)
+                        .map((item) => ({
+                          value: `${item.sourceNodeId}|${item.provider}`,
+                          label: item.label ?? item.provider,
+                        })),
+                    },
+                  ]}
+                />
               )
             }
           </Field>
-          <Field label={modelLabel}>
+          <Field label={modelLabel} layout={layout} changed={changed?.model}>
             {(props) =>
               readOnly || custom ? (
                 <Input
@@ -222,27 +217,23 @@ export function ProjectModelFields({
                   }}
                 />
               ) : (
-                <select
+                <Select
                   {...props}
                   value={value.model}
-                  onChange={(event) => {
-                    onChange({ ...value, model: event.target.value })
+                  onChange={(next) => {
+                    onChange({ ...value, model: next })
                     onCommit?.()
                   }}
-                  {...stylex.props(text.small, styles.select, focusRing.ring)}
-                >
-                  {models.map((model) => (
-                    <option key={model}>{model}</option>
-                  ))}
-                </select>
+                  options={models.map((model) => ({ value: model, label: model }))}
+                />
               )
             }
           </Field>
         </div>
       )}
-      {!readOnly && (
-        <div {...stylex.props(styles.action)}>
-          {custom && catalog.length > 0 ? (
+      {!readOnly && (custom ? catalog.length > 0 : true) && (
+        <ActionRow inRow={inRow}>
+          {custom ? (
             <Button
               small
               onClick={() => {
@@ -257,13 +248,17 @@ export function ProjectModelFields({
             >
               从设备模型中选择
             </Button>
-          ) : !custom ? (
+          ) : (
             <Button small onClick={() => setManual(true)}>
               手动输入服务商和模型
             </Button>
-          ) : null}
-        </div>
+          )}
+        </ActionRow>
       )}
     </div>
   )
+}
+
+function ActionRow({ inRow, children }: { inRow: boolean; children: ReactNode }) {
+  return inRow ? <FormRow>{children}</FormRow> : <div {...stylex.props(styles.action)}>{children}</div>
 }

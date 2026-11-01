@@ -1,6 +1,7 @@
 import { createMemoryHistory } from '@tanstack/react-router'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { chooseOption } from '../test/select'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { createMockClient } from '../data/mock/client'
 import type { ScenarioId } from '../data/mock/scenarios'
@@ -395,9 +396,9 @@ describe('projects', () => {
     expect(within(dialog).getByText('请输入项目名称。')).toBeInTheDocument()
     expect(within(dialog).getByLabelText('名称')).toHaveFocus()
 
-    await user.selectOptions(within(dialog).getByLabelText('模型来源'), '|Claude')
-    expect(within(dialog).getByLabelText('模型')).toHaveValue('claude-opus-5-5')
-    await user.selectOptions(within(dialog).getByLabelText('模型来源'), '|ChatGPT')
+    await chooseOption(user, within(dialog).getByLabelText('模型来源'), 'Claude')
+    expect(within(dialog).getByLabelText('模型')).toHaveTextContent('claude-opus-5-5')
+    await chooseOption(user, within(dialog).getByLabelText('模型来源'), 'ChatGPT')
     await user.type(within(dialog).getByLabelText('名称'), 'Release{Enter}')
     await advance(scheduler, 500)
     expect(await screen.findByText('暂无对话')).toBeInTheDocument()
@@ -444,7 +445,7 @@ describe('projects', () => {
     const { scheduler } = renderApp('/projects/prj-compat', 'streamingProject')
     await screen.findByRole('heading', { name: /Compatibility/ })
     await advance(scheduler, 1800)
-    const process = await screen.findByRole('button', { name: '正在处理' })
+    const process = await screen.findByRole('button', { name: /^正在处理/ })
     await user.click(process)
     await advance(scheduler, 3200)
     await waitFor(() => expect(screen.getAllByRole('button', { name: '执行过程' })).toHaveLength(1))
@@ -681,7 +682,7 @@ describe('projects', () => {
         }
       }
     })
-    await user.click(await screen.findByRole('button', { name: '正在处理' }))
+    await user.click(await screen.findByRole('button', { name: /^正在处理/ }))
     const command = await screen.findByRole('button', { name: /nodes.exec.*等待结果/ })
     await user.click(command)
     expect(screen.getAllByText('等待结果')).toHaveLength(2)
@@ -732,7 +733,7 @@ describe('projects', () => {
         },
       ]
     })
-    await user.click(await screen.findByRole('button', { name: '正在处理' }))
+    await user.click(await screen.findByRole('button', { name: /^正在处理/ }))
     await user.click(screen.getByRole('button', { name: /nodes.exec.*等待结果/ }))
     await user.click(await screen.findByRole('button', { name: /查看执行详情/ }))
     await waitFor(() => expect(router.state.location.search).toMatchObject({ execution: 'shell-execution' }))
@@ -756,7 +757,7 @@ describe('projects', () => {
         },
       ]
     })
-    const group = await screen.findByRole('button', { name: '正在处理' })
+    const group = await screen.findByRole('button', { name: /^正在处理/ })
     expect(group).toHaveAttribute('aria-expanded', 'false')
     await user.click(group)
     expect(screen.getByRole('button', { name: /nodes.exec.*等待结果/ })).toBeInTheDocument()
@@ -960,7 +961,7 @@ describe('threads', () => {
     const { client } = renderApp('/threads/thr-compat', 'error')
     await user.click(await screen.findByRole('button', { name: '选择文件夹' }))
     const dialog = await screen.findByRole('dialog', { name: '选择文件夹' })
-    await user.selectOptions(within(dialog).getByLabelText('设备'), 'dev-mac')
+    await chooseOption(user, within(dialog).getByLabelText('设备'), 'MacBook Pro')
     await user.type(within(dialog).getByLabelText('文件夹路径'), '  /Users/kaken/new-project  ')
     expect(within(dialog).getByText('将此文件夹添加到 MacBook Pro。')).toBeInTheDocument()
     await user.click(within(dialog).getByRole('button', { name: '添加并选择' }))
@@ -975,10 +976,10 @@ describe('threads', () => {
     renderApp('/threads/thr-compat', 'error')
     await user.click(await screen.findByRole('button', { name: '选择文件夹' }))
     const dialog = await screen.findByRole('dialog', { name: '选择文件夹' })
-    expect(within(dialog).getByLabelText('设备')).toHaveValue('dev-windows')
+    expect(within(dialog).getByLabelText('设备')).toHaveTextContent('Windows Desktop')
     expect(await within(dialog).findByText('Windows Desktop 已离线')).toBeInTheDocument()
 
-    await user.selectOptions(within(dialog).getByLabelText('设备'), 'dev-mac')
+    await chooseOption(user, within(dialog).getByLabelText('设备'), 'MacBook Pro')
     await user.click(await within(dialog).findByRole('button', { name: '~/src' }))
     await user.click(await within(dialog).findByRole('button', { name: 'compat-suite' }))
     await user.click(within(dialog).getByRole('button', { name: '选择文件夹' }))
@@ -1153,12 +1154,12 @@ describe('devices', () => {
     expect((await within(dialog).findAllByText('设置码已使用')).length).toBeGreaterThan(0)
   })
 
-  it('removes device folders and keeps a folder when removal fails', async () => {
+  it('removes used folders from the selection dialog and keeps a folder when removal fails', async () => {
     const user = userEvent.setup()
-    const { client } = renderApp('/devices')
-    await user.click(await screen.findByRole('button', { name: /^Ubuntu Dev/ }))
-    await user.click(screen.getByRole('button', { name: '文件夹' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Ubuntu Dev 上的文件夹' })
+    const { client } = renderApp('/threads/thr-compat', 'error')
+    await user.click(await screen.findByRole('button', { name: '选择文件夹' }))
+    const dialog = await screen.findByRole('dialog', { name: '选择文件夹' })
+    await chooseOption(user, within(dialog).getByLabelText('设备'), 'Ubuntu Dev')
     const remove = await within(dialog).findByRole('button', { name: '移除 /home/kaken/work' })
 
     client.controls.setReachable(false)
@@ -1440,7 +1441,7 @@ describe('execution details', () => {
     const detail = await screen.findByRole('complementary', { name: 'Fix gateway reconnect race' })
     const attachments = await within(detail).findByRole('list', { name: '附件' })
     expect(within(attachments).getByText('9b1e4d7a2c5f…')).toHaveAttribute(
-      'title',
+      'aria-label',
       '9b1e4d7a2c5f8e0b3d6a9c2f5e8b1d4a7c0e3f62',
     )
 

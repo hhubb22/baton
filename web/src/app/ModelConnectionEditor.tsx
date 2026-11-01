@@ -5,9 +5,10 @@ import { desktopCapability, useDesktopStatus } from '../data/desktop'
 import type { Device, ModelConnection } from '../data/types'
 import { text } from '../theme/text'
 import { semantic } from '../theme/semantic.stylex'
-import { radius, size, space } from '../theme/tokens.stylex'
-import { Button, focusRing } from '../ui/Button'
+import { space } from '../theme/tokens.stylex'
+import { Button } from '../ui/Button'
 import { Field, Input, TextArea } from '../ui/Field'
+import { Select } from '../ui/Select'
 
 const styles = stylex.create({
   section: { display: 'flex', flexDirection: 'column', gap: space.md, width: '100%', maxWidth: '560px' },
@@ -15,18 +16,6 @@ const styles = stylex.create({
   back: { alignSelf: 'flex-start' },
   delete: { marginRight: 'auto' },
   error: { color: semantic.destructiveForeground },
-  select: {
-    width: '100%',
-    height: size.control,
-    paddingInline: '10px',
-    backgroundColor: semantic.card,
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: { default: semantic.input, ':focus': semantic.ring },
-    borderRadius: radius.sm,
-    outline: 'none',
-    color: semantic.foreground,
-  },
 })
 
 export function ModelConnectionEditor({
@@ -129,12 +118,15 @@ export function ModelConnectionEditor({
       </Field>
       <Field label="协议">
         {(props) => (
-          <select
+          <Select<ModelConnection['protocol']>
             {...props}
-            {...stylex.props(text.small, styles.select, focusRing.ring)}
             value={connection.protocol}
-            onChange={(event) => {
-              const protocol = event.target.value as ModelConnection['protocol']
+            options={[
+              { value: 'openai-responses', label: 'OpenAI Responses' },
+              { value: 'openai-completions', label: 'OpenAI Chat Completions' },
+              { value: 'anthropic-messages', label: 'Anthropic Messages' },
+            ]}
+            onChange={(protocol) => {
               const official = [
                 'https://api.anthropic.com',
                 'https://api.anthropic.com/v1',
@@ -150,11 +142,7 @@ export function ModelConnectionEditor({
                   : connection.base_url,
               })
             }}
-          >
-            <option value="openai-responses">OpenAI Responses</option>
-            <option value="openai-completions">OpenAI Chat Completions</option>
-            <option value="anthropic-messages">Anthropic Messages</option>
-          </select>
+          />
         )}
       </Field>
       <Field label="服务地址">

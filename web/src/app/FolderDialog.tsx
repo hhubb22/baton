@@ -2,32 +2,22 @@ import * as stylex from '@stylexjs/stylex'
 import { useState } from 'react'
 import type { Location } from '../data/derive'
 import { fileName as folderName, fileParent as parentFolder } from '../data/file-paths'
-import { useDevices, useFolders } from '../data/queries'
+import { useDevices, useFolders, useRemoveDeviceFolder } from '../data/queries'
 import type { Device, FolderListing, ID } from '../data/types'
 import { text } from '../theme/text'
 import { semantic } from '../theme/semantic.stylex'
-import { radius, size, space } from '../theme/tokens.stylex'
+import { radius, space } from '../theme/tokens.stylex'
 import { Banner } from '../ui/Banner'
 import { Button, focusRing } from '../ui/Button'
 import { Dialog, DialogClose } from '../ui/Dialog'
 import { Field } from '../ui/Field'
 import { Icon } from '../ui/Icon'
+import { Select } from '../ui/Select'
+import { Tooltip } from '../ui/Tooltip'
 import { DeviceFolderForm } from './DeviceFolderForm'
 import { useLocalDirectoryPicker } from './LocalDirectoryPicker'
 
 const styles = stylex.create({
-  select: {
-    width: '100%',
-    height: size.control,
-    paddingInline: '10px',
-    backgroundColor: semantic.card,
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: { default: semantic.input, ':focus': semantic.ring },
-    borderRadius: radius.sm,
-    outline: 'none',
-    color: semantic.foreground,
-  },
   box: {
     display: 'flex',
     flexDirection: 'column',
@@ -41,6 +31,17 @@ const styles = stylex.create({
   },
   heading: { paddingBlock: '6px', paddingInline: space.sm, color: semantic.faintForeground },
   path: { paddingBlock: '6px', paddingInline: space.sm, color: semantic.mutedForeground },
+  root: { display: 'flex', alignItems: 'center', gap: space.xs },
+  folderChoice: { flexGrow: 1, minWidth: 0, width: 'auto' },
+  remove: {
+    flexShrink: 0,
+    paddingBlock: space.xs,
+    paddingInline: space.sm,
+    borderWidth: 0,
+    borderRadius: radius.sm,
+    backgroundColor: { default: 'transparent', ':hover': semantic.muted },
+    color: semantic.destructiveForeground,
+  },
   row: {
     display: 'flex',
     alignItems: 'center',
@@ -59,6 +60,7 @@ const styles = stylex.create({
   name: { flexGrow: 1 },
   status: { padding: space.sm, color: semantic.faintForeground },
   hint: { color: semantic.faintForeground },
+  error: { color: semantic.destructiveForeground },
 })
 
 function unavailableText(listing: Extract<FolderListing, { state: 'unavailable' }>, device: Device | undefined) {
@@ -92,6 +94,7 @@ export function FolderDialog({
   const local = useLocalDirectoryPicker({ nodeId: selectedDevice, onSelect, onError: setLocalError })
   const folders = useFolders(selectedDevice, path)
   const allowed = useFolders(selectedDevice, null)
+  const remove = useRemoveDeviceFolder()
   const device = devices.data?.find((item) => item.id === selectedDevice)
   const listing = folders.data
   const parent = path === null ? null : parentFolder(path)
@@ -119,22 +122,20 @@ export function FolderDialog({
     >
       <Field label="设备">
         {(props) => (
-          <select
+          <Select
             {...props}
             value={selectedDevice}
-            onChange={(event) => {
-              setSelectedDevice(event.target.value)
+            onChange={(next) => {
+              setSelectedDevice(next)
               setPath(null)
               setLocalError(null)
+              remove.reset()
             }}
-            {...stylex.props(text.small, styles.select)}
-          >
-            {devices.data?.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.connection === 'online' ? item.name : `${item.name} (${item.connection})`}
-              </option>
-            ))}
-          </select>
+            options={(devices.data ?? []).map((item) => ({
+              value: item.id,
+              label: item.connection === 'online' ? item.name : `${item.name} (${item.connection})`,
+            }))}
+          />
         )}
       </Field>
       {local.available && (
@@ -146,19 +147,19 @@ export function FolderDialog({
       <div>
         <div role="group" aria-label="文件夹" {...stylex.props(styles.box)}>
           {path === null ? (
-            <span {...stylex.props(text.captionMedium, styles.heading)}>文件夹</span>
+            <span {...stylex.props(text.captionMedium, styles.heading)}>用过的位置</span>
           ) : (
             <>
-              <span title={path} {...stylex.props(text.mono, styles.path, text.truncate)}>
-                {path}
-              </span>
+              <Tooltip label={path} align="start">
+                <span {...stylex.props(text.mono, styles.path, text.truncate)}>{path}</span>
+              </Tooltip>
               <button
                 type="button"
                 onClick={() => setPath(atRoot ? null : parent)}
                 {...stylex.props(text.small, styles.row, styles.back, focusRing.ring)}
               >
                 <Icon name="chevron-left" size={14} />
-                {atRoot || parent === null ? '返回文件夹列表' : `返回 ${folderName(parent)}`}
+                {atRoot || parent === null ? '返回用过的位置' : `返回 ${folderName(parent)}`}
               </button>
             </>
           )}
@@ -196,24 +197,43 @@ export function FolderDialog({
           )}
           {listing?.state === 'ready' && !listing.scanLimited && listing.folders.length === 0 && (
             <span {...stylex.props(text.caption, styles.status)}>
-              {path === null ? `${device?.name ?? '此设备'} 暂无文件夹。请在下方输入路径添加。` : '没有子文件夹'}
+              {path === null ? `${device?.name ?? '此设备'} 还没有用过的位置。请在下方输入路径添加。` : '没有子文件夹'}
             </span>
           )}
           {listing?.state === 'ready' &&
             listing.folders.map((folder) => (
-              <button
-                key={folder}
-                type="button"
-                onClick={() => setPath(folder)}
-                {...stylex.props(text.small, styles.row, focusRing.ring)}
-              >
-                <Icon name="folder" size={15} style={styles.glyph} />
-                <span {...stylex.props(path === null ? text.mono : null, styles.name, text.truncate)}>
-                  {path === null ? folder : folderName(folder)}
-                </span>
-                <Icon name="chevron-right" size={14} style={styles.glyph} />
-              </button>
+              <div key={folder} {...stylex.props(styles.root)}>
+                <button
+                  type="button"
+                  onClick={() => setPath(folder)}
+                  {...stylex.props(text.small, styles.row, styles.folderChoice, focusRing.ring)}
+                >
+                  <Icon name="folder" size={15} style={styles.glyph} />
+                  <span {...stylex.props(path === null ? text.mono : null, styles.name, text.truncate)}>
+                    {path === null ? folder : folderName(folder)}
+                  </span>
+                  <Icon name="chevron-right" size={14} style={styles.glyph} />
+                </button>
+                {path === null && (
+                  <button
+                    type="button"
+                    aria-label={`移除 ${folder}`}
+                    aria-disabled={remove.isPending || undefined}
+                    onClick={() => {
+                      if (!remove.isPending) remove.mutate({ deviceId: selectedDevice, path: folder })
+                    }}
+                    {...stylex.props(text.small, styles.remove, focusRing.ring)}
+                  >
+                    移除
+                  </button>
+                )}
+              </div>
             ))}
+          {remove.isError && (
+            <p role="alert" {...stylex.props(text.caption, styles.status, styles.error)}>
+              无法移除文件夹，请重试。
+            </p>
+          )}
         </div>
       </div>
       <DeviceFolderForm

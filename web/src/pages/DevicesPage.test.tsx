@@ -6,6 +6,7 @@ import { App } from '../app/App'
 import { createAppRouter } from '../app/router'
 import { createMockClient } from '../data/mock/client'
 import { createDesktopBridge, registeredDesktop } from '../test/desktop'
+import { chooseOption } from '../test/select'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -103,7 +104,7 @@ it('adds, edits and deletes a device API connection without sending a key to the
   await user.type(screen.getByLabelText('名称'), 'Custom')
   await user.clear(screen.getByLabelText('服务地址'))
   await user.type(screen.getByLabelText('服务地址'), 'http://localhost:9999/v1')
-  await user.selectOptions(screen.getByLabelText('协议'), 'anthropic-messages')
+  await chooseOption(user, screen.getByLabelText('协议'), 'Anthropic Messages')
   expect(screen.getByLabelText('服务地址')).toHaveValue('http://localhost:9999/v1')
   expect(screen.getByText(/localhost:9999\/v1\/messages\?beta=true/)).toBeInTheDocument()
   await user.type(screen.getByLabelText('模型 ID'), 'model-id')
@@ -120,10 +121,7 @@ it('adds, edits and deletes a device API connection without sending a key to the
   await user.click(screen.getByRole('button', { name: '完成' }))
   await user.click(screen.getByRole('button', { name: '新建项目' }))
   await user.type(screen.getByLabelText('名称'), 'API project')
-  await user.selectOptions(
-    screen.getByLabelText('模型来源'),
-    screen.getByRole('option', { name: 'Custom · Ubuntu Dev' }),
-  )
+  await chooseOption(user, screen.getByLabelText('模型来源'), 'Custom · Ubuntu Dev')
   expect(screen.getByText(/此连接需要设备在线并配置 API 密钥/)).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: '创建项目' }))
   await waitFor(async () =>

@@ -12,6 +12,17 @@
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
+  --motion-micro: 120ms;
+  --motion-popover: 180ms;
+  --motion-modal: 240ms;
+  --motion-layout: 260ms;
+  --motion-exit: 140ms;
+  --motion-hover-delay: 100ms;
+  --motion-activity: 420ms;
+  --motion-shimmer: 2800ms;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 *,
@@ -75,17 +86,26 @@ svg {
 
 [data-live-activity] {
   opacity: 1;
-  transition: opacity 150ms cubic-bezier(0.23, 1, 0.32, 1);
+  transition: opacity var(--motion-micro) var(--ease-out);
   @starting-style {
     opacity: 0;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-micro: 1ms;
+    --motion-popover: 1ms;
+    --motion-modal: 1ms;
+    --motion-layout: 1ms;
+    --motion-exit: 1ms;
+    --motion-activity: 1ms;
+  }
   *,
   *::before,
   *::after {
     transition-duration: 1ms !important;
+    transition-delay: 0s !important;
   }
   .streamdown-animated .stream-char {
     animation: none !important;

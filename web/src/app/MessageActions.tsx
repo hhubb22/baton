@@ -5,6 +5,8 @@ import { semantic } from '../theme/semantic.stylex'
 import { radius, space } from '../theme/tokens.stylex'
 import { focusRing } from '../ui/Button'
 import { Icon } from '../ui/Icon'
+import { Swap } from '../ui/motion'
+import { Tooltip } from '../ui/Tooltip'
 import { copyText } from './SelectionMenu'
 import './message-actions.css'
 
@@ -33,20 +35,23 @@ export function MessageActions({ body, thread = false }: { body: string; thread?
   }, [status])
   return thread ? (
     <div className="thread-reply-actions">
-      <button
-        type="button"
-        title={status === 'copied' ? '已复制回复' : '复制回复'}
-        aria-label={status === 'copied' ? '已复制回复' : '复制回复'}
-        onClick={() =>
-          void copyText(body).then(
-            () => setStatus('copied'),
-            () => setStatus('error'),
-          )
-        }
-        {...stylex.props(text.caption, styles.button, focusRing.ring)}
-      >
-        <Icon name={status === 'copied' ? 'check' : 'copy'} size={14} />
-      </button>
+      <Tooltip label={status === 'copied' ? '已复制回复' : '复制回复'}>
+        <button
+          type="button"
+          aria-label={status === 'copied' ? '已复制回复' : '复制回复'}
+          onClick={() =>
+            void copyText(body).then(
+              () => setStatus('copied'),
+              () => setStatus('error'),
+            )
+          }
+          {...stylex.props(text.caption, styles.button, focusRing.ring)}
+        >
+          <Swap value={status === 'copied' ? 'check' : 'copy'}>
+            <Icon name={status === 'copied' ? 'check' : 'copy'} size={14} />
+          </Swap>
+        </button>
+      </Tooltip>
       {status && (
         <span role="status" {...stylex.props(text.caption)}>
           {status === 'copied' ? '已复制' : '复制失败'}
@@ -54,20 +59,23 @@ export function MessageActions({ body, thread = false }: { body: string; thread?
       )}
     </div>
   ) : (
-    <button
-      type="button"
-      title={status === 'copied' ? '已复制回复' : '复制回复'}
-      aria-label={status === 'copied' ? '已复制回复' : '复制回复'}
-      onClick={() =>
-        void copyText(body).then(
-          () => setStatus('copied'),
-          () => setStatus('error'),
-        )
-      }
-      {...stylex.props(text.caption, styles.button, styles.projectButton, focusRing.ring)}
-    >
-      <Icon name={status === 'copied' ? 'check' : 'copy'} size={16} />
-      {status === 'error' && <span role="status">复制失败</span>}
-    </button>
+    <Tooltip label={status === 'copied' ? '已复制回复' : '复制回复'}>
+      <button
+        type="button"
+        aria-label={status === 'copied' ? '已复制回复' : '复制回复'}
+        onClick={() =>
+          void copyText(body).then(
+            () => setStatus('copied'),
+            () => setStatus('error'),
+          )
+        }
+        {...stylex.props(text.caption, styles.button, styles.projectButton, focusRing.ring)}
+      >
+        <Swap value={status === 'copied' ? 'check' : 'copy'}>
+          <Icon name={status === 'copied' ? 'check' : 'copy'} size={16} />
+        </Swap>
+        {status === 'error' && <span role="status">复制失败</span>}
+      </button>
+    </Tooltip>
   )
 }

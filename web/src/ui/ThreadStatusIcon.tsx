@@ -1,6 +1,7 @@
 import * as stylex from '@stylexjs/stylex'
 import { semantic } from '../theme/semantic.stylex'
 import { Icon } from './Icon'
+import { Swap } from './motion'
 
 export type ThreadStatus = 'running' | 'attention' | 'stopped' | 'waiting' | 'idle' | 'archived'
 
@@ -38,8 +39,16 @@ const pixels = [
   [1, 6],
 ] as const
 
-// 同一系列的 16px 状态图标：圆的画法表示状态，只有运行中和需要处理带颜色。
+// 同一系列的 16px 状态图标：圆的画法表示状态，只有运行中和需要处理带颜色。状态变化时新图标弹入。
 export function ThreadStatusIcon({ status, label }: { status: ThreadStatus; label?: string }) {
+  return (
+    <Swap value={status}>
+      <StatusGlyph status={status} label={label} />
+    </Swap>
+  )
+}
+
+function StatusGlyph({ status, label }: { status: ThreadStatus; label?: string }) {
   if (status === 'archived') {
     return (
       <span role={label ? 'img' : undefined} aria-label={label} {...stylex.props(styles.archived)}>

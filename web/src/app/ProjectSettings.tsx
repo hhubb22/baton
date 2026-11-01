@@ -11,9 +11,8 @@ import { space } from '../theme/tokens.stylex'
 import { Banner } from '../ui/Banner'
 import { Button, focusRing } from '../ui/Button'
 import { Dialog } from '../ui/Dialog'
-import { Field, Input, TextArea } from '../ui/Field'
+import { Field, FormRow, FormSection, Input, SaveBar, SwitchField, TextArea } from '../ui/Field'
 import { StatusDot } from '../ui/Status'
-import { Toggle } from '../ui/Toggle'
 import { useDraft } from './drafts'
 import { Page } from './Page'
 import { useWorkspace } from './workspace'
@@ -25,27 +24,13 @@ const styles = stylex.create({
     flexDirection: 'column',
     gap: space.xl,
     width: '100%',
-    maxWidth: '720px',
+    maxWidth: '640px',
     marginInline: 'auto',
     paddingBlock: '40px',
     paddingInline: '48px',
   },
   title: { display: 'flex', alignItems: 'baseline', gap: space.xs, minWidth: 0 },
-  section: { display: 'flex', flexDirection: 'column', gap: space.md },
-  row: { display: 'flex', alignItems: 'center', gap: space.md },
-  saveRow: { display: 'flex', alignItems: 'center', gap: space.md, minHeight: '32px' },
-  feedback: { display: 'flex', alignItems: 'center', columnGap: space.md, flexGrow: 1, minWidth: 0 },
   description: { display: 'flex', flexDirection: 'column', flexGrow: 1, gap: '4px' },
-  controls: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: space.lg,
-    paddingTop: '20px',
-    borderWidth: 0,
-    borderTopWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: semantic.border,
-  },
   link: {
     padding: 0,
     borderWidth: 0,
@@ -91,6 +76,12 @@ export function ProjectSettings({
   const patch = archived ? {} : (draft ?? {})
   const values = { ...project, ...patch }
   const embedding = values.memoryEmbedding
+  const contentRef = useRef<HTMLDivElement>(null)
+
+  // 校验失败时把焦点放到第一个出错的字段。
+  useEffect(() => {
+    if (error) contentRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
+  }, [error])
   const dirty = Object.keys(patch).length > 0
 
   // 有未保存的修改时，刷新或关闭标签页前由浏览器确认。
@@ -226,63 +217,71 @@ export function ProjectSettings({
         </Button>
       }
     >
-      <div {...stylex.props(styles.content)}>
+      <div ref={contentRef} {...stylex.props(styles.content)}>
         <h2 {...stylex.props(text.title)}>项目设置</h2>
         {archived && <ArchivedNotice project={project} threads={projectThreads} devices={devices.data ?? []} />}
-        <Field label="名称" error={error === nameError ? nameError : undefined}>
-          {(props) => (
-            <Input
-              {...props}
-              value={values.name}
-              readOnly={archived}
-              onChange={(event) => change({ name: event.target.value })}
-            />
-          )}
-        </Field>
-        <ProjectEmojiPicker
-          value={values.emoji ?? '📁'}
-          readOnly={archived}
-          error={error === '请选择或输入一个表情。' ? error : undefined}
-          onChange={(emoji) => change({ emoji })}
-        />
-        <Field label="目标" optional>
-          {(props) => (
-            <TextArea
-              {...props}
-              value={values.goal}
-              readOnly={archived}
-              onChange={(event) => change({ goal: event.target.value })}
-            />
-          )}
-        </Field>
-        <div {...stylex.props(styles.section)}>
+        <FormSection title="基本信息">
+          <Field
+            label="名称"
+            layout="row"
+            changed={'name' in patch}
+            error={error === nameError ? nameError : undefined}
+          >
+            {(props) => (
+              <Input
+                {...props}
+                value={values.name}
+                readOnly={archived}
+                onChange={(event) => change({ name: event.target.value })}
+              />
+            )}
+          </Field>
+          <ProjectEmojiPicker
+            layout="row"
+            changed={'emoji' in patch}
+            value={values.emoji ?? '📁'}
+            readOnly={archived}
+            error={error === '请选择或输入一个表情。' ? error : undefined}
+            onChange={(emoji) => change({ emoji })}
+          />
+          <Field label="目标" layout="row" optional changed={'goal' in patch}>
+            {(props) => (
+              <TextArea
+                {...props}
+                value={values.goal}
+                readOnly={archived}
+                onChange={(event) => change({ goal: event.target.value })}
+              />
+            )}
+          </Field>
+        </FormSection>
+        <FormSection title="项目助手" description="更改将在下次运行时生效。">
           <ProjectModelFields
+            layout="row"
+            changed={{ source: 'subscription' in patch || 'sourceNodeId' in patch, model: 'model' in patch }}
             catalog={catalog}
             value={{ subscription: values.subscription, model: values.model, sourceNodeId: values.sourceNodeId }}
             onChange={change}
             readOnly={archived}
             loading={devices.isPending}
           />
-          <p {...stylex.props(text.caption, text.faint)}>更改将在下次运行时生效。</p>
-        </div>
-        <div {...stylex.props(styles.section)}>
-          <div {...stylex.props(styles.row)}>
-            <h3 {...stylex.props(text.label, styles.description)}>记忆嵌入</h3>
-            {archived ? (
+        </FormSection>
+        <FormSection title="记忆">
+          {archived ? (
+            <FormRow>
+              <h3 {...stylex.props(text.label, styles.description)}>记忆嵌入</h3>
               <span {...stylex.props(text.caption, text.muted)}>{embedding ? '已开启' : '已关闭'}</span>
-            ) : (
-              <Toggle
-                label="记忆嵌入"
-                checked={embedding !== null}
-                onChange={(enabled) => change({ memoryEmbedding: enabled ? { base_url: '', model: '' } : null })}
-              />
-            )}
-          </div>
+            </FormRow>
+          ) : (
+            <SwitchField
+              label="记忆嵌入"
+              helper={embedding ? '设备会向此兼容 OpenAI 的端点发送请求。请在各设备上配置 API 密钥。' : undefined}
+              checked={embedding !== null}
+              onChange={(enabled) => change({ memoryEmbedding: enabled ? { base_url: '', model: '' } : null })}
+            />
+          )}
           {embedding && (
             <>
-              <p {...stylex.props(text.caption, text.muted)}>
-                设备会向此兼容 OpenAI 的端点发送请求。请在各设备上配置 API 密钥。
-              </p>
               {(
                 [
                   ['base_url', '嵌入模型基础 URL'],
@@ -290,10 +289,17 @@ export function ProjectSettings({
                   ['credential_profile', '设备凭据名称'],
                 ] as const
               ).map(([key, label]) => (
-                <Field key={key} label={label} optional={key === 'credential_profile'}>
+                <Field
+                  key={key}
+                  label={label}
+                  layout="row"
+                  optional={key === 'credential_profile'}
+                  changed={(project.memoryEmbedding?.[key] ?? '') !== (embedding[key] ?? '')}
+                >
                   {(props) => (
                     <Input
                       {...props}
+                      mono={key === 'base_url'}
                       value={embedding[key] ?? ''}
                       readOnly={archived}
                       onChange={(event) => {
@@ -309,24 +315,18 @@ export function ProjectSettings({
                   )}
                 </Field>
               ))}
-              <p {...stylex.props(text.caption, text.muted)}>
-                使用 <code>batond project-runtime embedding-key &lt;name&gt;</code> 设置对应密钥。无密钥的服务可留空。
-              </p>
+              <FormRow>
+                <p {...stylex.props(text.caption, text.muted)}>
+                  使用 <code>batond project-runtime embedding-key &lt;name&gt;</code> 设置对应密钥。无密钥的服务可留空。
+                </p>
+              </FormRow>
             </>
           )}
-        </div>
+        </FormSection>
         {!archived && (
           <>
-            <div {...stylex.props(styles.saveRow)}>
-              <span role="status" {...stylex.props(text.small, text.muted, styles.feedback)}>
-                {feedback}
-              </span>
-              <Button variant="primary" onClick={() => void save()}>
-                保存更改
-              </Button>
-            </div>
-            <div {...stylex.props(styles.controls)}>
-              <div {...stylex.props(styles.row)}>
+            <FormSection title="项目状态">
+              <FormRow>
                 <div {...stylex.props(styles.description)}>
                   <h3 {...stylex.props(text.label)}>{project.status === 'paused' ? '恢复项目' : '暂停项目'}</h3>
                   <p {...stylex.props(text.caption, text.faint)}>新消息将在恢复后处理。</p>
@@ -334,8 +334,8 @@ export function ProjectSettings({
                 <Button small onClick={() => void changeStatus(project.status === 'paused' ? 'active' : 'paused')}>
                   {status.isPending && !archiving ? '正在保存…' : project.status === 'paused' ? '恢复' : '暂停'}
                 </Button>
-              </div>
-              <div {...stylex.props(styles.row)}>
+              </FormRow>
+              <FormRow>
                 <div {...stylex.props(styles.description)}>
                   <h3 {...stylex.props(text.label)}>归档项目</h3>
                   <p {...stylex.props(text.caption, text.faint)}>停止助手和运行中的对话，保留聊天、记忆和对话记录。</p>
@@ -351,13 +351,26 @@ export function ProjectSettings({
                 >
                   归档
                 </Button>
-              </div>
+              </FormRow>
               {actionError && !confirm && (
-                <p role="alert" {...stylex.props(text.caption, styles.error)}>
-                  {actionError}
-                </p>
+                <FormRow>
+                  <p role="alert" {...stylex.props(text.caption, styles.error)}>
+                    {actionError}
+                  </p>
+                </FormRow>
               )}
-            </div>
+            </FormSection>
+            <SaveBar
+              open={feedback !== null}
+              status={feedback}
+              actions={
+                (dirty || saving || error) && (
+                  <Button variant="primary" onClick={() => void save()}>
+                    保存更改
+                  </Button>
+                )
+              }
+            />
           </>
         )}
       </div>

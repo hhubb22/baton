@@ -19,6 +19,7 @@ import { Button, focusRing } from '../ui/Button'
 import { Dialog } from '../ui/Dialog'
 import { Field, TextArea } from '../ui/Field'
 import { Icon } from '../ui/Icon'
+import { Tooltip } from '../ui/Tooltip'
 import { useWorkspace, type MemoryDraft } from './workspace'
 
 const styles = stylex.create({
@@ -251,16 +252,17 @@ export function ProjectMemory({ project }: { project: Project }) {
   const retired = memory.data?.filter((note) => note.status === 'retired') ?? []
   const renderNote = (note: MemoryNote) => (
     <article key={note.id} aria-label="记忆" {...stylex.props(styles.row)}>
-      <button
-        data-memory-id={note.id}
-        type="button"
-        title={note.body}
-        onClick={() => setEditing(note)}
-        {...stylex.props(text.small, styles.edit, focusRing.ring)}
-      >
-        <Icon name="memory" size={16} style={text.muted} />
-        <span {...stylex.props(text.truncate)}>{note.body}</span>
-      </button>
+      <Tooltip label={note.body} align="start">
+        <button
+          data-memory-id={note.id}
+          type="button"
+          onClick={() => setEditing(note)}
+          {...stylex.props(text.small, styles.edit, focusRing.ring)}
+        >
+          <Icon name="memory" size={16} style={text.muted} />
+          <span {...stylex.props(text.truncate)}>{note.body}</span>
+        </button>
+      </Tooltip>
     </article>
   )
   return (

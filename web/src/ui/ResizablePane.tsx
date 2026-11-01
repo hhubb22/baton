@@ -1,13 +1,12 @@
 import * as stylex from '@stylexjs/stylex'
 import { useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
 import { semantic } from '../theme/semantic.stylex'
-import { radius, size } from '../theme/tokens.stylex'
+import { motion, radius, size } from '../theme/tokens.stylex'
 
 const styles = stylex.create({
   pane: { position: 'relative', flexShrink: 0, height: '100%', minWidth: 0 },
   animatedWidth: {
-    transition: 'width 260ms cubic-bezier(0.16, 1, 0.3, 1)',
-    '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+    transition: `width ${motion.layout} ${motion.easeDrawer}`,
   },
   draggingWidth: { transition: 'none' },
   floating: {
@@ -24,20 +23,13 @@ const styles = stylex.create({
     transform: 'translateY(0) scale(1)',
     transformOrigin: 'top right',
     visibility: 'visible',
-    transition:
-      'opacity 180ms cubic-bezier(0.23, 1, 0.32, 1), transform 180ms cubic-bezier(0.23, 1, 0.32, 1), visibility 0s',
-    '@media (prefers-reduced-motion: reduce)': { transition: 'opacity 120ms ease', transform: 'none' },
+    transition: `opacity ${motion.popover} ${motion.easeOut}, transform ${motion.popover} ${motion.easeOut}, visibility 0s`,
   },
   floatingClosed: {
     opacity: 0,
     transform: 'translateY(-6px) scale(0.98)',
     visibility: 'hidden',
-    transition:
-      'opacity 180ms cubic-bezier(0.23, 1, 0.32, 1), transform 180ms cubic-bezier(0.23, 1, 0.32, 1), visibility 0s 180ms',
-    '@media (prefers-reduced-motion: reduce)': {
-      transition: 'opacity 120ms ease, visibility 0s 120ms',
-      transform: 'none',
-    },
+    transition: `opacity ${motion.exit} ${motion.easeOut}, transform ${motion.exit} ${motion.easeOut}, visibility 0s ${motion.exit}`,
   },
   paneStack: { '@media (max-width: 700px)': { width: '100% !important', height: 'auto' } },
   handle: {
@@ -67,8 +59,8 @@ const styles = stylex.create({
     backgroundColor: semantic.input,
     maskImage: 'linear-gradient(to bottom, transparent, black 10%, black 90%, transparent)',
     opacity: 0,
-    transition: 'opacity 250ms ease 100ms',
-    '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+    // 延迟避免鼠标路过边界时闪出拖动线。
+    transition: `opacity ${motion.modal} ${motion.easeOut} ${motion.hoverDelay}`,
   },
   highlight: {
     position: 'absolute',

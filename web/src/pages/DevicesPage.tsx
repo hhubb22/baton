@@ -21,10 +21,8 @@ import {
   useDevices,
   useClient,
   useDownloads,
-  useDeviceFolders,
   useProjects,
   useRemoveDevice,
-  useRemoveDeviceFolder,
   useSession,
   useSetCommandAccess,
   useSetDefaultDevice,
@@ -38,6 +36,7 @@ import { Button, focusRing } from '../ui/Button'
 import { Dialog } from '../ui/Dialog'
 import { Icon } from '../ui/Icon'
 import { StatusDot } from '../ui/Status'
+import { Tooltip } from '../ui/Tooltip'
 
 const styles = stylex.create({
   column: {
@@ -127,25 +126,6 @@ const styles = stylex.create({
   summaryLabel: { color: semantic.mutedForeground },
   actions: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: space.sm },
   disconnect: { marginInlineStart: 'auto' },
-  folders: { display: 'flex', flexDirection: 'column' },
-  folder: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space.md,
-    paddingBlock: space.md,
-    borderBottomWidth: '1px',
-    borderBottomStyle: 'solid',
-    borderBottomColor: { default: semantic.border, ':last-child': 'transparent' },
-  },
-  folderPath: { flexGrow: 1, overflowWrap: 'anywhere', minWidth: 0 },
-  textButton: {
-    paddingBlock: space.xs,
-    paddingInline: space.sm,
-    borderWidth: 0,
-    borderRadius: radius.sm,
-    backgroundColor: { default: 'transparent', ':hover': semantic.muted },
-    color: semantic.destructiveForeground,
-  },
   empty: {
     display: 'flex',
     flexDirection: 'column',
@@ -216,12 +196,9 @@ function DeviceRow({
           <span {...stylex.props(text.label, text.truncate)}>{device.name}</span>
           {isDefault && <span {...stylex.props(text.caption, text.faint)}>默认</span>}
         </span>
-        <span
-          title={`${device.system} · Baton ${device.batondVersion}`}
-          {...stylex.props(text.caption, text.muted, text.truncate)}
-        >
-          {systemName(device.system)}
-        </span>
+        <Tooltip label={`${device.system} · Baton ${device.batondVersion}`} align="start">
+          <span {...stylex.props(text.caption, text.muted, text.truncate)}>{systemName(device.system)}</span>
+        </Tooltip>
       </span>
       <span {...stylex.props(styles.status, text.caption, status.tone === 'agent' ? styles.agentStatus : text.muted)}>
         <StatusDot tone={status.tone} />
@@ -242,7 +219,6 @@ function DeviceDetails({
   onAgents,
   onAssistant,
   onDefault,
-  onFolders,
   onReconnect,
   onDisconnect,
 }: {
@@ -252,7 +228,6 @@ function DeviceDetails({
   onAgents: () => void
   onAssistant: () => void
   onDefault: () => void
-  onFolders: () => void
   onReconnect: () => void
   onDisconnect: () => void
 }) {
@@ -304,11 +279,6 @@ function DeviceDetails({
               项目助手
             </Button>
           </>
-        )}
-        {device.connection !== 'offline' && (
-          <Button small onClick={onFolders}>
-            文件夹
-          </Button>
         )}
         {device.updateProtocol === 1 && device.updateAvailability?.status !== 'current' && (
           <Button
@@ -390,7 +360,6 @@ export function DevicesPage() {
   const [disconnect, setDisconnect] = useState<Disconnect | null>(null)
   const [permission, setPermission] = useState<PermissionState | null>(null)
   const [offlineDefault, setOfflineDefault] = useState<Device | null>(null)
-  const [folders, setFolders] = useState<Device | null>(null)
   const [agentsDeviceId, setAgentsDeviceId] = useState<ID | null>(null)
   const [assistantDeviceId, setAssistantDeviceId] = useState<ID | null>(null)
   const headingRef = useRef<HTMLHeadingElement>(null)
@@ -517,7 +486,6 @@ export function DevicesPage() {
                   onAgents={() => setAgentsDeviceId(device.id)}
                   onAssistant={() => setAssistantDeviceId(device.id)}
                   onDefault={() => chooseDefault(device)}
-                  onFolders={() => setFolders(device)}
                   onReconnect={() => setEnrolling(device)}
                   onDisconnect={() => startDisconnect(device)}
                 />
@@ -586,8 +554,6 @@ export function DevicesPage() {
         />
       )}
 
-      {folders && <FoldersDialog device={folders} onClose={() => setFolders(null)} />}
-
       {(() => {
         const agentsDevice = agentsDeviceId ? list.find((item) => item.id === agentsDeviceId) : null
         return agentsDevice ? (
@@ -637,70 +603,6 @@ export function DevicesPage() {
         finalFocus={() => (removed.current ? headingRef.current : true)}
       />
     </Page>
-  )
-}
-
-// 设备上已添加的文件夹。新文件夹在新建 Thread 的文件夹选择里添加；移除后新对话和文件预览不再能用它，已在运行的对话不受影响。
-function FoldersDialog({ device, onClose }: { device: Device; onClose: () => void }) {
-  const folders = useDeviceFolders(device.id, device.connection === 'online')
-  const remove = useRemoveDeviceFolder()
-  let body: ReactNode
-  if (device.connection !== 'online') {
-    body = <p {...stylex.props(text.small, text.muted)}>{device.name} 上线后可查看文件夹。</p>
-  } else if (folders.isPending) {
-    body = <p {...stylex.props(text.small, text.muted)}>正在加载文件夹…</p>
-  } else if (folders.isError) {
-    body = (
-      <div {...stylex.props(styles.group)}>
-        <p role="alert" {...stylex.props(text.small, styles.attention)}>
-          无法加载文件夹。
-        </p>
-        <Button small onClick={() => void folders.refetch()}>
-          重试
-        </Button>
-      </div>
-    )
-  } else if (folders.data.length === 0) {
-    body = <p {...stylex.props(text.small, text.muted)}>暂无文件夹，可在开始对话时添加。</p>
-  } else {
-    body = (
-      <div {...stylex.props(styles.folders)}>
-        {folders.data.map((folder) => (
-          <div key={folder} {...stylex.props(styles.folder)}>
-            <span {...stylex.props(text.mono, styles.folderPath)}>{folder}</span>
-            <button
-              type="button"
-              aria-label={`移除 ${folder}`}
-              aria-disabled={remove.isPending || undefined}
-              onClick={() => {
-                if (!remove.isPending)
-                  remove.mutate({ deviceId: device.id, path: folder }, { onSuccess: () => void folders.refetch() })
-              }}
-              {...stylex.props(text.small, styles.textButton, focusRing.ring)}
-            >
-              移除
-            </button>
-          </div>
-        ))}
-        {remove.isError && (
-          <p role="alert" {...stylex.props(text.caption, styles.attention)}>
-            无法移除文件夹，请重试。
-          </p>
-        )}
-      </div>
-    )
-  }
-  return (
-    <Dialog
-      open
-      onOpenChange={(open) => {
-        if (!open) onClose()
-      }}
-      title={`${device.name} 上的文件夹`}
-      actions={<Button onClick={onClose}>完成</Button>}
-    >
-      {body}
-    </Dialog>
   )
 }
 

@@ -9,7 +9,10 @@ import { motion, space } from '../theme/tokens.stylex'
 import { focusRing } from '../ui/Button'
 import { Disclosure, DisclosureChevron, DisclosurePanel, DisclosureTrigger } from '../ui/Disclosure'
 import { Icon, type IconName } from '../ui/Icon'
+import { enter } from '../theme/motion'
+import { Tooltip } from '../ui/Tooltip'
 import { FullOutput } from './FullOutput'
+import { QuietNote, Shimmer } from './LiveProgress'
 
 const ChangeDiff = lazy(() => import('./ChangeDiff').then((module) => ({ default: module.ChangeDiff })))
 
@@ -290,14 +293,28 @@ function headStatus(step: TraceStep, data: Record<string, unknown>): { label: st
   return { label: statusLabel(step.status), failed: step.status === 'failed' }
 }
 
+// 折叠的执行过程标题后面显示的当前步骤。
+export function activityStepLabel(step: TraceStep) {
+  return (presentation(step).label.split('\n')[0] ?? '').slice(0, 80)
+}
+
+const settledStatuses = new Set(['completed', 'succeeded', 'failed', 'cancelled', 'stopped'])
+
 export function ActivityStep({
   step,
   threadId,
   device,
+  current = false,
+  quietSeconds = null,
+  arriving = false,
 }: {
   step: TraceStep
   threadId: string
   device: Device | undefined
+  // 这一轮还在运行时列表里最新的一步。
+  current?: boolean
+  quietSeconds?: number | null
+  arriving?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const view = presentation(step)
@@ -310,18 +327,23 @@ export function ActivityStep({
   const head = (
     <>
       <Icon name={view.icon} size={12} />
-      <span
-        {...stylex.props(
-          styles.label,
-          step.type === 'command_execution' && text.mono,
-          fields && !open && text.truncate,
-        )}
-      >
-        {view.label}
-      </span>
+      <Tooltip label={times || null} align="start">
+        <span
+          {...stylex.props(
+            styles.label,
+            step.type === 'command_execution' && text.mono,
+            fields && !open && text.truncate,
+          )}
+        >
+          <Shimmer active={current && quietSeconds === null && !settledStatuses.has(step.status ?? '')}>
+            {view.label}
+          </Shimmer>
+        </span>
+      </Tooltip>
       {status && (
         <span {...stylex.props(text.caption, styles.status, status.failed && text.danger)}>{status.label}</span>
       )}
+      {current && <QuietNote seconds={quietSeconds} />}
     </>
   )
   const detail = (
@@ -329,10 +351,12 @@ export function ActivityStep({
       {view.body}
       {step.truncated && (
         <>
-          <span title={`${step.original_bytes} 字节`} {...stylex.props(text.caption, styles.muted)}>
-            原始大小 {fileSize(step.original_bytes)}，内容已截断
-            {step.full_output && device?.connection !== 'online' && ` · 完整输出保存在 ${device?.name ?? '原设备'}`}
-          </span>
+          <Tooltip label={`${step.original_bytes} 字节`} align="start">
+            <span {...stylex.props(text.caption, styles.muted)}>
+              原始大小 {fileSize(step.original_bytes)}，内容已截断
+              {step.full_output && device?.connection !== 'online' && ` · 完整输出保存在 ${device?.name ?? '原设备'}`}
+            </span>
+          </Tooltip>
           {step.full_output ? (
             <FullOutput threadId={threadId} reference={step.full_output} />
           ) : (
@@ -344,10 +368,8 @@ export function ActivityStep({
   )
   if (!fields)
     return (
-      <div {...stylex.props(styles.root)}>
-        <div title={times || undefined} {...stylex.props(text.small, styles.head)}>
-          {head}
-        </div>
+      <div {...stylex.props(styles.root, arriving && enter.settle)}>
+        <div {...stylex.props(text.body, styles.head)}>{head}</div>
         {detail}
       </div>
     )
@@ -356,18 +378,13 @@ export function ActivityStep({
     !fields.some((field) => data[field] !== undefined && data[field] !== null && data[field] !== '')
   )
     return (
-      <div {...stylex.props(styles.root)}>
-        <div title={times || undefined} {...stylex.props(text.small, styles.toolHead)}>
-          {head}
-        </div>
+      <div {...stylex.props(styles.root, arriving && enter.settle)}>
+        <div {...stylex.props(text.body, styles.toolHead)}>{head}</div>
       </div>
     )
   return (
-    <Disclosure open={open} onOpenChange={setOpen} {...stylex.props(styles.tool)}>
-      <DisclosureTrigger
-        title={times || undefined}
-        {...stylex.props(text.small, styles.toolHead, styles.toolToggle, focusRing.ring)}
-      >
+    <Disclosure open={open} onOpenChange={setOpen} {...stylex.props(styles.tool, arriving && enter.settle)}>
+      <DisclosureTrigger {...stylex.props(text.body, styles.toolHead, styles.toolToggle, focusRing.ring)}>
         {head}
         <DisclosureChevron open={open} />
       </DisclosureTrigger>

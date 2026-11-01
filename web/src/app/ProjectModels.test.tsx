@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import type { BatonClient } from '../data/client'
 import { createMockClient } from '../data/mock/client'
 import { createWorld } from '../data/mock/scenarios'
+import { chooseOption } from '../test/select'
 import type { Device, Project } from '../data/types'
 import { App } from './App'
 import { createAppRouter } from './router'
@@ -66,17 +67,19 @@ describe('device project model catalogs', () => {
     const { createProject, router } = setup('/threads', reportedModels)
     const dialog = await newProject(user)
     const model = within(dialog).getByLabelText('模型')
-    expect(model).toHaveValue('gpt-5.4')
-    expect(
-      within(model)
-        .getAllByRole('option')
-        .map((item) => item.textContent),
-    ).toEqual(['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex'])
+    expect(model).toHaveTextContent('gpt-5.4')
+    await user.click(model)
+    expect((await screen.findAllByRole('option')).map((item) => item.textContent)).toEqual([
+      'gpt-5.4',
+      'gpt-5.4-mini',
+      'gpt-5.3-codex',
+    ])
+    await user.keyboard('{Escape}')
     expect(within(dialog).queryByText('gpt-6.1-sol')).not.toBeInTheDocument()
     expect(within(dialog).queryByText('Claude subscription')).not.toBeInTheDocument()
-    await user.selectOptions(within(dialog).getByLabelText('模型来源'), '|xAI')
-    expect(model).toHaveValue('grok-4')
-    await user.selectOptions(model, 'grok-4-fast')
+    await chooseOption(user, within(dialog).getByLabelText('模型来源'), 'xAI')
+    expect(within(dialog).getByLabelText('模型')).toHaveTextContent('grok-4')
+    await chooseOption(user, within(dialog).getByLabelText('模型'), 'grok-4-fast')
     await user.type(within(dialog).getByLabelText('名称'), 'Runtime catalog')
     await user.click(within(dialog).getByRole('button', { name: '创建项目' }))
     await waitFor(() =>
@@ -142,7 +145,7 @@ describe('device project model catalogs', () => {
       devices[0].subscriptions = [{ provider: 'xAI', signedIn: false, models: ['grok-4'] }]
     })
     const dialog = await newProject(user)
-    expect(within(dialog).getByLabelText('模型')).toHaveValue('grok-4')
+    expect(within(dialog).getByLabelText('模型')).toHaveTextContent('grok-4')
     expect(within(dialog).getByText(/在线设备均未登录 xAI/)).toBeInTheDocument()
   })
 
@@ -162,8 +165,8 @@ describe('device project model catalogs', () => {
     expect(screen.getByLabelText('项目助手模型')).toHaveValue('gpt-6.1-sol')
     expect(screen.getByLabelText('项目助手模型').tagName).toBe('INPUT')
     await user.click(screen.getByRole('button', { name: '从设备模型中选择' }))
-    await user.selectOptions(screen.getByLabelText('模型来源'), '|xAI')
-    await user.selectOptions(screen.getByLabelText('项目助手模型'), 'grok-4-fast')
+    await chooseOption(user, screen.getByLabelText('模型来源'), 'xAI')
+    await chooseOption(user, screen.getByLabelText('项目助手模型'), 'grok-4-fast')
     expect(updateProject).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: '保存更改' }))
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('已保存'))

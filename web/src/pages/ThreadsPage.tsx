@@ -47,7 +47,9 @@ import { Chip } from '../ui/Chip'
 import { Composer } from '../ui/Composer'
 import { Icon } from '../ui/Icon'
 import { UnreadDot } from '../ui/Badge'
+import { Appear } from '../ui/motion'
 import { threadList } from '../ui/ThreadList'
+import { Tooltip } from '../ui/Tooltip'
 import { ThreadStatusIcon } from '../ui/ThreadStatusIcon'
 import { Menu, MenuHeading, MenuOption, MenuRule } from '../ui/Menu'
 
@@ -216,9 +218,9 @@ function LocationMenus({
           <MenuOption
             key={folder}
             detail={
-              <span title={folder} {...stylex.props(styles.locationPath)}>
-                {folder}
-              </span>
+              <Tooltip label={folder} side="right">
+                <span {...stylex.props(styles.locationPath)}>{folder}</span>
+              </Tooltip>
             }
             selected={device !== undefined && sameLocation(location, { deviceId: device.id, folder })}
             onSelect={() => {
@@ -282,27 +284,37 @@ function ThreadListRow({
       aria-label={`${thread.title}, ${group.status.label}, ${project?.name ?? '无项目'}${thread.unread ? '，未读' : ''}${timer ? `，运行时间 ${timer}` : ''}，最近活动 ${relativeTime(thread.updatedAt, now)}`}
       {...stylex.props(text.small, threadList.row, selected && threadList.rowSelected, focusRing.ring)}
     >
-      <span title={group.status.label} {...stylex.props(threadList.rowIconSlot)}>
-        <ThreadStatusIcon status={group.mark} />
-      </span>
+      <Tooltip label={group.status.label}>
+        <span {...stylex.props(threadList.rowIconSlot)}>
+          <ThreadStatusIcon status={group.mark} />
+        </span>
+      </Tooltip>
       <span {...stylex.props(threadList.title)}>
         <span {...stylex.props(threadList.titleText, text.truncate, thread.unread && threadList.titleUnread)}>
           {thread.title}
         </span>
         {timer && (
-          <span title={`运行时间：${timer}`} {...stylex.props(text.caption, styles.timer)}>
-            <Icon name="clock" size={12} />
-            {timer}
-          </span>
+          <Tooltip label={`运行时间：${timer}`}>
+            <span {...stylex.props(text.caption, styles.timer)}>
+              <Icon name="clock" size={12} />
+              {timer}
+            </span>
+          </Tooltip>
         )}
       </span>
-      <span title={project?.name} {...stylex.props(threadList.projectSlot)}>
-        {project && <Avatar name={project.name} hue={project.hue} emoji={project.emoji} />}
+      <Tooltip label={project?.name}>
+        <span {...stylex.props(threadList.projectSlot)}>
+          {project && <Avatar name={project.name} hue={project.hue} emoji={project.emoji} />}
+        </span>
+      </Tooltip>
+      <span {...stylex.props(threadList.unreadSlot)}>
+        <Appear when={thread.unread}>
+          <UnreadDot />
+        </Appear>
       </span>
-      <span {...stylex.props(threadList.unreadSlot)}>{thread.unread && <UnreadDot />}</span>
-      <span title="最近活动" {...stylex.props(text.caption, threadList.time)}>
-        {relativeTime(thread.updatedAt, now)}
-      </span>
+      <Tooltip label="最近活动">
+        <span {...stylex.props(text.caption, threadList.time)}>{relativeTime(thread.updatedAt, now)}</span>
+      </Tooltip>
     </Link>
   )
 }
@@ -500,12 +512,7 @@ export function ThreadsPage() {
                   current.includes(group.id) ? current.filter((id) => id !== group.id) : [...current, group.id],
                 )
               }
-              {...stylex.props(
-                text.captionMedium,
-                threadList.groupHeader,
-                !isCollapsed && threadList.groupHeaderExpanded,
-                focusRing.ring,
-              )}
+              {...stylex.props(text.captionMedium, threadList.groupHeader, focusRing.ring)}
             >
               <span {...stylex.props(threadList.groupIconSlot)}>
                 <Icon name={isCollapsed ? 'chevron-right' : 'chevron-down'} size={12} />
@@ -636,7 +643,13 @@ export function ThreadsPage() {
           )}
           <div {...stylex.props(threadList.stack, styles.listColumn)}>
             <div {...stylex.props(threadList.filters)}>
-              <Menu trigger={<Chip icon="laptop">{filterDevice?.name ?? '所有设备'}</Chip>}>
+              <Menu
+                trigger={
+                  <Chip icon="laptop" filter={search.device ? 'active' : 'idle'}>
+                    {filterDevice?.name ?? '所有设备'}
+                  </Chip>
+                }
+              >
                 <MenuOption selected={!search.device} onSelect={() => setSearch({ device: undefined })}>
                   所有设备
                 </MenuOption>
@@ -655,7 +668,7 @@ export function ThreadsPage() {
               ) : (
                 <Menu
                   trigger={
-                    <Chip icon="projects">
+                    <Chip icon="projects" filter={search.project ? 'active' : 'idle'}>
                       {search.project === 'none' ? '未关联项目' : (filterProject?.name ?? '所有项目')}
                     </Chip>
                   }
@@ -677,7 +690,13 @@ export function ThreadsPage() {
                   ))}
                 </Menu>
               )}
-              <Menu trigger={<Chip icon="archive">{archived ? '已归档' : '进行中'}</Chip>}>
+              <Menu
+                trigger={
+                  <Chip icon="archive" filter={archived ? 'active' : 'idle'}>
+                    {archived ? '已归档' : '进行中'}
+                  </Chip>
+                }
+              >
                 <MenuOption selected={!archived} onSelect={() => setSearch({ archived: undefined })}>
                   进行中
                 </MenuOption>

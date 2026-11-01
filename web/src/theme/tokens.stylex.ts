@@ -61,11 +61,19 @@ export const shadow = stylex.defineConsts({
   focusDanger: '0 0 0 3px color-mix(in oklab, var(--color-destructive) 20%, transparent)',
 })
 
+// 取值在 global.css 的 :root，系统减少动态效果时全部归零，画廊可整体放慢。
+// micro 用于控件反馈，popover 用于弹层和折叠，modal 用于弹窗，layout 用于面板宽度，exit 用于退场。
+// easeOut 用于进出场，easeInOut 用于屏幕内移动，easeDrawer 用于面板展开和收起。
 export const motion = stylex.defineConsts({
-  micro: '120ms',
-  popover: '180ms',
-  modal: '240ms',
-  exit: '140ms',
-  easeOut: 'cubic-bezier(0.23, 1, 0.32, 1)',
-  easeInOut: 'cubic-bezier(0.77, 0, 0.175, 1)',
+  micro: 'var(--motion-micro)',
+  popover: 'var(--motion-popover)',
+  modal: 'var(--motion-modal)',
+  layout: 'var(--motion-layout)',
+  exit: 'var(--motion-exit)',
+  hoverDelay: 'var(--motion-hover-delay)',
+  activity: 'var(--motion-activity)',
+  shimmer: 'var(--motion-shimmer)',
+  easeOut: 'var(--ease-out)',
+  easeInOut: 'var(--ease-in-out)',
+  easeDrawer: 'var(--ease-drawer)',
 })

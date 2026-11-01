@@ -8,15 +8,18 @@ import { weight } from '../theme/base.stylex'
 import { useTheme, type ThemeMode } from '../theme/ThemeProvider'
 import { text } from '../theme/text'
 import { semantic } from '../theme/semantic.stylex'
-import { radius, size, space } from '../theme/tokens.stylex'
+import { motion, radius, size, space } from '../theme/tokens.stylex'
+import { Appear } from '../ui/motion'
 import { Avatar, PersonAvatar } from '../ui/Avatar'
 import { Count, UnreadDot } from '../ui/Badge'
 import { focusRing, IconButton } from '../ui/Button'
 import { Icon, type IconName } from '../ui/Icon'
 import { Menu, MenuHeading, MenuOption, MenuRule } from '../ui/Menu'
+import { Tooltip } from '../ui/Tooltip'
 import { useWorkspace } from './workspace'
 
 const styles = stylex.create({
+  accountAvatar: { display: 'inline-flex', flexShrink: 0 },
   sidebar: {
     display: 'flex',
     flexDirection: 'column',
@@ -36,14 +39,18 @@ const styles = stylex.create({
     height: size.header,
     paddingInline: space.sm,
   },
+  headerCollapsed: { paddingInline: space.xs },
   brand: { flexGrow: 1, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', color: semantic.foreground },
   nav: { display: 'flex', flexDirection: 'column', flexShrink: 0, gap: space.xxs, marginTop: space.xs },
+  // 导航和账号的图标中心线距离侧栏左缘 26px，正好是 52px 收起宽度的中点，文字从 42px 开始。
+  // 收起和展开时这些图标都不横向移动。
   row: {
     display: 'flex',
     alignItems: 'center',
-    gap: space.sm,
+    gap: '7px',
     height: size.control,
-    paddingInline: space.sm,
+    paddingInlineStart: '9px',
+    paddingInlineEnd: space.sm,
     borderRadius: radius.md,
     color: semantic.mutedForeground,
     fontWeight: weight.medium,
@@ -53,7 +60,7 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
     backgroundColor: { default: 'transparent', ':hover': semantic.muted },
   },
-  projectRow: { height: size.row, gap: '6px' },
+  projectRow: { height: size.row, gap: '6px', paddingInlineStart: space.sm },
   active: {
     backgroundColor: { default: semantic.muted, ':hover': semantic.muted },
     color: semantic.foreground,
@@ -63,8 +70,7 @@ const styles = stylex.create({
   rowLabel: { flexGrow: 1, minWidth: 0 },
   label: {
     opacity: 1,
-    transition: 'opacity 160ms ease',
-    '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+    transition: `opacity ${motion.popover} ${motion.easeOut}`,
   },
   labelHidden: { opacity: 0, pointerEvents: 'none' },
   sectionHead: {
@@ -88,8 +94,7 @@ const styles = stylex.create({
     backgroundColor: { default: 'transparent', ':hover': semantic.muted },
     color: semantic.faintForeground,
     opacity: { default: 0, ':focus-visible': 1, '@media (hover: none)': 1 },
-    transition: 'opacity 150ms ease',
-    '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+    transition: `opacity ${motion.micro} ${motion.easeOut}`,
   },
   addProjectVisible: { opacity: 1 },
   projectArea: {
@@ -101,15 +106,13 @@ const styles = stylex.create({
     opacity: 1,
     visibility: 'visible',
     transform: 'translateX(0)',
-    transition: 'opacity 160ms ease, transform 240ms cubic-bezier(0.16, 1, 0.3, 1), visibility 0s',
-    '@media (prefers-reduced-motion: reduce)': { transition: 'none', transform: 'none' },
+    transition: `opacity ${motion.popover} ${motion.easeOut}, transform ${motion.modal} ${motion.easeDrawer}, visibility 0s`,
   },
   projectAreaHidden: {
     opacity: 0,
     visibility: 'hidden',
     transform: 'translateX(-6px)',
-    transition: 'opacity 100ms ease, transform 180ms ease, visibility 0s 100ms',
-    '@media (prefers-reduced-motion: reduce)': { transition: 'none', transform: 'none' },
+    transition: `opacity ${motion.exit} ${motion.easeOut}, transform ${motion.exit} ${motion.easeOut}, visibility 0s ${motion.exit}`,
   },
   footer: { flexShrink: 0, marginTop: space.sm },
   projects: {
@@ -127,11 +130,12 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'flex-start',
-    gap: space.sm,
+    gap: space.xs,
     width: '100%',
     minWidth: 0,
     height: '36px',
-    paddingInline: space.sm,
+    paddingInlineStart: '6px',
+    paddingInlineEnd: space.sm,
     borderWidth: 0,
     borderRadius: radius.md,
     backgroundColor: { default: 'transparent', ':hover': semantic.muted },
@@ -166,47 +170,53 @@ function NavRow({
   const { pathname } = useLocation()
   const active = pathname === to || pathname.startsWith(`${to}/`)
   return (
-    <Link
-      to={to}
-      aria-current={active ? 'page' : undefined}
-      aria-label={collapsed ? label : undefined}
-      title={collapsed ? label : undefined}
-      {...stylex.props(text.small, styles.row, active && styles.active, focusRing.ring)}
-    >
-      <Icon name={icon} size={18} style={styles.rowIcon} />
-      <span
-        aria-hidden={collapsed || undefined}
-        {...stylex.props(styles.rowLabel, styles.label, collapsed && styles.labelHidden)}
+    <Tooltip label={collapsed ? label : null} side="right">
+      <Link
+        to={to}
+        aria-current={active ? 'page' : undefined}
+        aria-label={collapsed ? label : undefined}
+        {...stylex.props(text.small, styles.row, active && styles.active, focusRing.ring)}
       >
-        {label}
-      </span>
-      {!collapsed && trailing}
-    </Link>
+        <Icon name={icon} size={18} style={styles.rowIcon} />
+        <span
+          aria-hidden={collapsed || undefined}
+          {...stylex.props(styles.rowLabel, styles.label, collapsed && styles.labelHidden)}
+        >
+          {label}
+        </span>
+        {!collapsed && trailing}
+      </Link>
+    </Tooltip>
   )
 }
 
 function ProjectTrailing({ project }: { project: Project }) {
-  return project.latestReplySeq > project.readReplySeq ? <UnreadDot /> : null
+  return (
+    <Appear when={project.latestReplySeq > project.readReplySeq}>
+      <UnreadDot />
+    </Appear>
+  )
 }
 
 function ProjectRow({ project }: { project: Project }) {
   const { pathname } = useLocation()
   const active = pathname === `/projects/${project.id}`
   return (
-    <Link
-      to="/projects/$projectId"
-      params={{ projectId: project.id }}
-      aria-current={active ? 'page' : undefined}
-      aria-label={project.status === 'paused' ? `${project.name}，已暂停` : undefined}
-      title={project.status === 'paused' ? '已暂停' : undefined}
-      {...stylex.props(text.small, styles.row, styles.projectRow, active && styles.active, focusRing.ring)}
-    >
-      <Avatar name={project.name} hue={project.hue} emoji={project.emoji} small />
-      <span {...stylex.props(styles.rowLabel, text.truncate, project.status === 'paused' && styles.pausedName)}>
-        {project.name}
-      </span>
-      <ProjectTrailing project={project} />
-    </Link>
+    <Tooltip label={project.status === 'paused' ? '已暂停' : null} side="right">
+      <Link
+        to="/projects/$projectId"
+        params={{ projectId: project.id }}
+        aria-current={active ? 'page' : undefined}
+        aria-label={project.status === 'paused' ? `${project.name}，已暂停` : undefined}
+        {...stylex.props(text.small, styles.row, styles.projectRow, active && styles.active, focusRing.ring)}
+      >
+        <Avatar name={project.name} hue={project.hue} emoji={project.emoji} small />
+        <span {...stylex.props(styles.rowLabel, text.truncate, project.status === 'paused' && styles.pausedName)}>
+          {project.name}
+        </span>
+        <ProjectTrailing project={project} />
+      </Link>
+    </Tooltip>
   )
 }
 
@@ -226,7 +236,7 @@ export function Sidebar() {
 
   return (
     <nav aria-label="工作区" {...stylex.props(styles.sidebar)}>
-      <div {...stylex.props(styles.header)}>
+      <div {...stylex.props(styles.header, collapsed && styles.headerCollapsed)}>
         {!collapsed && <span {...stylex.props(text.label, styles.brand)}>Baton</span>}
         <IconButton
           icon="sidebar"
@@ -262,10 +272,13 @@ export function Sidebar() {
               <button
                 type="button"
                 aria-label={account.name}
-                title={collapsed ? account.name : undefined}
                 {...stylex.props(text.small, styles.account, focusRing.ring)}
               >
-                <PersonAvatar name={account.name} />
+                <Tooltip label={collapsed ? account.name : null} side="right">
+                  <span {...stylex.props(styles.accountAvatar)}>
+                    <PersonAvatar name={account.name} />
+                  </span>
+                </Tooltip>
                 <span
                   aria-hidden={collapsed || undefined}
                   {...stylex.props(text.truncate, styles.accountLabel, styles.label, collapsed && styles.labelHidden)}

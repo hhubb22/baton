@@ -21,6 +21,7 @@ import { radius, shadow, space } from '../theme/tokens.stylex'
 import { Button, focusRing, IconButton } from '../ui/Button'
 import { Icon } from '../ui/Icon'
 import { ResizablePane } from '../ui/ResizablePane'
+import { Tooltip } from '../ui/Tooltip'
 import { useWorkspace } from './workspace'
 import { HighlightedLine, useHighlightedLines } from './CodeHighlight'
 import { copySelection, copyText, SelectionArea } from './SelectionMenu'
@@ -222,9 +223,9 @@ export function FilePreview({
         <BaseDialog.Popup {...stylex.props(styles.popup)}>
           <div {...stylex.props(styles.header)}>
             <div {...stylex.props(styles.heading)}>
-              <BaseDialog.Title title={current} {...stylex.props(text.mono, text.truncate)}>
-                {shown}
-              </BaseDialog.Title>
+              <Tooltip label={current} align="start">
+                <BaseDialog.Title {...stylex.props(text.mono, text.truncate)}>{shown}</BaseDialog.Title>
+              </Tooltip>
               <span {...stylex.props(text.caption, styles.muted, text.truncate)}>{meta.join(' · ')}</span>
             </div>
             <IconButton
@@ -366,34 +367,34 @@ function FolderPane({
         {data?.state === 'ready' && (
           <>
             {data.folders.map((folder) => (
-              <button
-                key={folder}
-                type="button"
-                title={folder}
-                onClick={() => onDir(folder)}
-                {...stylex.props(text.small, styles.row, focusRing.ring)}
-              >
-                <span {...stylex.props(styles.rowIcon)}>
-                  <Icon name="folder" size={14} />
-                </span>
-                <span {...stylex.props(styles.rowName, text.truncate)}>{folderName(folder)}</span>
-              </button>
+              <Tooltip key={folder} label={folder} side="right">
+                <button
+                  type="button"
+                  onClick={() => onDir(folder)}
+                  {...stylex.props(text.small, styles.row, focusRing.ring)}
+                >
+                  <span {...stylex.props(styles.rowIcon)}>
+                    <Icon name="folder" size={14} />
+                  </span>
+                  <span {...stylex.props(styles.rowName, text.truncate)}>{folderName(folder)}</span>
+                </button>
+              </Tooltip>
             ))}
             {data.files.map((entry) => (
-              <button
-                key={entry.path}
-                type="button"
-                title={entry.path}
-                aria-current={entry.path === file || undefined}
-                onClick={() => onFile(entry.path)}
-                {...stylex.props(text.small, styles.row, entry.path === file && styles.rowSelected, focusRing.ring)}
-              >
-                <span {...stylex.props(styles.rowIcon)}>
-                  <Icon name="file" size={14} />
-                </span>
-                <span {...stylex.props(styles.rowName, text.truncate)}>{baseName(entry.path)}</span>
-                <span {...stylex.props(text.caption, styles.rowSize)}>{fileSize(entry.size)}</span>
-              </button>
+              <Tooltip key={entry.path} label={entry.path} side="right">
+                <button
+                  type="button"
+                  aria-current={entry.path === file || undefined}
+                  onClick={() => onFile(entry.path)}
+                  {...stylex.props(text.small, styles.row, entry.path === file && styles.rowSelected, focusRing.ring)}
+                >
+                  <span {...stylex.props(styles.rowIcon)}>
+                    <Icon name="file" size={14} />
+                  </span>
+                  <span {...stylex.props(styles.rowName, text.truncate)}>{baseName(entry.path)}</span>
+                  <span {...stylex.props(text.caption, styles.rowSize)}>{fileSize(entry.size)}</span>
+                </button>
+              </Tooltip>
             ))}
             {data.scanLimited && (
               <p role="status" {...stylex.props(text.caption, styles.navNote)}>

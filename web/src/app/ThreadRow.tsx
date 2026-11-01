@@ -7,6 +7,7 @@ import { semantic } from '../theme/semantic.stylex'
 import { radius, size, space } from '../theme/tokens.stylex'
 import { UnreadDot } from '../ui/Badge'
 import { focusRing } from '../ui/Button'
+import { Appear } from '../ui/motion'
 import { StatusDot } from '../ui/Status'
 
 const styles = stylex.create({
@@ -37,7 +38,9 @@ export function ThreadRow({ thread, device }: { thread: Thread; device: Device |
     >
       <StatusDot tone={view.status.tone} />
       <span {...stylex.props(styles.title, text.truncate)}>{thread.title}</span>
-      {thread.unread && <UnreadDot />}
+      <Appear when={thread.unread}>
+        <UnreadDot />
+      </Appear>
       <span {...stylex.props(text.caption, styles.folder, text.truncate)}>{folderName(thread.folder)}</span>
       <span {...stylex.props(text.caption, styles.meta)}>
         {device?.name ?? '已移除的设备'} · {thread.agent ? agentNames[thread.agent] : '命令'} · {view.status.label}

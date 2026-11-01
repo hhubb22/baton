@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex'
 import { semantic } from '../theme/semantic.stylex'
-import { radius, space } from '../theme/tokens.stylex'
+import { radius, size, space } from '../theme/tokens.stylex'
 
 // 对话分组列表（样式 A）：每个状态分组是一张带 1px 外框与 12px 圆角的卡片，分组头作为顶栏，行间用 1px 细线分隔。
 export const threadList = stylex.create({
@@ -16,8 +16,8 @@ export const threadList = stylex.create({
     flexWrap: 'wrap',
     gap: space.xs,
     width: '100%',
-    paddingLeft: '6px',
-    paddingRight: space.md,
+    // 第一个筛选贴齐卡片左缘；多出的 1px 是卡片边框，右侧计数与行尾的时间对齐。
+    paddingRight: '13px',
   },
   count: {
     marginLeft: 'auto',
@@ -39,20 +39,16 @@ export const threadList = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: space.sm,
-    minHeight: '36px',
+    minHeight: size.control,
     width: '100%',
     paddingInline: space.md,
     borderWidth: 0,
     borderRadius: 0,
     textAlign: 'left',
     color: semantic.foreground,
-    backgroundColor: { default: semantic.secondary, ':hover': semantic.muted, ':active': semantic.accent },
+    // 比选中行（accent）浅，选中行始终是列表里最重的一块。靠底色和行分开，不再加分隔线。
+    backgroundColor: { default: semantic.muted, ':hover': semantic.accent },
     outlineOffset: '-2px',
-  },
-  groupHeaderExpanded: {
-    borderBottomWidth: '1px',
-    borderBottomStyle: 'solid',
-    borderBottomColor: semantic.border,
   },
   groupIconSlot: {
     display: 'inline-flex',
@@ -71,7 +67,7 @@ export const threadList = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: space.sm,
-    minHeight: '44px',
+    minHeight: size.comfortable,
     paddingInline: space.md,
     borderRadius: 0,
     borderBottomWidth: { default: '1px', ':last-child': 0 },
@@ -118,7 +114,7 @@ export const threadList = stylex.create({
   },
   time: {
     flexShrink: 0,
-    width: '72px',
+    minWidth: '60px',
     textAlign: 'right',
     color: semantic.faintForeground,
     whiteSpace: 'nowrap',

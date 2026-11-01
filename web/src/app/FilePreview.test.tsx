@@ -70,7 +70,7 @@ describe('folder selection', () => {
     const dialog = await screen.findByRole('dialog', { name: '选择文件夹' })
     await user.click(await within(dialog).findByRole('button', { name: root }))
     const folder = await within(dialog).findByRole('button', { name: 'name:part\\literal' })
-    expect(within(dialog).getByRole('button', { name: '返回文件夹列表' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '返回用过的位置' })).toBeInTheDocument()
     expect(within(dialog).getByRole('status')).toHaveTextContent('文件夹扫描受到限制')
     reloading = true
     await user.click(within(dialog).getByRole('button', { name: '重试' }))

@@ -2,7 +2,7 @@ import * as stylex from '@stylexjs/stylex'
 import { useEffect, useRef, useState, type ReactNode, type UIEventHandler } from 'react'
 import { text } from '../theme/text'
 import { semantic } from '../theme/semantic.stylex'
-import { radius, size, space } from '../theme/tokens.stylex'
+import { motion, radius, size, space } from '../theme/tokens.stylex'
 import { DesktopTargetNotice } from './DesktopWorkspace'
 
 // 主内容和 Thread 详情面板共用的圆角细边框。
@@ -51,8 +51,7 @@ const styles = stylex.create({
     pointerEvents: 'none',
     backgroundImage: `linear-gradient(to bottom, transparent, ${semantic.background})`,
     opacity: 0,
-    transition: 'opacity 160ms ease',
-    '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+    transition: `opacity ${motion.popover} ${motion.easeOut}`,
   },
   bottomFadeVisible: { opacity: 1 },
   notice: { paddingBlock: space.md, paddingInline: space.xl, ':empty': { display: 'none' } },

@@ -6,6 +6,7 @@ import type { DesktopBridge, DesktopDiagnostics, DesktopStatus } from '../data/d
 import { createMockClient } from '../data/mock/client'
 import { ClientProvider } from '../data/queries'
 import { createDesktopBridge, registeredDesktop as desktopStatusFixture } from '../test/desktop'
+import { chooseOption } from '../test/select'
 import { App } from './App'
 import { FolderDialog } from './FolderDialog'
 import { LocalThreadActions } from './LocalThreadActions'
@@ -186,8 +187,8 @@ describe('native folder selection', () => {
     )
     const dialog = await screen.findByRole('dialog', { name: '选择文件夹' })
     expect(within(dialog).queryByRole('button', { name: '选择本地文件夹' })).not.toBeInTheDocument()
-    await within(dialog).findByRole('option', { name: 'MacBook Pro' })
-    await user.selectOptions(within(dialog).getByLabelText('设备'), 'dev-mac')
+    await waitFor(() => expect(within(dialog).getByLabelText('设备')).not.toHaveTextContent(/^$/))
+    await chooseOption(user, within(dialog).getByLabelText('设备'), 'MacBook Pro')
     desktop.bridge.pickDirectory.mockResolvedValueOnce('/outside')
     await user.click(await within(dialog).findByRole('button', { name: '选择本地文件夹' }))
     expect(await within(dialog).findByText('所选文件夹不在此设备允许访问的范围内。')).toBeInTheDocument()
@@ -200,7 +201,7 @@ describe('native folder selection', () => {
         }),
     )
     await user.click(within(dialog).getByRole('button', { name: '选择本地文件夹' }))
-    await user.selectOptions(within(dialog).getByLabelText('设备'), 'dev-ubuntu')
+    await chooseOption(user, within(dialog).getByLabelText('设备'), 'Ubuntu Dev')
     await act(async () => finish('~/src/baton'))
     expect(selected).not.toHaveBeenCalled()
     expect(within(dialog).queryByRole('button', { name: '选择本地文件夹' })).not.toBeInTheDocument()
