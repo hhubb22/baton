@@ -181,6 +181,12 @@
       "skillPath": "skills/skill-doctor/SKILL.md",
       "computedHash": "a8385109f0b7b5f4df947c5e9372e4b62367e87a48e0abe96037e165b7f0ff24"
     },
+    "stageshow": {
+      "source": "benjitaylor/skills",
+      "sourceType": "github",
+      "skillPath": "stageshow/SKILL.md",
+      "computedHash": "bf9f07985a62882deae7935b5b1162fb5bf66b248930bb14a75dcaf9d67291b7"
+    },
     "system-design": {
       "source": "anthropics/knowledge-work-plugins",
       "sourceType": "github",
