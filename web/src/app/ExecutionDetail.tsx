@@ -31,7 +31,7 @@ export function ExecutionDetail({ id, projectId, onClose }: { id: string; projec
   const [error, setError] = useState<string | null>(null)
   const [stopping, setStopping] = useState(false)
   const query = useQuery({
-    queryKey: ['execution', id],
+    queryKey: keys.execution(id),
     queryFn: () => client.getExecution!(id),
     enabled: !!client.getExecution,
     refetchInterval: 2000,
@@ -43,7 +43,7 @@ export function ExecutionDetail({ id, projectId, onClose }: { id: string; projec
     setError(null)
     try {
       const result = await client.stopExecution(id)
-      queryClient.setQueryData(['execution', id], result)
+      queryClient.setQueryData(keys.execution(id), result)
       await queryClient.invalidateQueries({ queryKey: keys.executions(projectId) })
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '无法停止执行，请重试。')

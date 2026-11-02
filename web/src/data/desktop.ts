@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import type { BrowserNotification } from '@baton/protocol'
+import { keys } from './queries'
 import type { Device } from './types'
 
 // 网页只依赖 preload 的公开协议，不导入桌面进程代码。
@@ -80,15 +81,14 @@ export function desktopCapability(name: DesktopCapability) {
     : null
 }
 
-const statusKey = ['desktop', 'status'] as const
 const statusSubscriptions = new WeakMap<
   QueryClient,
   WeakMap<DesktopBridge, { subscribers: number; unsubscribe: () => void }>
 >()
 
 function updateDesktopStatus(cache: QueryClient, status: DesktopStatus) {
-  void cache.cancelQueries({ queryKey: statusKey })
-  cache.setQueryData(statusKey, status)
+  void cache.cancelQueries({ queryKey: keys.desktopStatus })
+  cache.setQueryData(keys.desktopStatus, status)
 }
 
 function subscribeDesktopStatus(cache: QueryClient, bridge: DesktopBridge) {
@@ -119,7 +119,7 @@ export function useDesktopStatus() {
   const bridge = desktopBridge()
   const cache = useQueryClient()
   const query = useQuery({
-    queryKey: statusKey,
+    queryKey: keys.desktopStatus,
     queryFn: () => bridge!.status(),
     enabled: bridge !== null,
     refetchOnMount: 'always',

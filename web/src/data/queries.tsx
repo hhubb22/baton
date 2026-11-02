@@ -34,6 +34,8 @@ export const keys = {
   enrollment: (id: ID) => ['devices', 'enrollment', id] as const,
   // 文件和目录内容由设备按需返回。
   folders: (deviceId: ID, path: string | null) => ['devices', 'folders', deviceId, path] as const,
+  deviceFolders: (deviceId: ID) => ['devices', 'folders', deviceId] as const,
+  allowedFolders: (deviceId: ID) => ['devices', 'allowedFolders', deviceId] as const,
   projects: ['projects'] as const,
   project: (id: ID) => ['projects', 'detail', id] as const,
   projectEntries: (id: ID) => ['projects', 'entries', id] as const,
@@ -43,15 +45,22 @@ export const keys = {
     ['projects', 'memorySources', projectId, noteId, version] as const,
   threads: ['threads'] as const,
   threadOrder: ['threadOrder'] as const,
-  executions: (id: ID) => ['executions', id] as const,
+  executionLists: ['executions'] as const,
+  executions: (projectId: ID) => ['executions', projectId] as const,
+  executionDetails: ['execution'] as const,
+  execution: (id: ID) => ['execution', id] as const,
   thread: (id: ID) => ['threads', 'detail', id] as const,
   messages: (threadId: ID) => ['messages', threadId] as const,
   activity: ['activity'] as const,
+  files: (deviceId: ID) => ['files', deviceId] as const,
   file: (deviceId: ID, path: string) => ['files', deviceId, path] as const,
   // 过程保存在中心，随消息更新，与设备连接状态无关。
   trace: (messageId: ID) => ['messages', 'trace', messageId] as const,
+  liveTrace: (threadId: ID, turnSeq: number | undefined) => ['liveTrace', threadId, turnSeq] as const,
   output: (threadId: ID) => ['messages', 'output', threadId] as const,
   operation: (id: ID) => ['operations', id] as const,
+  desktopStatus: ['desktop', 'status'] as const,
+  desktopDiagnostics: (nodeId: ID, state: string) => ['desktop', 'diagnostics', nodeId, state] as const,
 }
 
 const ClientContext = createContext<BatonClient | null>(null)
@@ -110,8 +119,8 @@ function refreshListItem<T extends { id: ID }>(
 
 function invalidateEntity(client: BatonClient, queryClient: QueryClient, target: NonNullable<ChangeEvent['target']>) {
   if (target.type === 'execution') {
-    void queryClient.invalidateQueries({ queryKey: ['executions'] })
-    void queryClient.invalidateQueries({ queryKey: ['execution', target.id] })
+    void queryClient.invalidateQueries({ queryKey: keys.executionLists })
+    void queryClient.invalidateQueries({ queryKey: keys.execution(target.id) })
     return
   }
   const messages = queryClient.getQueryData<Message[]>(keys.messages(target.id)) ?? []
@@ -141,10 +150,10 @@ function invalidateEntity(client: BatonClient, queryClient: QueryClient, target:
     refreshListItem<Thread>(queryClient, keys.threads, keys.thread(target.id), target.id, () =>
       client.getThread(target.id),
     )
-    void queryClient.invalidateQueries({ queryKey: ['executions'] })
+    void queryClient.invalidateQueries({ queryKey: keys.executionLists })
   } else {
     void queryClient.invalidateQueries({ queryKey: keys.executions(target.id) })
-    void queryClient.invalidateQueries({ queryKey: ['execution'] })
+    void queryClient.invalidateQueries({ queryKey: keys.executionDetails })
     refreshListItem<Project>(queryClient, keys.projects, keys.project(target.id), target.id, () =>
       client.getProject(target.id),
     )
@@ -171,10 +180,10 @@ export function ClientProvider({ client, children }: { client: BatonClient; chil
         }, 75)
         return
       }
-      if (topics.includes('threads')) void queryClient.invalidateQueries({ queryKey: ['executions'] })
+      if (topics.includes('threads')) void queryClient.invalidateQueries({ queryKey: keys.executionLists })
       if (topics.includes('executions') || topics.includes('projects'))
-        void queryClient.invalidateQueries({ queryKey: ['execution'] })
-      if (topics.includes('projects')) void queryClient.invalidateQueries({ queryKey: ['executions'] })
+        void queryClient.invalidateQueries({ queryKey: keys.executionDetails })
+      if (topics.includes('projects')) void queryClient.invalidateQueries({ queryKey: keys.executionLists })
       for (const topic of topics)
         void queryClient.invalidateQueries({
           queryKey: [topic],
@@ -217,7 +226,7 @@ export function useDevices() {
 export function useDeviceFolders(deviceId: ID, connected: boolean) {
   const client = useClient()
   return useQuery({
-    queryKey: ['devices', 'allowedFolders', deviceId],
+    queryKey: keys.allowedFolders(deviceId),
     queryFn: () => client.listDeviceFolders(deviceId),
     enabled: connected,
     refetchOnMount: 'always',
@@ -370,7 +379,7 @@ export function useTrace(messageId: ID, enabled: boolean) {
 export function useLiveTrace(threadId: ID, turnSeq: number | undefined, enabled: boolean, live = true) {
   const client = useClient()
   return useInfiniteQuery({
-    queryKey: ['liveTrace', threadId, turnSeq],
+    queryKey: keys.liveTrace(threadId, turnSeq),
     queryFn: ({ pageParam }) => client.readTurnTrace!(threadId, turnSeq!, pageParam),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (page) => (page.state === 'ready' ? page.nextCursor : undefined),
@@ -616,9 +625,9 @@ export function useSetDefaultDevice() {
 
 const refreshDeviceFolders = (cache: QueryClient, deviceId: ID) =>
   Promise.all([
-    cache.invalidateQueries({ queryKey: ['devices', 'folders', deviceId] }),
-    cache.invalidateQueries({ queryKey: ['devices', 'allowedFolders', deviceId] }),
-    cache.invalidateQueries({ queryKey: ['files', deviceId] }),
+    cache.invalidateQueries({ queryKey: keys.deviceFolders(deviceId) }),
+    cache.invalidateQueries({ queryKey: keys.allowedFolders(deviceId) }),
+    cache.invalidateQueries({ queryKey: keys.files(deviceId) }),
   ])
 
 export function useAddDeviceFolder() {

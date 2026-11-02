@@ -2,6 +2,7 @@ import * as stylex from '@stylexjs/stylex'
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { desktopErrorMessage, useLocalDesktop, type DesktopBridge } from '../data/desktop'
+import { keys } from '../data/queries'
 import { text } from '../theme/text'
 import { semantic } from '../theme/semantic.stylex'
 import { space } from '../theme/tokens.stylex'
@@ -43,7 +44,7 @@ export function LocalDeviceDiagnostics({ nodeId }: { nodeId: string }) {
 
 function Diagnostics({ nodeId, bridge, state }: { nodeId: string; bridge: DesktopBridge; state: string }) {
   const query = useQuery({
-    queryKey: ['desktop', 'diagnostics', nodeId, state],
+    queryKey: keys.desktopDiagnostics(nodeId, state),
     queryFn: () => bridge.diagnostics!({ nodeId }),
     refetchOnMount: 'always',
     refetchInterval: 5000,
