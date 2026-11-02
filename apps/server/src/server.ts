@@ -87,9 +87,15 @@ export const startServer = (
     const forwardTelemetry = makeTelemetryForwardClient(telemetryEnv)
     const projectWaits = makeProjectWaitObserver()
     const memoryWaits = makeMemoryWaitObserver()
-    yield* Effect.forkIn(serverMetricsLoop(projectWaits), scope)
-    yield* Effect.forkIn(projectWaits.poll.pipe(Effect.andThen(Effect.sleep('1 second')), Effect.forever), scope)
-    yield* Effect.forkIn(memoryWaits.pipe(Effect.andThen(Effect.sleep('1 second')), Effect.forever), scope)
+    yield* Effect.forkIn(serverMetricsLoop(projectWaits).pipe(Effect.withTracerEnabled(false)), scope)
+    yield* Effect.forkIn(
+      projectWaits.poll.pipe(Effect.andThen(Effect.sleep('1 second')), Effect.forever, Effect.withTracerEnabled(false)),
+      scope,
+    )
+    yield* Effect.forkIn(
+      memoryWaits.pipe(Effect.andThen(Effect.sleep('1 second')), Effect.forever, Effect.withTracerEnabled(false)),
+      scope,
+    )
     const controller = new AbortController()
     const controlGate = yield* Semaphore.make(4)
     const httpGate = yield* Semaphore.make(16)
@@ -106,6 +112,9 @@ export const startServer = (
       const error = Cause.squash(result.cause)
       throw error instanceof AppError ? error : new AppError(503, 'unavailable')
     }
+    // 定时轮询空转时不产生 span；实际处理任务时由 withTraceSpan 记录。
+    const poll = <A, E>(operation: ControlOperation, effect: Effect.Effect<A, E, SqlClient.SqlClient>) =>
+      run(operation, effect.pipe(Effect.withTracerEnabled(false)))
     const authorizeBrowser = async (cookie: string) => {
       const session = await run('browser', Auth.lookupSession(cookieToken(cookie)))
       if (session.employee.must_change_password) throw new AppError(403, 'password_change_required')
@@ -154,7 +163,8 @@ export const startServer = (
                 await run('authenticate', Nodes.claimConnection(source))
                 return source
               },
-              validate: (source) => run('validate', Nodes.revalidateNodeSource(source, false)),
+              validate: (source, background) =>
+                (background ? poll : run)('validate', Nodes.revalidateNodeSource(source, false)),
               heartbeat: (source) => run('heartbeat', Nodes.touchNode(source)),
               disconnected: (source) => run('disconnect', Nodes.disconnectNode(source)),
               telemetry: (source, body) => {
@@ -363,7 +373,7 @@ export const startServer = (
       if (broadcasting || controller.signal.aborted) return
       broadcasting = true
       try {
-        const rows = await run('dispatch', claimNotificationBroadcasts())
+        const rows = await poll('dispatch', claimNotificationBroadcasts())
         for (const row of rows) gateway.notify(row.employee_id, row.event)
       } catch {
         // The replay endpoint retains committed events through transport or database failures.
@@ -376,10 +386,10 @@ export const startServer = (
       if (dispatching || controller.signal.aborted) return
       dispatching = true
       try {
-        const commands = await run('dispatch', Threads.claimCommands())
+        const commands = await poll('dispatch', Threads.claimCommands())
         for (const command of commands)
           await gateway.sendValidated(command.node_id, command.employee_id, command.message_id, command.body)
-        const executions = await run('dispatch', Executions.claimCommands())
+        const executions = await poll('dispatch', Executions.claimCommands())
         for (const command of executions)
           await gateway.sendValidated(command.node_id, command.employee_id, command.message_id, command.body)
       } catch {
@@ -394,7 +404,7 @@ export const startServer = (
       if (placing || controller.signal.aborted) return
       placing = true
       try {
-        const candidates = await run('schedule', Projects.listProjectRunCandidates(placementCursor, 32))
+        const candidates = await poll('schedule', Projects.listProjectRunCandidates(placementCursor, 32))
         for (const agentId of candidates) {
           if (controller.signal.aborted) break
           try {
@@ -405,7 +415,7 @@ export const startServer = (
           placementCursor = agentId
         }
         if (candidates.length < 32) placementCursor = ''
-        await run('schedule', Projects.scheduleMemoryJobs())
+        await poll('schedule', Projects.scheduleMemoryJobs())
       } catch {
         // Committed leases and persistent due times are revisited after recovery.
       } finally {
@@ -424,7 +434,7 @@ export const startServer = (
       if (sendingProjects.has(kind) || controller.signal.aborted) return
       sendingProjects.add(kind)
       try {
-        const deliveries = await run('dispatch', Projects.claimProjectCommands(kind))
+        const deliveries = await poll('dispatch', Projects.claimProjectCommands(kind))
         for (const delivery of deliveries)
           await gateway.sendValidated(delivery.node_id, delivery.employee_id, delivery.command.run_id, delivery.command)
       } catch {
@@ -448,7 +458,7 @@ export const startServer = (
       void broadcastNotifications()
     }, options.dispatchMs ?? 200)
     const compensate = createRevocationCompensator(
-      (effect) => run('maintenance', effect),
+      (effect) => poll('maintenance', effect),
       (nodeId) => gateway.disconnect(nodeId),
       { concurrency: 1 },
     )
@@ -460,7 +470,7 @@ export const startServer = (
         await Promise.allSettled([
           compensate(),
           gateway.closeExpiredConnections(),
-          run('maintenance', expireProjectNodeLeases()),
+          poll('maintenance', expireProjectNodeLeases()),
         ])
       } finally {
         maintaining = false

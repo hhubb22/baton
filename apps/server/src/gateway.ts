@@ -76,7 +76,7 @@ export interface GatewayHandlers {
     connectionId: string,
     version: Pick<NodeAuth, 'daemon_version' | 'protocol_version'>,
   ): Promise<NodeSource>
-  validate(source: NodeSource): Promise<void>
+  validate(source: NodeSource, background?: boolean): Promise<void>
   heartbeat(source: NodeSource): Promise<void>
   disconnected(source: NodeSource): Promise<void>
   handle(source: NodeSource, envelope: Envelope): Promise<Body | undefined>
@@ -286,7 +286,7 @@ export class Gateway {
     await Promise.all(
       [...this.nodes.values()].map(async (connection) => {
         try {
-          await this.handlers.validate(connection.source)
+          await this.handlers.validate(connection.source, true)
         } catch (error) {
           if (
             error instanceof AppError &&

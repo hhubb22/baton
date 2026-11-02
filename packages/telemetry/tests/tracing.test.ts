@@ -43,6 +43,34 @@ it('continues W3C context and sampling across independent runtimes', async () =>
   expect(decodeTrace({ ...incoming, tracestate: 'a\r\nb' })).toBeUndefined()
 })
 
+it('records real work inside an untraced polling loop and never persists a noop context', async () => {
+  const spans: Tracer.NativeSpan[] = []
+  const tracer = Tracer.make({
+    span(options) {
+      const span = new Tracer.NativeSpan(options)
+      spans.push(span)
+      return span
+    },
+  })
+  const incoming = { traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01` }
+  const [idle, dispatched, placed] = await Effect.runPromise(
+    Effect.gen(function* () {
+      const idle = yield* captureTrace
+      const dispatched = yield* withTraceSpan(captureTrace, 'baton.command.dispatch', incoming)
+      const placed = yield* withTraceSpan(captureTrace, 'baton.memory.placement')
+      return [idle, dispatched, placed] as const
+    }).pipe(
+      Effect.withSpan('claimCommands'),
+      Effect.withTracerEnabled(false),
+      Effect.provideService(Tracer.Tracer, tracer),
+    ),
+  )
+  expect(idle).toBeUndefined()
+  expect(spans.map((span) => span.name)).toEqual(['baton.command.dispatch', 'baton.memory.placement'])
+  expect(dispatched?.traceparent).toContain('a'.repeat(32))
+  expect(decodeTrace(placed)?.traceparent).toContain(spans[1]!.traceId)
+})
+
 it('exports to a local OTLP capture endpoint on scope release and redacts automatic errors and SQL attributes', async () => {
   const payloads: string[] = []
   const server = createServer((request, response) => {

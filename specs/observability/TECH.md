@@ -99,7 +99,7 @@ Agent 的系统提示词、输入消息、思考与计划步骤、工具参数�
 
 ## 4. span
 
-已有的 HTTP、数据库和 `Effect.fn` span 保留。每类工作增加一个根 span，下面挂子 span：
+已有的 HTTP、数据库和 `Effect.fn` span 保留。中心的后台定时循环（命令认领、调度、租约与吊销检查、等待观察、指标采集）关闭追踪，只有实际处理任务时才通过 `withTraceSpan` 产生 span，例如 `baton.command.dispatch`、`baton.memory.placement` 和 `baton.wait`；循环的健康情况看第 5 节的指标。每类工作增加一个根 span，下面挂子 span：
 
 | span | 进程 | 说明 |
 |---|---|---|
@@ -113,6 +113,7 @@ Agent 的系统提示词、输入消息、思考与计划步骤、工具参数�
 | `baton.project.tool` | Project Runtime | 一次工具调用，带 `gen_ai.operation.name = execute_tool`、`baton.project.tool`、`gen_ai.tool.name`、`gen_ai.tool.call.id`、`gen_ai.tool.call.arguments`、`gen_ai.tool.call.result` |
 | `baton.project.compaction` | Project Runtime | 一次上下文压缩 |
 | `gen_ai.embeddings` | Project Runtime | 一次向量化调用（记忆条目向量生成与 `memory.recall` 查询向量生成）。span 名写成 `embeddings {model}`，带 `gen_ai.operation.name = embeddings`、`gen_ai.provider.name = openai`、`gen_ai.request.model`、`gen_ai.input.messages` 与 `gen_ai.usage.input_tokens` |
+| `baton.memory.placement` | 中心 | 一次后台记忆任务放置到设备，是该次 `baton.project.run` 的上游 |
 | `baton.report` | batond | 一批报告从提交到收到中心回执 |
 
 Session Agent 与 Project Runtime 的 `gen_ai.*` span 直接对齐 ClickStack `/llm`（OTel GenAI `>= 1.37`）与兼容 GenAI 语义约定的观测平台。

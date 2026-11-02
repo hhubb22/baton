@@ -38,7 +38,8 @@ export const traceFromHeaders = (headers: Record<string, string | undefined>): T
 
 export const captureTrace: Effect.Effect<TraceContext | undefined> = Effect.gen(function* () {
   const span = yield* Effect.currentSpan.pipe(Effect.option)
-  if (Option.isNone(span)) return undefined
+  // 关闭追踪时当前 span 是 noop，它的标识不能写入持久上下文。
+  if (Option.isNone(span) || span.value.traceId === 'noop') return undefined
   const tracestate = yield* TraceState
   return {
     traceparent: HttpTraceContext.toHeaders(span.value).traceparent!,
@@ -70,7 +71,7 @@ export const waitEvent = (
     trace,
   ).pipe(Effect.catchCause((cause) => (Cause.hasInterrupts(cause) ? Effect.failCause(cause) : Effect.void)))
 
-/** Queue consumers use the durable producer as parent, including after restart. */
+/** Queue consumers use the durable producer as parent, including after restart. Real work stays traced inside untraced polling loops. */
 export const withTraceSpan = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
   name: string,
@@ -84,7 +85,9 @@ export const withTraceSpan = <A, E, R>(
     ...(!options.parent && parent ? { parent } : {}),
     captureStackTrace: false,
   })
-  return trace?.tracestate ? Effect.provideService(traced, TraceState, trace.tracestate) : traced
+  return (trace?.tracestate ? Effect.provideService(traced, TraceState, trace.tracestate) : traced).pipe(
+    Effect.withTracerEnabled(true),
+  )
 }
 
 export const tracePromise = async <A>(
