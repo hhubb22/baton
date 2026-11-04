@@ -2,263 +2,156 @@
 
 Status: draft
 Owner: Asa
-Basis: [设备接入行为规格](PRODUCT.md) DS-01～DS-23；调查提交 `2b28da5`。
+Basis: [设备接入行为规格](PRODUCT.md) DS-01～DS-17；调查提交 `9c003f8`。
 
-## Context
+## 全景与架构
 
-设备接入现在由四段独立的流程组成：
+员工设备通过标准系统信任 TLS（HTTPS / WSS）连接中心，使用统一的设备码登录（Device Code Flow）完成身份绑定。每台设备在同一数据目录下只运行一个后台 `batond` 守护进程，对外暴露受令牌保护的本地控制通道（POSIX Unix Domain Socket / Windows Named Pipe）；CLI 与桌面客户端均只作为该控制通道的客户端，并在守护进程未运行时按需在后台拉起它。
 
-- **注册：** `apps/batond/src/daemon/cli.ts` 的 `up` 和 `register` 首次注册可使用 SEA 安装目录中的 `deployment.json`，显式参数优先。`registerNode` 在私有数据目录中保存 `coordinator_url` 与本次使用的 CA。
-- **运行：** `runDaemon`、重新认证和升级检查默认使用保存的 CA，已有身份不读取安装目录的部署配置。
-- **网页：** `web/src/app/EnrollDialog.tsx` 按下载清单展示 CLI 注册与服务安装命令，凭据通过 `read -rs` 写进环境变量；未配置下载时保留依赖 PATH 中 `batond` 的命令。
-- **中心：** `apps/server/src/http/index.ts` 托管网页静态文件和经核验的安装包，匿名公开接口包含 `GET /api/v1/release` 与 `GET /api/v1/downloads`；`BATON_ALLOWED_ORIGINS` 同时用于检查写请求的 Origin 和按 Host 选择部署配置中的中心地址。
-
-daemon 在私有数据目录的 `daemon-status.json` 中报告连接状态。致命失败时，`reportBatondError` 在 stderr 输出一行 JSON 后退出，凭据拒绝和版本不兼容的退出码为 78，部署配置错误与 daemon 锁占用也有独立错误码。`daemon.lock` 由 `platform/lock.ts` 管理，第二个 daemon 的 `ProcessLockBusy` 映射为 `daemon_running`。
-
-发布流水线 `.github/workflows/release-packages.yml` 已在 macos-15、ubuntu-24.04、ubuntu-24.04-arm、windows-2025 四个原生 runner 上产出 `baton-<版本>-<平台>.tar.gz|zip`，归档顶层目录同名，内含 `release.json`。
-
-## 架构
-
-```
-浏览器 / 桌面客户端窗口 ──HTTPS──► 中心
-  │  GET /api/v1/downloads     下载清单、接入链接（匿名）
-  │  GET /downloads/<文件>      原始 CLI 包 / 客户端安装包
+```text
+浏览器 / 桌面客户端窗口 ── HTTPS（系统根证书库校验）──► Coordinator（apps/server）
+  │  GET  /api/v1/downloads                         匿名下载清单与 baton://connect?url=...
+  │  GET  /downloads/<file>                         静态安装包流式下载
+  │  POST /api/v1/device-auth/sessions/:id/approve  已登录员工确认设备码
   │
-  └ 桌面客户端 main 进程
-       ├ 部署配置存储（userData/deployment.json、ca.pem）
-       ├ 证书校验：只对中心 host 使用保存的 CA
-       ├ preload 桥接 window.batonDesktop（只注入中心页面）
-       └ batond 进程监管 ──spawn──► resources/batond/batond run --exit-with-stdin
-                                        └ 写 <数据目录>/daemon-status.json
-CLI 用户：解压 CLI 包 → batond register（显式指定中心与 CA）→ batond service install
+CLI 命令 / 桌面客户端 main 进程
+  └─ ControlClient（按需持有 autostart.lock 后台拉起 batond）
+       │  本地控制通道（UDS / Named Pipe + control.token）
+       ▼
+     batond（唯一守护进程，持有 daemon.lock）
+       ├─ POST /api/v1/device-auth/{sessions,token} 发起与轮询设备码换取长效凭据
+       └─ WSS  /v1/node                             长效凭据连接中心与业务同步
 ```
 
-## 部署配置
+节点连接仅使用操作系统根证书库校验的 HTTPS / WSS，设备授权统一经中心设备码会话颁发长效可吊销凭据，本机 CLI 与桌面客户端统一通过本地控制通道与唯一 `batond` 交互。
 
-桌面客户端从接入链接保存的内容使用以下结构：
+## 1. 中心：安装包托管与接入链接（DS-01～DS-03）
 
-```json
-{ "format": 1, "coordinator_url": "https://10.28.243.116:8443", "ca_pem": "-----BEGIN CERTIFICATE-----..." }
-```
+`apps/server/src/downloads.ts` 扫描 `BATON_DOWNLOADS_DIR`（未设置时返回 `enabled: false`），核验与当前中心发布版本一致的安装包及相邻 `.sha256` 文件，不合格项跳过并记日志：
 
-`coordinator_url` 只允许 `https` 源（scheme、host、可选端口），不带路径。`ca_pem` 可选：中心使用公共信任的证书时不提供 CA，就不写这一项。协议 Schema 放在 `packages/protocol/src/deployment.ts`，batond、中心和客户端共用。
+- CLI 归档：`baton-<版本>-<darwin-arm64|linux-x64|linux-arm64>.tar.gz`
+- 桌面安装包：`baton-desktop-<版本>-darwin-arm64.dmg`、`baton-desktop-<版本>-win32-x64.exe`
 
-## 中心：安装包托管（DS-01～DS-04）
-
-**配置**
-
-| 环境变量 | 含义 |
+| 匿名接口 | 契约与行为 |
 |---|---|
-| `BATON_DOWNLOADS_DIR` | 安装包目录；未设置时不提供下载，清单返回 `enabled: false` |
-| `BATON_PUBLIC_CA_FILE` | 写入部署配置和接入链接的 CA；未设置表示中心证书由公共 CA 签发 |
+| `GET /api/v1/downloads` | 返回 `{ enabled, version, connect_url, items: [{ kind: 'cli' \| 'desktop', platform, arch, file, size, sha256 }] }` |
+| `GET /downloads/<file>` | 仅允许清单已收录文件名；原样流式返回，附 `content-length`、`content-disposition: attachment`、`cache-control: no-cache`、`x-content-type-options: nosniff`，其余路径返回 404 |
 
-**目录约定**
+`connect_url` 按请求 `Host` 匹配 `BATON_ALLOWED_ORIGINS` 中的 HTTPS 源生成 `baton://connect?url=<encodeURIComponent(origin)>`；无匹配 HTTPS 源时 `connect_url` 为 `null`，安装包仍可下载。
 
-`BATON_DOWNLOADS_DIR` 中放发布产物和同名的 `.sha256`：
-- CLI 包：`baton-<版本>-<darwin-arm64|linux-x64|linux-arm64>.tar.gz`。Windows 的 zip 不提供下载。
-- 桌面客户端：`baton-desktop-<版本>-darwin-arm64.dmg` 和 `baton-desktop-<版本>-win32-x64.exe`。
+## 2. 设备码登录协议（DS-04～DS-07）
 
-`apps/server/src/downloads.ts` 负责扫描与核验原始安装包。
+### 2.1 数据表 `device_login_sessions`
 
-**索引**
+中心使用 `device_login_sessions` 表记录短期设备码登录会话：
 
-中心读取目录与文件属性，发现新增、删除和原地替换的安装包。文件版本须等于当前中心发布版本，`.sha256` 与实际哈希一致；不合格的文件跳过。
-
-**原始归档**
-
-中心按大小和摘要核验安装包后原样提供，不将部署配置写入签名工件。中心地址与 CA 通过接入链接或显式命令参数单独传递。
-
-**对外地址**
-
-接入链接中的中心地址按请求 `Host` 头匹配 `BATON_ALLOWED_ORIGINS` 中的同 host 源确定；没有匹配的源时不生成接入链接，原始安装包仍可下载。
-
-**接口**（在 `packages/protocol/src/http-api.ts` 中与 `release` 一样声明为匿名接口）
-
-| 接口 | 响应 |
-|---|---|
-| `GET /api/v1/downloads` | `{ enabled, version, connect_url, ca_sha256, items: [{ kind: 'cli'\|'desktop', platform, arch, file, size, sha256 }] }` |
-| `GET /downloads/<file>` | 只接受清单中列出的文件名，流式返回，带 `content-length`、`content-disposition: attachment`、`cache-control: no-cache` 和 `x-content-type-options: nosniff`；其他名字一律 404 |
-
-`connect_url` 的格式是 `baton://connect?url=<百分号编码的源>&ca=<CA DER 的 base64url>`。文件路由与 `staticResponse` 并列，加在 `http/index.ts` 的非 `/api/` 分支前，不经过登录校验。文件响应使用 Effect 平台的文件流，按需查固定版本的源码确认 API。
-
-## batond（DS-05～DS-11）
-
-**部署配置读取**
-
-新模块 `apps/batond/src/daemon/deployment.ts`。只有 SEA 运行时（`isSea()`）读取 `dirname(process.execPath)/deployment.json`；源码和 bundle 入口不读。文件缺失时视为没有部署配置；格式错误则报 `deployment_invalid` 并退出，不悄悄忽略。
-
-**注册参数解析**（`daemon/cli.ts`）
-
-- `--coordinator` 优先，否则用 `deployment.coordinator_url`。
-- `--ca-file` 优先，否则用 `deployment.ca_pem`。
-- 已有身份时完全不读部署配置（DS-07）。
-
-**保存 CA**（DS-06）
-
-`registerNode` 和 `reauthNode` 在写入 `identity.json` 之前，先在同一把 `identity.lock` 下用 `writePrivateFileAtomic` 写 `<数据目录>/coordinator-ca.pem`。本次没有使用 CA 时删除这个文件，让设备回到系统信任。之后由 `loadCoordinatorCA(dataDirectory, explicitFile?)` 统一取值：先用显式文件，再用保存的文件，都没有就返回 undefined。`runDaemon`、`reauthNode` 和 `checkUpgrade` 都改用这个函数。
-
-注册时传入的 CA 被服务器证书校验通过并成功注册后才保存；重新认证成功后替换。设备更新的一致备份包含这个文件。
-
-**状态文件**
-
-daemon 在连接状态变化时原子写 `<数据目录>/daemon-status.json`：
-
-```json
-{ "pid": 1234, "state": "connecting|online|rejected|stopping", "code": "node_version_incompatible", "message": "...", "updated_at": "..." }
-```
-
-- 认证成功写 `online`。
-- 每次重连写 `connecting`。
-- 致命失败在退出前写 `rejected`，附上 code。
-- 正常停止写 `stopping`。
-
-读取方用 `pid` 加 `daemon.lock` 判断状态是否过期。这个文件不含凭据。
-
-**退出码和错误码**
-
-`reportBatondError` 新增几个 code：
-- `needs_reauth`：对应 `NeedsReauthentication`。
-- `daemon_running`：在 `daemon.lock` 上遇到 `ProcessLockBusy`，提示服务或客户端正在运行（DS-11）。
-- `deployment_invalid`：包内部署配置格式错误。
-
-`needs_reauth` 和 `node_version_incompatible` 以退出码 78 退出，供服务管理器区分「不该重启」；其他失败仍为 1。
-
-**`--exit-with-stdin`**
-
-这是 `run` 的内部参数，供桌面客户端使用。开启后 stdin 读到 EOF 就触发与 SIGTERM 相同的中止路径。Windows 无法向子进程发 SIGTERM，客户端靠关闭 stdin 正常停止 batond；客户端崩溃时，管道关闭也会让 batond 退出。
-
-**`batond identity`**
-
-输出 `{ registered, coordinator_url, node_id, display_name, system }`，不含凭据，供客户端判断本机身份。
-
-**`batond service install|uninstall|status`**
-
-新模块 `apps/batond/src/daemon/service.ts`。服务定义由纯函数生成，系统命令通过可注入的 runner 执行，便于测试。
-
-| | macOS | Linux |
+| 列 | 类型与约束 | 说明 |
 |---|---|---|
-| 定义文件 | `~/Library/LaunchAgents/dev.baton.batond.plist` | `~/.config/systemd/user/baton-batond.service` |
-| 启动 | `ProgramArguments=[可执行文件, run, --data-dir, 目录]`，`RunAtLoad`，`KeepAlive.SuccessfulExit=false`，`ThrottleInterval=30` | `ExecStart=… run --data-dir …`，`Restart=on-failure`，`RestartSec=5`，`RestartPreventExitStatus=78`，`WantedBy=default.target` |
-| 日志 | `StandardOutPath` 和 `StandardErrorPath` 指向 `<数据目录>/logs/batond.log` | `StandardOutput=append:` 和 `StandardError=append:` 指向同一文件 |
-| 安装命令 | `launchctl bootout`（忽略未加载）后 `launchctl bootstrap gui/<uid> <plist>` | `systemctl --user daemon-reload` 后 `enable --now`，再 `restart` |
-| 状态 | `launchctl print gui/<uid>/dev.baton.batond` | `systemctl --user show -p ActiveState,MainPID,ExecStart`；`loginctl show-user <user> -p Linger` |
+| `id` | `UUID PRIMARY KEY` | 登录会话标识 |
+| `device_code_hash` | `BYTEA NOT NULL UNIQUE` | 256-bit 随机 `device_code` 的 SHA-256，明文仅返回给发起方 `batond` 内存保存 |
+| `user_code` | `TEXT NOT NULL` | 去歧义 Base32 短码（如 `ABCD-EFGH`），在未过期的 `pending` 会话内唯一 |
+| `display_name` | `TEXT NOT NULL` | 1～80 字符设备显示名 |
+| `system` | `TEXT NOT NULL` | `macos` \| `linux` \| `windows` |
+| `status` | `TEXT NOT NULL` | `pending` \| `approved` \| `consumed` \| `denied` \| `expired` |
+| `employee_id` | `UUID REFERENCES employees(id)` | 浏览器确认时写入 |
+| `node_id` | `UUID` | 浏览器确认创建设备时写入 |
+| `created_at` / `expires_at` | `TIMESTAMPTZ NOT NULL` | 默认有效期 600 秒，以 PostgreSQL `clock_timestamp()` 判定 |
+| `consumed_at` | `TIMESTAMPTZ` | `batond` 首次换取凭据的时间 |
 
-- **安装前提：** 设备必须已注册；可执行文件路径用 `realpath(process.execPath)`。
-- **原子安装：** 定义文件先写临时文件再改名；systemctl 或 launchctl 失败时恢复原来的定义文件，原来没有就删除（DS-10）。
-- **单一服务：** 每个系统用户只有一个服务；用另一个数据目录安装会替换原服务。
-- **无法安装的情况：** Linux 上 `systemctl --user` 不可用，或拿不到 `XDG_RUNTIME_DIR`，就报 `service_unavailable`；Windows 上报 `service_unsupported`，并提示使用桌面客户端。
-- **状态输出：** `service status` 返回 `installed`、`running`、`program_path`、`log_path` 和 `daemon`。路径取自已安装的定义，不取调用时的 `--data-dir`；`daemon` 从该服务数据目录的 `daemon-status.json` 读取，未安装时使用 `--data-dir`。文件缺失、不可读或内容无效时 `daemon` 为 null。有效时包含 `pid`、`state`、`updated_at` 和可选的 `code`、`message`，其中状态沿用 `connecting|online|rejected|stopping`；另附 `stale`，锁不存在、锁属主 PID 与快照不同或锁属主进程已退出时为 true，锁无法核实时也为 true。过期快照保留最后的拒绝原因，服务当前是否运行仍以 `running` 为准。Linux 额外返回 `linger`（无法查询时为 null）；未开启或无法查询时在顶层 `message` 中说明。
-- **launchd 限制：** launchd 不能按退出码阻止重启，所以 78 退出后仍会每 30 秒拉起一次；`service status` 的 `daemon` 附上最后的拒绝原因与错误码。
+### 2.2 HTTP 接口契约
 
-## 网页（DS-12～DS-14）
+Schema 定义在 `packages/protocol/src/device.ts` 与 `http-api.ts`：
 
-**数据层**
+| 接口 | 鉴权 | 行为与幂等规则 |
+|---|---|---|
+| `POST /api/v1/device-auth/sessions` | 匿名（按 IP 限流 20 次/分钟） | 输入 `{ display_name, system }`；创建 `pending` 会话并返回 `{ session_id, device_code, user_code, verification_uri, verification_uri_complete, expires_at, expires_in_seconds: 600, interval_seconds: 2 }` |
+| `GET /api/v1/device-auth/sessions/by-code/:userCode` | 员工会话 | 忽略大小写与连字符规范化 `userCode`；查找未过期的 `pending` 会话返回 `{ session_id, user_code, display_name, system, expires_at }`，不存在或已过期返回 404/410 |
+| `POST /api/v1/device-auth/sessions/:id/approve` | 员工会话 + Origin + CSRF | 核对 `{ user_code }` 与 `pending` 未过期状态；单事务创建 `nodes`、`node_credentials`（长效无过期时间，版本 1）、初始化员工默认设备（若尚无）并将状态置为 `approved` |
+| `POST /api/v1/device-auth/sessions/:id/deny` | 员工会话 + Origin + CSRF | 将未过期的 `pending` 会话置为 `denied` |
+| `POST /api/v1/device-auth/token` | 匿名（校验 `device_code` 摘要） | 输入 `{ session_id, device_code }`。未确认返回 `{ status: 'pending', interval_seconds: 2 }`；已拒绝或过期返回 `denied` / `expired`；`approved` 时原子置为 `consumed`，按持久化的 `(node_id, credential_id, version, issued_at)` 签发 Ed25519 JWT 并返回 `{ status: 'approved', identity: NodeIdentity }`。若网络中断导致响应丢失，在原会话 `expires_at` 前且节点未吊销时用同一 `device_code` 重试会确定性返回同一份 `NodeIdentity` |
 
-`web/src/data` 新增 `getDownloads` 查询；mock 客户端提供带下载和不带下载的两种场景。
+所有中心与节点 HTTPS / WSS 请求均直接使用操作系统根证书库验证服务端 TLS 证书（DS-07）。
 
-**注册对话框**（普通浏览器）
+## 3. 单一后台 `batond` 与本地控制通道（DS-08～DS-09）
 
-清单 `enabled` 并且有对应平台的 CLI 包时，`registerCommand` 生成：
+### 3.1 锁、控制端点与生命周期
 
-```sh
-tar xzf baton-v0.1.0-linux-x64.tar.gz && cd baton-v0.1.0-linux-x64
-read -rs BATON_ENROLLMENT_TOKEN && export BATON_ENROLLMENT_TOKEN
-./batond register --display-name "…" && ./batond service install
-```
+`apps/batond/src/daemon/control.ts` 复用 `daemon/ipc.ts` 的 `listenAuthenticated` / `requestAuthenticated`（帧上限 256 KiB，常量时间令牌比对）：
 
-对话框同时显示下载链接、SHA-256 和 `curl -fLk -O <链接>`。用 `-k` 是因为此时还没有信任 CA；校验靠对话框上显示的 SHA-256。选择 Windows 时显示客户端下载。清单未启用时，保留现有命令。重新认证的命令改为 `./batond reauth && ./batond service install`。
+- **排他锁**：`<data-dir>/daemon.lock`（`platform/lock.ts`），保证同一数据目录最多一个 `batond` 实例。
+- **控制端点**：
+  - POSIX：优先 `<data-dir>/ipc/ctl-<hash20>.sock`；若路径超过 Unix Socket 103 字节上限，回退到 `$XDG_RUNTIME_DIR/baton/ctl-<hash20>.sock` 或当前用户 `0700` 私有目录 `/tmp/baton-<uid>/ctl-<hash20>.sock`。
+  - Windows：`\\.\pipe\baton-ctl-<hash24>`。
+- **认证令牌**：`batond` 取得 `daemon.lock` 后原子写入 `0600` 私有文件 `<data-dir>/control.token`，随后监听控制端点。
+- **连接状态机**：`batond` 常驻监听本地控制通道，不在未绑定或认证被拒时退出进程；内存状态机维护 `unbound`、`authorizing`、`connecting`、`syncing`、`online`、`rejected` 六种状态。中心返回 `credential_revoked` 或 `node_version_incompatible` 时，WSS 循环停止重连并进入 `rejected`，保留 `{ code, message, at }` 供 CLI 与桌面端实时读取。
 
-**接入链接**
+### 3.2 按需自动拉起（`ensureDaemon`）
 
-清单有 `connect_url` 且页面不在客户端中时，Devices 页面显示「在客户端中打开」，以普通链接打开 `connect_url`。
+CLI 与桌面客户端共用 `ControlClient`：
 
-**桌面模式**
+1. 读取 `control.token` 并请求控制端点；成功则直接返回。
+2. 令牌缺失或连接返回 `ENOENT` / `ECONNREFUSED` 时，获取短期文件锁 `<data-dir>/autostart.lock`，串行化并发拉起。
+3. 持锁重测一次控制端点；仍不可达则以分离后台模式启动 `batond serve --data-dir <dir>`（`detached: true`、`stdio` 重定向至 `<data-dir>/logs/batond.log` 并按 10 MiB 轮转、`windowsHide: true`、`unref()`）。
+4. 以 50ms→200ms 退避轮询控制端点 `status` 直至就绪（上限 POSIX 5 秒、Windows 10 秒），释放 `autostart.lock` 后发送原请求。
 
-`web/src/data/desktop.ts` 在网页内声明 protocol 1 的桥接类型，不依赖 `apps/desktop` 包。检测到 `window.batonDesktop?.protocol === 1` 时启用桌面模式；其他环境沿用浏览器流程。
+### 3.3 控制通道方法与 CLI 路由
 
-Devices 页读取 `status()` 并订阅 `onStatus()`，卸载时取消订阅，再次进入时重新读取；较早发起的查询不会覆盖之后的状态通知。未接入时显示 `Connect this computer`；已有身份且中心设备的凭据状态为 `idle_expired`，或客户端报告 `needs_reauth` 时显示 `Reconnect this computer`。本机状态包括外部服务管理和拒绝原因，版本不兼容时提示下载新版客户端；状态查询失败可以重试。
+| 控制方法 | 参数 | 行为 |
+|---|---|---|
+| `status` | `{}` | 返回 `{ pid, batond_version, protocol_version, platform, state, coordinator_url?, node_id?, employee_id?, display_name?, rejection?, pending_login?, last_error?, service_installed }` |
+| `login_start` | `{ coordinator_url, display_name? }` | 校验 HTTPS 源与现有身份（DS-06）：同中心有效身份直接触发重连并返回 `already_bound`；异中心身份或已吊销身份返回 `logout_required`；未绑定则向中心申请设备码，启动后台轮询 fiber，返回 `{ status: 'pending', session_id, user_code, verification_uri, verification_uri_complete, expires_at, expires_in_seconds }`（不向外返回 `device_code`） |
+| `login_cancel` | `{}` | 中止进行中的设备码轮询 fiber，回到 `unbound` |
+| `logout` | `{}` | 断开中心 WSS、中止登录轮询、停止并回收活动执行子进程树、原子删除 `<data-dir>/identity.json`，状态回到 `unbound`，保留 `node.db`、目录授权与模型凭据 |
+| `resolve_thread_directory` | `{ thread_id }` | 进程内只读查询 `node.db` 的 Thread 配置并校验真实路径位于 `browse_roots` 内，供桌面端打开目录（[桌面 TECH](../desktop/TECH.md)） |
+| `diagnostics` | `{}` | 返回版本、平台、运行状态、最近异常/拒绝摘要及日志末尾最多 200 行的脱敏文本 |
+| `shutdown` | `{}` | 断开 WSS、有序停止并回收 `agent-host` / `project-runtime` / `execution` 子进程树、刷盘关闭 `node.db` 后进程退出 0 |
 
-桌面注册对话框由 `web/src/app/DesktopEnrollDialog.tsx` 实现，不显示命令、下载、系统选择或接入口令。显示名初始为空，省略 `displayName` 时由客户端使用主机名。点击接入或重新认证后：
-1. 重新读取本机身份，以当前员工的已有 `createEnrollment(nodeId?)` 接口领取凭据；重新认证的节点 ID 取自桥接状态，不能把其他设备的凭据交给本机客户端。
-2. 只在内存中将凭据交给 `batonDesktop.enroll({ code, displayName? })` 或 `reauth({ code })`，对话框仅保留凭据记录 ID，通过 `useEnrollment` 跟随中心状态更新。
-3. 操作期间阻止重复提交。失败时保留显示名并显示原因，重试重新领取凭据；领取时已过期则重新领取一次。桥接错误中出现本次口令时隐藏该口令，再显示错误。已有有效本机身份时直接沿用，不重复注册。
+CLI 子命令分派（`apps/batond/src/cli.ts`）：
+- `batond login [--coordinator <url>] [--display-name <name>]`（无位置参数）：经本地控制通道调用 `login_start`，在支持图形界面时打开浏览器展示 `verification_uri_complete`，并在终端等待状态变为 `online`（用户按 Ctrl-C 仅退出 CLI 等待，不终止后台轮询；`--cancel` 调用 `login_cancel`）。带单个位置参数 `batond login <openai-codex|xai>` 保持路由至 Project Runtime 订阅登录。
+- `batond logout`：调用控制通道 `logout`。
+- `batond status`：未带 `--thread-id` 时输出守护进程与中心连接状态；带 `--thread-id` 时查询对应本地 Thread 状态。
 
-其他设备的重新认证操作在桌面模式中提示改用浏览器。凭据不渲染到页面，也不写入日志。
+## 4. 系统用户服务（DS-10～DS-11）
 
-## 桌面客户端 `apps/desktop`（DS-15～DS-23）
+`apps/batond/src/daemon/service.ts` 使用可注入命令执行器管理用户级服务定义：
 
-**技术选型**
+| 项目 | macOS（launchd） | Linux（systemd --user） |
+|---|---|---|
+| 定义路径 | `~/Library/LaunchAgents/dev.baton.batond.plist` | `~/.config/systemd/user/baton-batond.service` |
+| 启动命令 | `[realpath(execPath), 'run', '--data-dir', dataDir]`，`RunAtLoad=true`，`KeepAlive=true`，`ThrottleInterval=10` | `ExecStart=<execPath> run --data-dir <dataDir>`，`Restart=always`，`RestartSec=5`，`WantedBy=default.target` |
+| 日志 | `StandardOutPath` / `StandardErrorPath` 指向 `<data-dir>/logs/batond.log` | `StandardOutput=append:` / `StandardError=append:` 指向同一路径 |
 
-- 框架：Electron。
-- 打包：electron-builder，mac 出 dmg，Windows 出按用户安装、无需管理员的 NSIS 安装包。
-- 编译：main 和 preload 用 TypeScript 写，由 esbuild 打成 CJS，与 batond bundle 的工具链一致。
-- 说明页：未配置时显示的是本地静态 `setup.html`，不加载网页前端。
+- **无冲突接管**：`service install` 写入服务定义前，若检测到当前已有非服务托管的后台 `batond` 正在运行，先通过本地控制通道发送 `shutdown` 并等待 `daemon.lock` 释放，再执行 `launchctl bootstrap` 或 `systemctl --user enable --now`，避免双实例锁冲突。
+- **原子回滚与平台检查**：服务文件先写临时文件再原子替换，系统命令失败时恢复旧定义（原无定义则删除）。Linux 缺少可用 `systemd --user` 或 `XDG_RUNTIME_DIR` 时返回 `service_unavailable`；`service status` 额外通过 `loginctl show-user <user> -p Linger` 检查并在未开启时提示注销后服务会停止。Windows 执行 `service` 子命令返回 `service_unsupported` 并提示使用桌面客户端。
+- **卸载保留数据**：`service uninstall` 停止服务并移除定义文件，不删除 `<data-dir>`。
 
-依赖安装沿用 `--ignore-scripts`，CI 和单元测试都不下载 Electron 二进制；打包时由 electron-builder 下载 Electron，可用 `ELECTRON_MIRROR` 指定镜像。
+## 5. 网页与桌面客户端接入（DS-12～DS-17）
+
+### 5.1 浏览器端（`web/`）
+
+- **添加设备弹窗（`EnrollDialog.tsx`）**：按平台展示安装包下载链接、SHA-256，以及无秘密的固定命令 `./batond login --coordinator <中心源>` 与 `./batond service install`；Windows 引导下载桌面客户端。普通浏览器下若 `connect_url` 存在，Devices 页显示「在客户端中打开」。
+- **设备码确认页（`/device-login`）**：支持 `?code=XXXX-XXXX` 预填或手动输入短码，调用 `by-code` 展示待绑定设备的显示名与系统类型，员工点击确认调用 `approve`，取消调用 `deny`。
+
+### 5.2 桌面客户端（`apps/desktop`）
 
 | 模块 | 职责 |
 |---|---|
-| `src/deployment.ts` | 读写 `userData/deployment.json` 与 `ca.pem`（0600）；解析和校验接入链接：只接受 https 源，CA 必须可解析且 `basicConstraints` 为 CA，链接不超过 8KB |
-| `src/main.ts` | 单实例锁。macOS 处理 `open-url`，Windows 处理 `second-instance` 的 argv，`setAsDefaultProtocolClient('baton')`；用原生对话框显示源和 SHA-256 指纹，由用户确认；已有身份且源不同时拒绝替换（DS-15、DS-16）；接入链接与注册操作串行执行 |
-| `src/trust.ts` | `session.setCertificateVerifyProc`：host 与保存的源一致时，用 Node `X509Certificate` 沿 `issuerCert` 链校验签名、有效期和 `checkHost`/`checkIP`，链最终由保存的 CA 签发才放行，检查 CA 路径长度与服务器用途；当前未支持的名称、策略约束或未知 critical 扩展拒绝自定义信任；其他 host 返回 `-3`，交给系统校验（DS-17） |
-| `src/window.ts` | `contextIsolation`、`sandbox` 开启，`nodeIntegration` 关闭。`will-navigate` 和 `setWindowOpenHandler` 把非中心源交给 `shell.openExternal`；关闭窗口改为隐藏（DS-20） |
-| `src/preload.ts` | 仅当 `location.origin` 等于保存的源时，通过 `contextBridge` 暴露 `batonDesktop`：`{ protocol: 1, version, status(), onStatus(cb), enroll(input), reauth(input) }` |
-| `src/bridge.ts`、`src/main.ts` | 校验接入参数、身份与中心源；main 端 IPC 每次核对调用方窗口、主 frame 与 `event.senderFrame.url`，不符就拒绝 |
-| `src/batond.ts` | 解析内置 batond 的路径（`process.resourcesPath/batond/batond(.exe)`）；`identity()` 调用 `batond identity`；`enroll()` 以子进程运行 `register --coordinator <源> --ca-file <userData/ca.pem> --display-name …`，凭据只通过子进程环境变量 `BATON_ENROLLMENT_TOKEN` 传入；`reauth()` 同理 |
-| `src/supervisor.ts` | 运行 `batond run --exit-with-stdin`，stdout 和 stderr 写入 `<数据目录>/logs/desktop-batond.log`（超过 10MB 轮转一份）；退出码 78 或末行 code 为终止类时停止重启，显示原因；客户端仍在运行时其他退出（含 0）按 1s→30s 退避重启，60 秒内连续失败 5 次则停止。`daemon_running` 时进入「外部运行」模式，读状态文件，并每 30 秒重试接管。退出客户端时关闭 stdin，等待 15 秒 |
-| `src/status.ts` | 合并 supervisor 状态与 `daemon-status.json`，推送给托盘和桥接 |
-| `src/tray.ts` | 状态文本，菜单项为打开窗口、重启 batond、打开日志目录、登录时启动（勾选）、退出（DS-22） |
-| `src/autostart.ts` | `app.setLoginItemSettings`，默认开启，选择保存在 userData 的 `login-start.json`；以登录项启动时隐藏窗口（DS-21） |
+| `src/coordinator.ts` | 读写 `userData/coordinator.json`（`{ format: 1, coordinator_url }`，`0600`）；校验 `baton://connect?url=...` 仅接受纯 HTTPS 源（长度 ≤ 2 KiB，不含用户信息、路径或查询串） |
+| `src/main.ts` | 单实例锁、注册 `baton://` 协议、原生确认框保存中心地址；经 `ControlClient` 查询本机 `batond` 绑定状态，已绑定原中心时拒绝跨中心替换（DS-14） |
+| `src/window.ts` | 开启 `contextIsolation` 与 `sandbox`，关闭 `nodeIntegration`；未保存中心地址时加载本地静态 `setup.html`，非中心源链接一律交由 `shell.openExternal` 打开；关闭窗口改为隐藏到托盘（DS-16） |
+| `src/preload.ts` / `src/bridge.ts` | 仅在主框架且 `location.origin` 等于已保存中心源时注入 `window.batonDesktop`；提供 `status()`、`onStatus(cb)`、`startLogin({ displayName? })`、`cancelLogin()`、`logout()` 等受限方法 |
+| `src/daemon-client.ts` | 封装内置 `resources/batond/batond(.exe)` 的 `ControlClient`（含按需拉起与周期性/事件驱动状态同步） |
+| `src/tray.ts` / `src/autostart.ts` | 托盘展示连接状态与拒绝原因；默认开启系统登录自启并隐藏启动（`userData/login-start.json`）；选择「退出」时若 `service_installed === false` 先调用 `control.shutdown`（最多等待 10 秒）再退出应用，若 `service_installed === true` 仅退出客户端界面与托盘（DS-17） |
 
-**身份规则**（DS-19）
-
-客户端启动时先运行 `batond identity`：
-- **未注册：** 等待网页发起接入。
-- **已注册且 `coordinator_url` 等于保存的源：** 直接启动监管。
-- **已注册但源不同：** 显示冲突，不启动，也不改保存的配置。
-
-数据目录使用 batond 默认的 `~/.baton/data`，与 CLI 共用。
-
-**打包布局**
-
-`tools/package-desktop.mjs --batond <batond 安装目录> --out <目录>` 把整个 batond 安装目录作为 `extraResources` 放到 `resources/batond/`，生成 `baton-desktop-<版本>-<平台>.<dmg|exe>` 及 `.sha256`。客户端版本取 batond 的 `release.json`，保证与 batond 一致。
-
-macOS 的应用整体做临时签名，内置的 batond 保留自身的临时签名。发布流水线在 macos-15 和 windows-2025 两个 job 中，于 batond 打包之后运行 `package-desktop`，产物与 CLI 包一同上传。
-
-**升级**（DS-23）
-
-替换应用后，`userData` 与数据目录保持不变。中心以版本不兼容拒绝时，托盘显示状态文件中的 code，并打开中心下载页。需要数据迁移的升级不在客户端首版处理。
+桌面端一键绑定流程（DS-15）：Devices 页面在桌面模式且 `state === 'unbound'` 时显示「连接这台电脑」→ 调用 `batonDesktop.startLogin({ displayName })` → 主进程经本地控制通道触发 `login_start` 取得 `{ session_id, user_code, expires_at }` → 窗口内弹出确认框展示设备信息与短码 → 员工点击确认直接请求同源 `POST /api/v1/device-auth/sessions/:id/approve` → 后台 `batond` 轮询拿到凭据后自动保存身份并连接上线。
 
 ## Testing and validation
 
 | Requirement | Setup and observation | Failure condition | Where | Status |
 |---|---|---|---|---|
-| DS-02、DS-03 | 提供原始发布包并核对下载字节和摘要，另放入摘要不符的包 | 下载内容被修改或摘要不符的包进入清单 | `apps/server` 单元 + 集成 | 待验证 |
-| DS-01、DS-02 | 中心集成测试启用下载，匿名请求清单与文件，变换 Host | 需要登录；清单哈希与下载内容不一致；未列出的文件名能被下载；Host 不匹配时仍生成部署配置 | `apps/server` 集成 | implemented |
-| DS-05～DS-07 | 用注入的 transport 注册和重新认证；SEA 场景用临时目录模拟 `deployment.json` | 未保存或未替换 CA；已有身份时读了部署配置；显式参数没有优先 | `apps/batond` 单元 | implemented |
-| DS-08～DS-10 | 生成 plist 和 unit 文本；用替身 runner 验证重复安装替换、命令失败回滚、状态查询、daemon 快照读取与过期判断、卸载保留数据 | 定义缺少参数；失败后残留或覆盖了原定义；状态遗漏拒绝原因；快照缺失或损坏导致查询失败；卸载删除数据目录 | `apps/batond` 单元 | implemented |
-| DS-11 | 持有 `daemon.lock` 时运行 `run` | 没有输出 `daemon_running` | `apps/batond` 单元 | implemented |
-| 状态文件、`--exit-with-stdin` | 复用 `reconnect.test.ts` 的协议替身检查认证、拒绝和停止状态；CLI 单元测试检查 stdin EOF 触发中止，中心 e2e 检查连接与停止状态 | 状态缺失或不准；关闭 stdin 后 daemon 不退出 | `apps/batond` 单元 + `e2e` | implemented |
-| DS-12、DS-13 | 渲染有无下载、各平台和重新认证的注册对话框，以及 Devices 页的接入链接 | 下载命令包含凭据或部署参数；无下载时旧命令丢失；Windows 显示 CLI 命令；客户端中的页面仍显示接入链接 | `web` 单元 | implemented |
-| DS-14 | 桥接替身验证本机接入、显示名、闲置重新认证、失败与过期重领、状态订阅和取消订阅 | 桌面模式显示命令或下载；凭据被渲染；重新认证交给错误设备；旧查询覆盖状态通知 | `web` 单元 | implemented |
-| DS-15～DS-17 | 测试数据中固定根 CA、中间 CA、服务器与其他 CA 证书（附生成命令）；测试链接解析、证书链、源和身份检查 | 接受 http 源或非 CA 证书；非中心 host 使用了保存的 CA；用其他 CA 签发的叶子通过校验 | `apps/desktop` 单元（Node，不启动 Electron） | implemented |
-| DS-18～DS-20 | supervisor 使用替身 spawn：正常退出、78、反复崩溃、`daemon_running`、退出流程；另测凭据环境传递与状态合并 | 终止类失败仍重启；退避或次数上限不对；退出时没有关闭 stdin；凭据进入进程参数或返回错误 | `apps/desktop` 单元 | implemented |
-| CLI 全链路 | 现有 HTTPS e2e 中心，在数据目录外注入安装目录与 `deployment.json`，不带中心地址和 CA 参数注册并连接 | 必须传 `--coordinator` 或 `--ca-file` | `e2e` | implemented |
-| DS-08、DS-09 launchd | macOS arm64 上用开发 bundle、临时数据目录与离线身份执行 install → status → uninstall；连接地址仅指向本机不可用端口 | 状态未显示运行、程序或日志路径不符、卸载后仍有服务定义或 daemon、身份与日志被删除 | 手动，结果见 release TECH「验证」 | manual |
-| systemd、客户端安装与常驻 | macOS arm64 已验证客户端 DMG 安装与说明页启动；真实接入、系统登录、Debian 服务与 Windows 客户端仍待对应系统验收 | 任一验收行不符 | 手动，范围见 release TECH | manual |
-
-自动化测试不下载 Electron，也不访问外部服务。系统服务和桌面集成依赖真实系统，只做手动验证，未测的平台如实记录。
-
-## 实施顺序
-
-1. 部署配置 Schema、batond 读取部署配置和保存 CA、`identity` 命令、状态文件、错误码、`--exit-with-stdin`。客户端和 CLI 都依赖这一步。
-2. 中心原始安装包托管、下载接口，以及网页注册对话框的 CLI 部分。
-3. `batond service`。
-4. `apps/desktop`、网页桌面模式、`package-desktop` 与发布流水线。
-
-第 2～4 步只依赖第 1 步，可以并行。
-
-## Open questions
-
-- macOS arm64 已核对应用整体与内置 batond 的临时签名有效，安装后能够调用 `identity` 并显示说明页。Windows NSIS、真实接入与登录启动尚待手动验证。
-- Windows 上 Electron 启动的 batond，在客户端被强制结束时，Worker 是否随 Job Object 一起退出，沿用 [发布 TECH](../release/TECH.md) 记录的 Windows 进程回收边界，手动验证时记录结果。
+| DS-01～DS-03 | 配置临时下载目录（含合法包、版本不符包、摘要损坏包），匿名请求 `/api/v1/downloads` 与 `/downloads/<file>`，切换 `Host` | 需要登录；坏包进入清单；未列出文件可下载；`connect_url` 含证书参数或匹配非允许源 | `apps/server` 单元 + 集成 | planned |
+| DS-04～DS-07 | 发起设备码会话，覆盖未确认轮询、确认换取凭据、响应丢失幂等重试、过期、拒绝、同中心重登与跨中心/已吊销防覆盖 | `device_code` 泄漏到员工查询或日志；过期或拒绝后仍签发凭据；重试产生重复设备；静默覆盖异中心身份 | `apps/server` 集成 + `apps/batond` 单元 | planned |
+| DS-08、DS-09 | 停止 `batond` 后并发从 CLI 与桌面客户端发起 `status`；模拟中心返回 `credential_revoked` 与 `node_version_incompatible` | 并发拉起产生双实例错误；错误控制令牌通过认证；终止类拒绝后 `batond` 仍死循环重连或退出丢失原因 | `apps/batond` 单元 + `e2e` | planned |
+| DS-10、DS-11 | 用替身执行器验证 `launchd` / `systemd --user` 安装、已有后台 `batond` 平滑停机接管、命令失败回滚、`linger` 提示与卸载保留数据 | 服务定义含无效参数；未停止旧后台进程导致锁冲突；失败残留半写入文件；卸载删除数据目录 | `apps/batond` 单元 | planned |
+| DS-12～DS-15 | 网页测试覆盖浏览器添加设备弹窗、`/device-login` 确认页及桌面模式一键绑定；桌面端单测覆盖 `baton://connect` 校验与跨中心保护 | 弹窗仍生成口令或 `curl -k`；非 HTTPS 源被保存；子框架或外部源可调用桥接；已绑定设备被静默换源 | `web` 单元 + `apps/desktop` 单元 | planned |
+| DS-16、DS-17 | 桌面端单测验证关窗隐藏、自启配置，以及 `service_installed` 为 `false` / `true` 时的退出控制通道行为；真机验证原生托盘与安装覆盖 | 未安装服务退出客户端后 `batond` 仍残留运行；已安装服务退出客户端时误停后台服务 | `apps/desktop` 单元 + macOS / Windows 手动验证 | planned |

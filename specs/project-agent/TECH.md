@@ -6,7 +6,7 @@ Basis: [PRODUCT.md](PRODUCT.md) PA-01～PA-26；[Baton TECH](../baton/TECH.md)�
 
 ## Context
 
-Baton 的 Thread 对应设备上的一个原生 Agent 会话，由 Session Worker 维护消息队列、Turn 边界和回复账本，中心保存 Thread 记录和每条回复（[Baton TECH](../baton/TECH.md)「Thread 与 Turn」）。Project Agent 直接发起的命令以独立 Execution 记录和运行。节点只主动连接 Gateway，单条控制消息上限 256 KiB。
+Baton 的 Thread 对应设备上的一个原生 Agent 会话，由 `batond` 进程内的 Thread 状态机与 `node.db` 维护消息队列、Turn 边界和回复账本，按需通过 `agent-host` 子进程运行原生会话，中心保存 Thread 记录和每条回复（[Baton TECH](../baton/TECH.md)「Thread 与 Turn」）。Project Agent 直接发起的命令以独立 Execution 记录和运行。节点只主动连接 Gateway，单条控制消息上限 256 KiB。
 
 Project Agent 是比 Thread 存在更久的协调者。它的运行位置每次都可能不同，它开的 Thread 结束一轮时它可能不在运行。所以它的对话、记忆和待处理输入都放在 Coordinator，运行时只是一个按需启动的 Runtime 进程。它对 Thread 的操作走和员工相同的 Store 入口，只是操作者记为 Project Agent。
 
@@ -31,7 +31,7 @@ pi-agent-core 只包含 Agent Loop、工具执行和事件流（`packages/agent/
               │
            batond ── stdio ── baton-project-runtime（Node.js，pi-agent-core + pi-ai）
               │
-        Session Worker（执行 Agent，现有）
+       Thread 状态机（进程内）── stdio ── agent-host（按需启动，空闲休眠）
 ```
 
 Project Runtime 是独立进程，业务实现位于 `runtimes/project-agent`。开发节点使用 Node 26，通过该包的 tsx loader 启动源码 CLI；SEA 安装包将其作为 `project-runtime` 子命令分发，布局见 [发布设计](../release/TECH.md#打包与发布)。batond 负责上报能力、启动和停止进程、代为续租。Runtime 不直接连 Coordinator，所有请求经专用 stdio（独立源码运行也支持本地 IPC）交给 batond，再沿 Gateway 通道送到 Coordinator，复用节点认证。这样不需要为节点新开一条访问 Coordinator 的数据通道。

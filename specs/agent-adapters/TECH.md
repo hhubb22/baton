@@ -7,30 +7,29 @@ Thread 创建 DTO、持久记录、Worker 配置和原生映射携带执行模�
 
 ## 实现边界
 
-当前实现包含 Worker 的认证 IPC、持久命令回执、intent 账本、停止裁决与 outbox，batond 的注册、WSS 和 Worker 管理，中心与网页的远程 Thread、Project 和设备管理。Cursor、Pi、Codex、Kiro 经 `agent-host` 子进程使用 fork 的完整 provider adapter。Kiro 在程序已安装且认证 valid/unknown 时报告可用，版本和系统不限，开放网页新建与恢复。适配器行为以完整上游实现和当前 PRODUCT 为依据，离线验证复用 fork 的测试与转录；Kiro 夹具说明见 [fork README](../../upstream/t3code/packages/provider-acp-registry/src/testing/fixtures/kiro/README.md)。
+节点在 `batond` 进程内运行单 Thread 串行状态机（`apps/batond/src/worker/`），由统一 `node.db` 保存持久命令回执、intent 账本、停止裁决与上行报告 outbox，并通过本地控制通道对外提供查询与控制；中心与网页负责远程 Thread、Project 和设备管理。Cursor、Pi、Codex、Kiro、Antigravity、Droid 经按需拉起的 `agent-host` 子进程使用 fork 的完整 provider adapter。六个 Agent 在程序已安装且认证 valid/unknown 时报告可用，版本和系统不限，开放网页新建与恢复。适配器行为以完整上游实现和当前 PRODUCT 为依据，离线验证复用 fork 的测试与转录；Kiro 夹具说明见 [fork README](../../upstream/t3code/packages/provider-acp-registry/src/testing/fixtures/kiro/README.md)。
 
 Agent 接入整包依赖 Baton 维护的 t3code fork，使用其完整 provider 包和 `ProviderAdapterV2` 接口，接受上游的协议处理、重试、重连、steer、取消和事件归一化行为。Baton 不为产品差异修改上游 adapter；上游缺少的能力（如 Kiro）在 fork 中按上游写法补齐。包体积和依赖范围在第一版接受现状，之后再按需要逐步转写为自实现。
 
-Baton 保留自己的 Worker 可靠层、中心和网页：持久接收、intent 先于原生提交、未知不由 Worker 重发、控制代次、停止证据与进程树回收继续由 Worker 负责。上游的 Run、checkpoint、rollback、fork 和 MCP 工具集不作为 Baton 产品能力暴露；原生待审批请求按 R-11 通过 Thread 交给员工处理。产品条目下文简称 R-01 至 R-12，均指配套行为规格。
+Baton 保留自己的节点状态机可靠层、中心和网页：持久接收、intent 先于原生提交、未知不重发、控制代次、停止证据与进程树回收由节点状态机负责。上游的 Run、checkpoint、rollback、fork 和 MCP 工具集不作为 Baton 产品能力暴露；原生待审批请求按 R-11 通过 Thread 交给员工处理。产品条目下文简称 R-01 至 R-12，均指配套行为规格。
 
 ## 架构与职责
 
 ```text
 Coordinator：Thread 命令、报告与历史记录
-  └─ batond：设备能力与探测、Worker 发现与启动
-      └─ worker 子命令：thread.db、命令回执、intent、Turn、回复与 outbox
-          └─ agent-host 子命令：每 Thread 一个进程组
-              └─ Baton 宿主层 + t3code ProviderAdapterV2
-                  ├─ provider-pi
-                  ├─ provider-codex（fork 中从 apps/server 移出）
-                  ├─ provider-acp + provider-acp-registry（Kiro、Droid）
-                  ├─ provider-antigravity + provider-acp
-                  └─ provider-cursor → @cursor/sdk
+  └─ batond：设备能力与探测、本地控制通道、统一 node.db 与进程内 Thread 状态机（命令回执、intent、Turn、回复与 outbox）
+       └─ agent-host 子命令：按需启动，每活动 Thread 一个进程组，空闲满 10 分钟休眠回收
+            └─ Baton 宿主层 + t3code ProviderAdapterV2
+                 ├─ provider-pi
+                 ├─ provider-codex（fork 中从 apps/server 移出）
+                 ├─ provider-acp + provider-acp-registry（Kiro、Droid）
+                 ├─ provider-antigravity + provider-acp
+                 └─ provider-cursor → @cursor/sdk
 ```
 
 目录职责与实现入口统一见 [AGENTS.md](../../AGENTS.md#核心架构与目录)。
 
-Worker 通过 `agents/thread-agents.ts` 和纯数据 catalog 装配执行工厂，不加载探测、SDK、provider adapter 或 host driver，保持就绪预算（Windows 10 秒，其余系统 3 秒）。`buildBatond` 检查 Worker 运行时依赖图，覆盖静态导入、再导出和字面量动态加载，禁止绕入 host 实现或不可解析的动态加载。daemon 与普通 CLI 通过 `agents/probe.ts` 探测，Cursor 安装预检只通过 `sdk-inspection.ts` 读取元数据与资产路径。执行 agent-host 由 `cli/agent-host.ts` 按类型动态加载对应模块，Cursor SDK 只在 Cursor host 内执行。安装包的 `agent-host --probe` 会加载六个 Agent 模块以检查完整性。每个执行 Thread 一个 agent-host，它是 POSIX 进程组组长或 Windows Worker 账本登记的根进程。POSIX 的上游独立组由 host 内部 registrar/watchdog 另行管理；Windows registrar 不另行登记上游子进程，回收受下文平台边界约束。探测在 batond 拉起的只读 agent-host 中执行，用同一套平台接口回收。
+节点通过 `agents/thread-agents.ts` 和纯数据 catalog 装配执行工厂，`batond` 主图不静态加载 SDK、provider adapter 或 host driver。`buildBatond` 检查运行时依赖图，覆盖静态导入、再导出和字面量动态加载，禁止主图绕入重型 host 运行包或不可解析的动态加载。daemon 与普通 CLI 通过 `agents/probe.ts` 探测，Cursor 安装预检只通过 `sdk-inspection.ts` 读取元数据与资产路径。执行 `agent-host` 由 `cli/agent-host.ts` 按类型动态加载对应模块，Cursor SDK 只在 Cursor host 内执行。安装包的 `agent-host --probe` 会加载六个 Agent 模块以检查完整性。每个活动执行 Thread 对应一个 `agent-host`，它是 POSIX 进程组组长或 Windows `node.db` 账本登记的根进程，空闲满 10 分钟无排队输入或待答问题时自动休眠回收，下次输入透明 `resume`。POSIX 的上游独立组由 host 内部 registrar/watchdog 另行管理；Windows registrar 不另行登记上游子进程，回收受下文平台边界约束。探测在 `batond` 拉起的只读 `agent-host` 中执行，用同一套平台接口回收。
 
 ### 宿主层
 
@@ -38,8 +37,8 @@ agent-host 为上游 adapter 提供它要求的 Effect service：
 
 | service | Baton 提供的实现 |
 |---|---|
-| `ChildProcessSpawner`、`FileSystem` | `@effect/platform-node`；POSIX spawner 将上游独立组登记给 host 自己的 registrar/watchdog；Worker 账本登记 host 根进程，Windows registrar 返回 false |
-| `AgentScope` | `wrap` 透传命令，`stop`、`clear` 为空；adapter/spawner Scope 释放各自资源，Worker 执行外层整树回收 |
+| `ChildProcessSpawner`、`FileSystem` | `@effect/platform-node`；POSIX spawner 将上游独立组登记给 host 自己的 registrar/watchdog；`node.db` 登记 host 根进程，Windows registrar 返回 false |
+| `AgentScope` | `wrap` 透传命令，`stop`、`clear` 为空；adapter/spawner Scope 释放各自资源，节点状态机执行外层整树回收 |
 | `ProviderHost` | `paths` 指向 Thread 工作目录与设备私有状态目录；`settings` 是静态快照；`credentials` 是只读空实现，认证使用设备显式配置的 `CURSOR_API_KEY`；`shouldRunBackgroundWork` 返回 false |
 | `McpProviderSessions` | 使用 provider-core 的内存实现；第一版不写入任何会话配置，Agent 不挂载 MCP 工具 |
 
@@ -47,104 +46,104 @@ adapter 选项中的 `environment` 只含系统必要变量和该 Agent 的配�
 
 ### 事件映射与 ThreadAgent
 
-agent-host 把 `ProviderAdapterV2` 映射到 Worker 现有的 `ThreadAgent`：
+agent-host 把 `ProviderAdapterV2` 映射到节点状态机的 `ThreadAgent`：
 
 | ThreadAgent | 上游调用或事件 |
 |---|---|
 | `open` | `openSession` 与 `ensureThread`；返回前把 `OrchestrationV2ProviderThread` 原子写入原生映射文件 |
 | `resume` | 读取映射，调用 `resumeThread` |
 | `send` | 队列消息调用 `startTurn`，Pi、Codex 插入调用 `steerTurn` 并保留上游执行归属；Cursor、Kiro 拒绝插入；调用成功即视为原生接收 |
-| `sent` | 新建只读 agent-host 调用 `readThreadSnapshot`；user 消息数超过 Worker 已确认发送数且下一条正文相同时确认，否则返回未确认 |
+| `sent` | 新建只读 agent-host 调用 `readThreadSnapshot`；user 消息数超过已确认发送数且下一条正文相同时确认，否则返回未确认 |
 | `abort` | `interruptTurn` |
 | `events` | assistant 消息完成映射为 `reply`，turn 完成或中断映射为 `end`，会话错误或进程退出映射为 `uncertain` / `exited` |
 | `output` | assistant 文本增量 |
 
 `agent-host/driver.ts` 的通用驱动负责上述映射、持久原生映射、迟到事件过滤和 sent 判定。映射还保存 Agent 类型与非敏感的本机 profile 目录，恢复时核对它们；目录变化直接拒绝。Pi、Codex、Kiro 使用原生 CLI 的认证，Cursor 使用显式 `CURSOR_API_KEY`。Kiro 的 profile 只记录 `homedir()`，没有专有环境变量目录映射。
 
-`prepareInput` 与 `restoreInput` 不读取原生历史，InputPreparation 只保存原生会话、准备标识和 Worker 已确认的发送数。运行时权限请求、`user_input` 和 `mcp-elicitation` 通过 `turn_item.updated` 的问题内容和 `runtime_request.updated` 的请求身份关联，保存到 Worker 账本并报告中心，网页提供原生批准选项、文本回答和取消。Codex 的 MCP elicitation 按上游提供的确认语义回答；ACP 表单由上游转换为结构化问题。其他请求返回取消。停止后的请求取消，执行结束或 Worker 恢复时关闭旧问题；提问期间继续计入本轮执行时限。回答命令与原请求及执行身份绑定，在调用上游前持久保存 intent；结果不确定时保留诊断并禁止自动重发。上游的 `rollbackThread`、`forkThread`、`compactThread` 与 `uploadFeedback` 不接入。
+`prepareInput` 与 `restoreInput` 不读取原生历史，InputPreparation 只保存原生会话、准备标识和已确认的发送数。运行时权限请求、`user_input` 和 `mcp-elicitation` 通过 `turn_item.updated` 的问题内容和 `runtime_request.updated` 的请求身份关联，保存到 `node.db` 并报告中心，网页提供原生批准选项、文本回答和取消。Codex 的 MCP elicitation 按上游提供的确认语义回答；ACP 表单由上游转换为结构化问题。其他请求返回取消。停止后的请求取消，执行结束或恢复时关闭旧问题；提问期间继续计入本轮执行时限。回答命令与原请求及执行身份绑定，在调用上游前持久保存 intent；结果不确定时保留诊断并禁止自动重发。上游的 `rollbackThread`、`forkThread`、`compactThread` 与 `uploadFeedback` 不接入。
 
 ## 运行时与进程模型（R-08、R-12）
 
 ### 运行时与本地存储
 
-Worker 运行在 batond SEA 携带的 Node 26 上，依赖 `effect` 4 与 `@effect/platform-node`，版本在 pnpm catalog 中统一锁定。账本复用已有 `packages/sqlite`，在现有表的数据职责基础上设计 TS schema，保存下文命令、输入基准和进程字段，不读旧账本。提交结果不确定时使用 SqlClient 的提交核查；仍无法确认则停止执行并从持久事实恢复。
+`batond` 与 `agent-host` 运行在 SEA 携带的 Node 26 上，依赖 `effect` 4 与 `@effect/platform-node`，版本在 pnpm catalog 中统一锁定。统一 `node.db` 复用 `packages/sqlite`，集中保存所有 Thread 与 Execution 的命令、输入基准、状态与进程登记。提交结果不确定时使用 SqlClient 的提交核查；仍无法确认则冻结对应状态机并从持久事实恢复。
 
-账本保持 `journal_mode=WAL`、`synchronous=FULL`。t3code 使用 NORMAL，因为 `node:sqlite` 在主线程同步提交，FULL 会让每次提交的 fsync 停住事件循环。Baton 的 intent 必须在调用原生提交前落盘，NORMAL 在断电时可能丢掉已提交的 intent，所以不采用。每个 Thread 一个 Worker 进程，提交卡顿只影响该 Thread；已记录 macOS arm64、Linux x64 与 arm64 的实际账本测量，此负载提交 p99 均低于 50 ms；Windows 尚无数据。负载范围与数值集中在 [发布验证](../release/TECH.md)，若后续测量或实际命令接收延迟超标，再评估 `worker_threads`。
+`node.db` 保持 `journal_mode=WAL`、`synchronous=FULL`。t3code 使用 NORMAL，因为 `node:sqlite` 在主线程同步提交，FULL 会让每次提交的 fsync 停住事件循环。Baton 的 intent 必须在调用原生提交前落盘，NORMAL 在断电时可能丢掉已提交的 intent，所以不采用。所有 Thread 与 Execution 共享同一串行写连接，已记录 macOS arm64、Linux x64、Linux arm64 与 Windows Server 2022 的账本基准测量（见 [发布验证](../release/TECH.md)）；若后续高并发提交延迟超标，再评估将 SQLite 写入移入 `worker_threads`。
 
-账本里保存的单调时间使用 `process.hrtime.bigint()`。它在同一次开机内跨进程可比，但不计系统睡眠，所以设备睡眠期间停止计时会暂停，唤醒后才到期；这只会推迟强制回收，不影响 unknown 判定。batond 的 Project Runtime 租约与 Worker 的 Turn 执行时限均计入睡眠，做法见 [Baton 平台实现](../baton/TECH.md#平台相关实现)。
+账本里保存的单调时间使用 `process.hrtime.bigint()`。它在同一次开机内可比，但不计系统睡眠，所以设备睡眠期间停止计时会暂停，唤醒后才到期；这只会推迟强制回收，不影响 unknown 判定。Project Runtime 租约与 Turn 执行时限均计入睡眠，做法见 [Baton 平台实现](../baton/TECH.md#平台相关实现)。
 
 ### 进程组与停止回收
 
-每个执行 Thread 独占一个 agent-host 进程及其后代，本期不做跨 Thread 的 app-server 或 SDK host 共享。Cursor 将 SDK 的 detached 后代并入 host 进程组。Pi、Codex、Kiro 的 `foldDetached: false` 保留原生进程组供上游发送组信号，包装 spawner 用 process registrar 登记独立进程组；release 在注销前回收整树，仅在回收成功或确认 PID 身份不符时注销。超时和检查失败返回错误并记录警告，保留登记供 watchdog 在 host 退出后继续回收；watchdog 确认注销后才删除本地登记。该路径无需修改上游共享进程模块。
+每个活动执行 Thread 独占一个 `agent-host` 进程及其后代，不做跨 Thread 的 app-server 或 SDK host 共享；空闲满 10 分钟自动关闭回收 `agent-host` 并保持 Thread `idle`。Cursor 将 SDK 的 detached 后代并入 host 进程组。Pi、Codex、Kiro 的 `foldDetached: false` 保留原生进程组供上游发送组信号，包装 spawner 用 process registrar 登记独立进程组；release 在注销前回收整树，仅在回收成功或确认 PID 身份不符时注销。超时和检查失败返回错误并记录警告，保留登记供 watchdog 在 host 退出后继续回收；watchdog 确认注销后才删除本地登记。该路径无需修改上游共享进程模块。
 
-| 系统 | 启动 | 停止超时（一分钟）后 | Worker 意外退出 |
+| 系统 | 启动 | 停止超时（一分钟）后 | `batond` 意外退出 |
 |---|---|---|---|
-| macOS、Linux | `detached: true`，Agent 成为独立进程组组长 | `process.kill(-pgid, "SIGKILL")` | `watchdog` 子命令持有私有管道读端，读到 EOF 即对已登记的进程组发 SIGKILL |
-| Windows | 普通子进程，PID 与进程创建时间写入账本 `thread_processes` | `taskkill /PID <pid> /T /F` | 下次 Worker 启动时读取 `thread_processes`，PID 与创建时间都匹配的进程用 `taskkill /T /F` 结束，再清除记录 |
+| macOS、Linux | `detached: true`，`agent-host` 成为独立进程组组长 | `process.kill(-pgid, "SIGKILL")` | `watchdog` 子命令持有私有管道读端，读到 EOF 即对已登记的进程组发 SIGKILL |
+| Windows | 普通子进程，PID 与进程创建时间写入 `node.db` 的 `node_processes` | `taskkill /PID <pid> /T /F` | 下次 `batond` 启动时读取 `node_processes`，PID 与创建时间都匹配的进程用 `taskkill /T /F` 结束，再清除记录 |
 
-POSIX 的 watchdog 是 batond 可执行文件的 `watchdog` 子命令：Worker 被强杀时内核关闭管道写端，watchdog 不依赖 Worker 配合。Worker 把每个新建的进程组 ID 通过该管道登记给 watchdog。
+POSIX 的 watchdog 是 `batond` 可执行文件的 `watchdog` 子命令：`batond` 或 `agent-host` 被强杀时内核关闭管道写端，watchdog 不依赖宿主配合。宿主把每个新建的进程组 ID 通过该管道登记给 watchdog。
 
-Windows 第一版接受两个已知缺口。`taskkill /T` 按父 PID 向下查找，中间进程先退出时，其后代会漏掉；Worker 被强杀后，到下次 Worker 启动之间 Agent 进程会继续运行。Windows 进程创建时间在恢复时通过 PowerShell `Get-CimInstance Win32_Process` 读取，用于排除 PID 复用。kill-on-close Job Object 放在第一版之后，需以原生模块接入平台回收接口。全局停止与恢复规则见 `specs/baton/TECH.md`，两处采用相同的 Windows 边界。
+Windows 第一版接受两个已知缺口。`taskkill /T` 按父 PID 向下查找，中间进程先退出时，其后代会漏掉；`batond` 被强杀后，到下次 `batond` 启动之间 `agent-host` 进程可能继续运行。Windows 进程创建时间在恢复时通过 PowerShell `Get-CimInstance Win32_Process` 读取，用于排除 PID 复用。kill-on-close Job Object 放在第一版之后，需以原生模块接入平台回收接口。全局停止与恢复规则见 `specs/baton/TECH.md`，两处采用相同的 Windows 边界。
 
-停止先等待 Turn 终止或回收证据，再回收执行实例与持久进程记录；全部确认后写 `thread.stopped`，未确认则 unknown。回收测试用本地替身创建 detached 后代，核对整棵进程树退出，不能只看 agent-host PID 已消失。batond 重启仍通过已有认证 IPC 连接存活的 Worker，不因重连重开 Agent。
+停止先等待 Turn 终止或回收证据，再回收执行实例与持久进程记录；全部确认后写 `thread.stopped`，未确认则 unknown。回收测试用本地替身创建 detached 后代，核对整棵进程树退出，不能只看 `agent-host` PID 已消失。
 
-### Worker IPC
+### 本地控制通道与状态机驱动
 
-Worker IPC 使用令牌认证与固定端点：POSIX 为私有目录下的 UDS，Windows 为命名管道。Node 的 `net` 模块可直接监听两者，但不能给命名管道设置只允许当前用户的安全描述符，第一版依靠令牌认证，令牌保存在私有数据目录中（见 [Baton 平台实现](../baton/TECH.md#平台相关实现)）。消息结构以 `packages/protocol` 为准，`ThreadReport` 的 `command_id`、`command_outcome` 表达命令终态，`RuntimeAgent.reason` 保存能力诊断。Worker 以 detached 方式启动，batond 重启后通过同一端点重新连接。
+CLI 与桌面客户端通过受 `control.token` 认证的本地控制通道（POSIX UDS / Windows Named Pipe，见 [设备接入设计](../device-setup/TECH.md)）访问唯一 `batond`；中心命令经 WSS 到达 `batond` 后，直接在进程内写入 `node.db` 并驱动对应 Thread 的串行状态机 fiber，生成的 `ThreadReport` 写入 `node.db` 的 `thread_outbox` 并直连 WSS 上报，不再经过跨进程 Worker IPC 中转。
 
-## Worker 接收与异步执行（R-04、R-05、R-08）
+## 命令接收与异步执行（R-04、R-05、R-08）
 
-### 启动与命令回执
+### 启动、懒加载与命令回执
 
-Worker 取得 Session 文件锁、打开并验证本地账本后，先建立认证 IPC，再接收或恢复持久启动意图。首次启动须先接收 thread_open 并保存回执，才调度原生初始化；重启则只恢复已有持久意图。Host 的就绪等待只检查 Worker 的认证就绪状态，不等待 Agent；已存在的启动中 Worker 不得被再次拉起。`status` 区分 `worker_ready` 与 `agent_ready`，节点账本中的 ready 只表示本地 Worker 已接管，不能触发中心的 thread.opened。
+`batond` 取得 `daemon.lock` 并打开 `node.db` 后，启动时仅懒加载处于未决/活动态的 Thread 执行恢复；历史 `idle`、`stopped`、`archived` Thread 不在启动时拉起 `agent-host`。首次创建须先接收 `thread_open` 并写入 `node.db` 保存回执，再在独立 Scope 内异步启动 `agent-host` 完成原生初始化。
 
-Worker 以短事务接收命令。`thread_commands(id, payload)` 的 JSON 保存内容摘要、接收回执和执行结果，状态为 accepted/running 或终态 succeeded/failed/cancelled/unknown；通过 IPC 传递中心原始命令 ID。接收回执与该命令的状态或队列变更在同一事务提交。相同 ID、相同内容返回原回执和已知结果，内容不同时拒绝，不因已 ACK 再次执行。消息仍按 client_message_id 唯一，不同传输命令 ID 绑定到同一消息及同一执行结果。
+节点以短事务接收命令。`thread_commands(thread_id, id, ...)` 保存内容摘要、接收回执和执行结果，状态为 accepted/running 或终态 succeeded/failed/cancelled/unknown，保留中心原始命令 ID。接收回执与该命令的状态或队列变更在同一 `node.db` 事务提交。相同 ID、相同内容返回原回执和已知结果，内容不同时拒绝，不因已 ACK 再次执行。消息仍按 `client_message_id` 唯一，不同传输命令 ID 绑定到同一消息及同一执行结果。
 
-所有命令终态、对应业务状态和最终报告在同一个 Worker 事务写入。`command.completed` 报告携带 `command_id`、`command_outcome`、reason 和 storage_generation；同事务先写相关 thread.opened/resumed、message.sent/withdrawn/unknown 或停止报告，再写完成报告。open/resume 在实际打开或恢复后完成，message 在原生输入确认或明确撤回/未知后完成，stop 在停止证据或未知结果确定后完成。重启扫描 accepted/running 和持久意图，不能仅依赖内存任务队列；终态命令只补送 outbox，不再次调度。
+所有命令终态、对应业务状态和最终报告在同一个 `node.db` 事务写入。`command.completed` 报告携带 `command_id`、`command_outcome`、reason 和 `storage_generation`；同事务先写相关 `thread.opened`/`resumed`、`message.sent`/`withdrawn`/`unknown` 或停止报告，再写完成报告。open/resume 在实际打开或恢复后完成，message 在原生输入确认或明确撤回/未知后完成，stop 在停止证据或未知结果确定后完成。重启扫描 accepted/running 和持久意图，不能仅依赖内存任务队列；终态命令只补送 outbox，不再次调度。
 
-中心以 thread_outbox.acked_at 表示设备已持久接收，以 completed_at、completion(JSONB) 保存执行结果。正 ACK 不设置 completed_at，执行前的明确拒绝同时结束命令；command.completed 按命令 ID、Thread、节点与存储代次验证后写完成状态。完成报告先于接收 ACK 到达也有效，迟到 ACK 不能覆盖完成结果。ThreadView.resume_pending 和恢复请求去重查询 action=resume 且 completed_at 为空，持续到成功、失败、停止取消或未知终态；期间重复恢复请求复用同一待完成命令。
+中心以 `thread_outbox.acked_at` 表示设备已持久接收，以 `completed_at`、`completion(JSONB)` 保存执行结果。正 ACK 不设置 `completed_at`，执行前的明确拒绝同时结束命令；`command.completed` 按命令 ID、Thread、节点与存储代次验证后写完成状态。完成报告先于接收 ACK 到达也有效，迟到 ACK 不能覆盖完成结果。`ThreadView.resume_pending` 和恢复请求去重查询 `action=resume` 且 `completed_at` 为空，持续到成功、失败、停止取消或未知终态；期间重复恢复请求复用同一待完成命令。
 
 本地账本丢失或旧存储代次失效时，中心的历史缺失处理同时将受影响的待完成命令结束为 unknown，不能让已无法恢复的 resume 永久保持 pending。
 
-| 命令 | IPC 返回前完成 | 异步完成与报告 |
+| 命令 | 回执返回前完成 | 异步完成与报告 |
 |---|---|---|
-| open | 保存配置、启动意图与命令回执 | 原生建立及映射持久化后发 thread.opened，失败发 thread.open_failed |
-| message | 校验归属和能力，保存 queued 消息与回执；steer 同时固定当前 target_turn_seq，无活动回合则拒绝 | 必要时恢复原生会话；准备、intent、提交后发 message.sent/unknown/withdrawn |
-| resume | 校验允许恢复，保存 resumeRequested 与回执 | 恢复后发 thread.resumed，失败保持 stopped 或 unknown |
+| open | 保存配置、启动意图与命令回执 | 原生建立及映射持久化后发 `thread.opened`，失败发 `thread.open_failed` |
+| message | 校验归属和能力，保存 queued 消息与回执；steer 同时固定当前 `target_turn_seq`，无活动回合则拒绝 | 若 `agent-host` 未运行或已休眠则先透明 `resume`；准备、intent、提交后发 `message.sent`/`unknown`/`withdrawn` |
+| resume | 校验允许恢复，保存 `resumeRequested` 与回执 | 恢复后发 `thread.resumed`，失败保持 stopped 或 unknown |
 | stop | 同事务保存停止标记、撤回 queued、递增控制代次与回执 | 中断正在启动、准备或提交的任务；等待终止证据并核实实例和持久进程回收，报告 stopped 或 unknown |
 
-open 的成功 `ThreadCommandResult` 携带当前 `storage_generation`，中心校验当前连接后将它写入 Thread 已有字段，但不设置 opened_at、native_session_id 或 idle。这样 Agent 仍在初始化时，stop 已能携带正确代次到达节点。opened 报告可能先于 ACK 到达，二者须核对同一代次；迟到旧连接或不同代次不能覆盖现有归属。网页根据在线状态、接收确认和 opened_at 展示“设备已接收，Agent 正在启动”，不把 Worker ready 显示为 Agent 空闲。
+open 的成功 `ThreadCommandResult` 携带当前 `storage_generation`，中心校验当前连接后将它写入 Thread 已有字段，但不设置 `opened_at`、`native_session_id` 或 idle。这样 Agent 仍在初始化时，stop 已能携带正确代次到达节点。opened 报告可能先于 ACK 到达，二者须核对同一代次；迟到旧连接或不同代次不能覆盖现有归属。网页根据在线状态、接收确认和 `opened_at` 展示“设备已接收，Agent 正在启动”。
 
-`thread_meta.payload` 保存 `resumeRequested` 和 `epoch`；`thread_messages.payload` 以 `preparation` 保存准备证据，以 `targetTurn` 固定异步 steer 目标，并保存执行身份与结束标记。`thread_processes(pid, created_at, role)` 保存所属进程；完整物理结构见 [Worker 账本](../baton/TECH.md#worker-账本)。
+`threads` 表保存 `resume_requested` 和控制代次 `epoch`；`thread_messages` 以 `preparation` 保存准备证据，以 `target_turn_seq` 固定异步 steer 目标，并保存执行身份与结束标记。`node_processes` 保存所属进程；完整物理结构见 [节点本地存储](../baton/TECH.md#节点本地存储)。
 
-状态变更和 SQLite 事务由一个串行的 Effect 队列处理；原生 Start、历史读取、模型配置、Send、Abort 和进程等待作为独立 fiber 在队列外执行。每个异步结果携带控制代次、操作标识和原生会话引用，过期结果不能改变新状态。stop 有独立登记与中断路径，不能排在发送 fiber 或启动任务之后。
+每个 Thread 的状态变更由串行 Effect 队列处理并提交至 `node.db`；原生 Start、历史读取、模型配置、Send、Abort 和进程等待作为独立 fiber 在队列外执行。每个异步结果携带控制代次、操作标识和原生会话引用，过期结果不能改变新状态。stop 有独立登记与中断路径，不能排在发送 fiber 或启动任务之后。
 
-停止先于 intent 提交时，撤回尚未提交的 queued 输入；intent 已提交则保留可能已经发出的事实，取消并查历史，不能当成未发送撤回。即使尚无活动 Turn，只要有启动或准备任务，就必须保留 stop 标记并中断/回收，不能按空闲路径清除它。准备或提交中收到 stop 后不启动下一条消息，待 SDK handle/原生 turn 建立时立即应用已登记的取消。异步 steer 写 intent 前核对 target_turn_seq 与原生执行引用；目标已结束时撤回仍 queued 的消息并说明原因。写 intent 后的过期目标按 unknown 核查，不流入下一轮。启动失败、完成报告丢失和命令 ACK 丢失分别按本地持久事实恢复。
+停止先于 intent 提交时，撤回尚未提交的 queued 输入；intent 已提交则保留可能已经发出的事实，取消并查历史，不能当成未发送撤回。即使尚无活动 Turn，只要有启动或准备任务，就必须保留 stop 标记并中断/回收，不能按空闲路径清除它。准备或提交中收到 stop 后不启动下一条消息，待 SDK handle/原生 turn 建立时立即应用已登记的取消。异步 steer 写 intent 前核对 `target_turn_seq` 与原生执行引用；目标已结束时撤回仍 queued 的消息并说明原因。写 intent 后的过期目标按 unknown 核查，不流入下一轮。启动失败、完成报告丢失和命令 ACK 丢失分别按本地持久事实恢复。
 
-首次 open 的成功与 stop 在 Worker 的串行状态事务中裁决。成功映射和 thread.opened 尚未提交时，先持久接收的 stop 取消 open，禁止补发 thread.opened；回收已登记进程与迟到创建的 SDK 实例，发送 thread.open_failed（reason 为启动被停止）及 open 的 cancelled 完成结果，再按停止证据结束 stop。该 Thread 保持从未成功打开，不能用残留映射自动恢复或重新创建。
+首次 open 的成功与 stop 在该 Thread 的串行状态事务中裁决。成功映射和 `thread.opened` 尚未提交时，先持久接收的 stop 取消 open，禁止补发 `thread.opened`；回收已登记进程与迟到创建的 SDK 实例，发送 `thread.open_failed`（reason 为启动被停止）及 open 的 cancelled 完成结果，再按停止证据结束 stop。该 Thread 保持从未成功打开，不能用残留映射自动恢复或重新创建。
 
-若 open 的成功事务已提交，则其 thread.opened 必须按 WorkerSeq 先于停止报告发出；stop 走已打开会话的正常取消路径。过期启动结果除禁止更新状态外，还必须关闭/回收其资源；停止确认前要排除仍可能派生子进程的启动任务，取消后的控制代次禁止新建资源。最终裁决、命令终态和报告顺序都持久保存，重启不得改变结果。
+若 open 的成功事务已提交，则其 `thread.opened` 必须按 `worker_seq` 先于停止报告发出；stop 走已打开会话的正常取消路径。过期启动结果除禁止更新状态外，还必须关闭/回收其资源；停止确认前要排除仍可能派生子进程的启动任务，取消后的控制代次禁止新建资源。最终裁决、命令终态和报告顺序都持久保存，重启不得改变结果。
 
 ### 期限与单次准备
 
 | 路径 | 预算与关系 |
 |---|---|
-| Worker 进程就绪 | Host 最多 3 秒，Windows 最多 10 秒，仅含 Node 启动、账本与认证 IPC；原生初始化在其后异步开始 |
-| 命令接收 | Worker 认证与短事务目标期限 1 秒；Host 就绪等待加 IPC 1 秒，复用外层剩余期限而不逐段重置；Windows 上就绪等待可能超过节点 5 秒期限，此时命令失败，以相同命令 ID 查询或重试接收，启动中的 Worker 不会被再次拉起 |
-| 原生 open/send | SDK/原生调用预算 30 秒，agent-host 通信 32 秒，Worker 阶段预算 35 秒；逐层保留返回与清理余量 |
+| 命令接收 | 节点进程内校验与 `node.db` 短事务目标期限 1 秒（无需拉起独立 Worker 进程），外层网关请求期限 5 秒；原生初始化与恢复在其后异步执行 |
+| 原生 open/resume/send | SDK/原生调用预算 30 秒，`agent-host` 通信 32 秒，节点状态机阶段预算 35 秒；逐层保留返回与清理余量 |
 | 输入准备 | 整个准备阶段最多 10 秒，历史子调用服从剩余期限；与提交合计最多 45 秒，不占命令接收期限 |
+| 空闲休眠 | Thread 进入 `idle` 且无排队输入或待答问题满 10 分钟（`IDLE_HOST_TIMEOUT_MS = 600_000`）后自动关闭回收 `agent-host` |
 | Stop | 从持久接收 stop 起独立计时，最长一分钟；不能等输入的 45 秒预算耗尽后才开始计时 |
 | 后台探测 | 最多 30 秒的非执行任务，服从独立并发和进程回收约束，不阻塞接收命令 |
 
-所有慢操作都是可中断的 Effect，并以 `Effect.timeout` 套上本表预算。Worker 在登记任务时为其建立独立 Scope，不能复用即将结束的 5 秒命令上下文。RestoreInput 只恢复本地基准，不发起历史查询。断开命令 IPC 不中断已经持久接收的执行，持久 stop、阶段超时和 Worker 退出负责中断任务。SEA 冷启动耗时计入就绪预算，在三个系统上测量。Windows 上新 Worker 首次读取自身创建时间要启动 PowerShell（约 2～3 秒），预算为 10 秒；其余系统为 3 秒，超出时先缩小 Worker 入口的同步加载。
+所有慢操作都是可中断的 Effect，并以 `Effect.timeout` 套上本表预算。节点状态机在登记任务时为其建立独立 Scope，不复用即将结束的 5 秒命令请求上下文。`restoreInput` 只恢复本地基准，不发起历史查询。持久 stop、阶段超时和 `batond` 退出负责中断任务。
 
-输入准备只在本地完成：prepareInput 生成准备标识并与 intent 原子提交，restoreInput 在进程重启后恢复它，二者都不读取原生历史。新输入、控制代次变化或原生身份变化使准备失效。接收确认与恢复核查见上文 `sent` 的映射。
+输入准备只在本地完成：`prepareInput` 生成准备标识并与 intent 原子提交，`restoreInput` 在进程重启后恢复它，二者都不读取原生历史。新输入、控制代次变化或原生身份变化使准备失效。接收确认与恢复核查见上文 `sent` 的映射。
 
-## Worker 保证与上游行为（R-04～R-09）
+## 节点状态机保证与上游行为（R-04～R-09）
 
-以下由 Worker 保证，与具体 adapter 无关：命令先持久接收再执行；intent 提交后才调用 `send`；`send` 结果未知时先调用 `sent`，仍无法确认则进入 unknown，Worker 不再次提交同一输入；stop 有独立登记路径，一分钟内没有终止事件就回收进程树；所有异步结果写状态前核对控制代次。
+以下由节点状态机保证，与具体 adapter 无关：命令先持久接收再执行；intent 提交后才调用 `send`；`send` 结果未知时先调用 `sent`，仍无法确认则进入 unknown，状态机不再次提交同一输入；stop 有独立登记路径，一分钟内没有终止事件就回收进程树；所有异步结果写状态前核对控制代次。
 
-通用 driver 将上游 `turn.terminal` 的 `failed` 转为带原生会话、输入与执行身份的 `end`（`outcome: failed`），并附安全原因。Worker 按正常结束路径保存 `turn.ended`，现有 `reason` 为 `failed`，`content` 为安全原因；中心将 `end_reason: failed` 写入 `thread_turns`，并把含原因的完整报告保存为时间线事件，无需扩展共享协议。输入保持 sent，Worker 保留 Agent 实例、host 进程与原生会话，继续调度队列。`queue_empty` 在结束事务中计算，中心据此选择 idle 或 running。网页在对应回合显示 `<Agent> could not finish this reply` 与原因，不为此显示 unknown 提示。运行时请求无法应答、事件流断开、发送结果无法确认、host 崩溃或连接丢失仍进入 unknown。
+通用 driver 将上游 `turn.terminal` 的 `failed` 转为带原生会话、输入与执行身份的 `end`（`outcome: failed`），并附安全原因。状态机按正常结束路径保存 `turn.ended`，现有 `reason` 为 `failed`，`content` 为安全原因；中心将 `end_reason: failed` 写入 `thread_turns`，并把含原因的完整报告保存为时间线事件，无需扩展共享协议。输入保持 sent，状态机保留 Agent 实例、host 进程与原生会话，继续调度队列。`queue_empty` 在结束事务中计算，中心据此选择 idle 或 running。网页在对应回合显示 `<Agent> could not finish this reply` 与原因，不为此显示 unknown 提示。运行时请求无法应答、事件流断开、发送结果无法确认、host 崩溃或连接丢失仍进入 unknown。
 
 以下按上游实现接受：adapter 内部的请求重试、断线重连和会话恢复（如 Cursor resume 冲突时取消旧 run 再发送，`enableAgentRetries`）；Pi、Codex 的 steer 归属；子任务与后台任务何时算回合结束；中断后的终态时序。上游行为导致的问题先在 fork 中修复并提交上游，不在 Baton 接入层另做一套等价逻辑。
 
@@ -265,7 +264,7 @@ Kiro 与 Droid 的 `turnFailure` 回调处理真实回合的 provider failure：
 
 中心先按原客户端标识查询创建幂等记录；请求摘要保存显式 `runtime_mode` 或固定的「使用上游默认」标记，首次创建再解析默认并保存实际值。相同请求重试返回原 Thread，不因后续上游常量或设备报告变化重新选择；请求字段改变返回既有创建冲突。open、重试打开与 resume 的 payload 均从持久配置取实际模式。
 
-中心在接收时核对上游支持范围和本机能力快照，节点在执行前再次检查。设备离线时可保存明确的创建选择，重新上线后发现该模式不可用则报告启动失败，不改用其他模式。恢复前核对中心、节点、Worker 与原生映射；冲突时保留会话和 intent，不用当前默认值补齐。存活 Worker 的认证 status 报告已保存 mode，daemon 重连不会改变它。
+中心在接收时核对上游支持范围和本机能力快照，节点在执行前再次检查。设备离线时可保存明确的创建选择，重新上线后发现该模式不可用则报告启动失败，不改用其他模式。恢复前核对中心、`node.db` 与原生映射；冲突时保留会话和 intent，不用当前默认值补齐。活动 Thread 状态机的 status 报告已保存 mode，`batond` 重连中心不会改变它。
 
 | 结果 | 契约 |
 |---|---|
@@ -278,7 +277,7 @@ Kiro 与 Droid 的 `turnFailure` 回调处理真实回合的 provider failure：
 
 模式不绕过 `threads/core.ts` 的员工、节点和初始工作目录检查，不改变文件浏览 API 边界。`nodes.exec` 仍校验本机开关。前端、模型工具与 `adapter_config` 不接受任意 native policy JSON，不通过环境或返回文本覆盖持久 mode。
 
-沿用上游原测试和转录，只为传递、持久恢复与审批转交补回归。首版前的数据库与设备记录使用当前结构基线，旧实验记录需要重建；发布后的模式迁移按 [发布设计](../release/TECH.md#持久格式与迁移)保存原会话真实策略，无法确认时不自动恢复。
+沿用上游原测试和转录，只为传递、持久恢复与审批转交补回归。首版前的数据库与设备记录使用当前结构基线，旧实验记录需要重建；发布后的模式迁移按 [发布设计](../release/TECH.md)保存原会话真实策略，无法确认时不自动恢复。
 
 ### Cursor 模式探测
 
@@ -302,19 +301,19 @@ batond bundle 直接打包用到的 `@t3tools/*` 包及其纯 JS 依赖。原生
 
 Kiro host 回放使用上述授权转换的夹具，验证范围包括真实 adapter 的新建、两轮、停止（含工具运行中）、恢复、`restore_missing` 失败和 `sent` 的确认与未确认；工具中断夹具中的权限请求经真实 adapter 返回 `allow_once`。进程回收用真实 Kiro adapter 与本地 ACP 协议替身，确认 ACP 独立进程组及同组 grandchild 在正常关闭和 host SIGKILL 后均退出，强杀路径由 registrar watchdog 回收。`e2e/src/provider-agents.integration.test.ts` 通过注入已验证 capability 驱动真实 Kiro adapter，覆盖网页 API 发送、回复、中心 idle、停止与恢复；此注入验证自动化行为，不能证明真实账号授权有效；生产报告按节点探测到的安装与认证状态决定，版本和系统保留为诊断信息。
 
-版本探测测试使用本地可执行替身，验证 stdout/stderr 版本解析、预发布后缀保留、诊断不外传、非零退出、缺程序和超时后进程退出，不启动真实 CLI。现有六个 Agent 的注册表测试核对未知版本、其他系统、认证 unknown 和版本超时均放行，缺程序与明确 missing 拒绝；Cursor 探测的模式区分按 R-11 验证。认证失败场景由 `provider_error` 派生夹具驱动真实 adapter、agent-host 与 Worker；该夹具和原始 provider 错误场景分别接上 `simple` 的成功回合，来源记录在 metadata。测试核对失败原因持久化、原始错误不外传、输入保持 sent、排队消息继续执行、最终 idle，以及原生会话和进程保留。跨 app e2e 核对中心读取失败原因和 idle 后，再发消息能收到回复。
+版本探测测试使用本地可执行替身，验证 stdout/stderr 版本解析、预发布后缀保留、诊断不外传、非零退出、缺程序和超时后进程退出，不启动真实 CLI。现有六个 Agent 的注册表测试核对未知版本、其他系统、认证 unknown 和版本超时均放行，缺程序与明确 missing 拒绝；Cursor 探测的模式区分按 R-11 验证。认证失败场景由 `provider_error` 派生夹具驱动真实 adapter、`agent-host` 与节点状态机；该夹具和原始 provider 错误场景分别接上 `simple` 的成功回合，来源记录在 metadata。测试核对失败原因持久化、原始错误不外传、输入保持 sent、排队消息继续执行、最终 idle，以及原生会话和进程保留。跨 app e2e 核对中心读取失败原因和 idle 后，再发消息能收到回复。
 
 | 范围 | 验证 | 层次 |
 |---|---|---|
 | fork 中用到的包 | 运行各包上游测试；Codex 拆包与 `kiroAcp`、`droidAcp` 的新增测试 | 上游模块测试 |
 | 宿主层 | 各 service 的路径、凭据、环境白名单；spawner 登记进程组 | 包内单测 |
 | 事件映射 | 用上游 testkit 替身驱动真实 adapter，核对 reply、end、uncertain 与 `sent` 判定 | 确定性回放 |
-| Worker 保证 | 接收、intent、unknown、停止裁决与回收测试，使用可控 ThreadAgent 替身并补真实 host 回放 | Worker 集成 |
-| 主链路 | Cursor、Pi、Codex、Kiro、Antigravity、Droid 经真实 provider host 回放验证网页 API 发送、回复、停止与恢复；remote/Project 复杂场景使用本地 ThreadAgent 替身 | e2e |
+| 节点状态机保证 | 接收、intent、unknown、停止裁决、空闲休眠唤醒与回收测试，使用可控 `ThreadAgent` 替身并补真实 host 回放 | 包内集成 |
+| 主链路 | Cursor、Pi、Codex、Kiro、Antigravity、Droid 经真实 provider host 回放验证网页 API 发送、回复、停止与恢复；remote/Project 复杂场景使用本地 `ThreadAgent` 替身 | e2e |
 | 历史 | 网页与 `threads.read` 读取同一份中心 Thread 记录，分页与权限正确 | 中心集成与 Web 契约 |
 | 探测与 reason | 六个 Agent 已安装且认证 valid/unknown 时 available；未知版本、其他系统、版本失败或超时只记入诊断。缺程序、明确认证缺失或 Cursor 公共依赖失败时 unavailable，sandbox 故障按 R-11 区分模式；整次探测未确认安装时 unverified；未开放能力写明原因 | 包内与本地可执行替身 |
-| Kiro 回合失败 | `provider_error` 与派生认证失败经真实 host/Worker 保存失败原因，输入保持 sent，后续排队消息执行并收到回复、原生会话与进程保留；中心时间线可读原因、空队列时 idle，网页在对应回合显示失败 | 确定性回放、Worker 集成、跨 app e2e 与网页数据层 |
-| Thread 执行权限 | API、CLI、Project 创建与默认值、模式幂等、持久恢复、按模式准入；Full access 通过真实 adapter 本地替身链路 | 中心与 Worker 包内集成、host 离线回放及跨 app 本地替身；真实系统沙箱隔离未验证 |
+| Kiro 回合失败 | `provider_error` 与派生认证失败经真实 host 与状态机保存失败原因，输入保持 sent，后续排队消息执行并收到回复、原生会话与进程保留；中心时间线可读原因、空队列时 idle，网页在对应回合显示失败 | 确定性回放、包内集成、跨 app e2e 与网页数据层 |
+| Thread 执行权限 | API、CLI、Project 创建与默认值、模式幂等、持久恢复、按模式准入；Full access 通过真实 adapter 本地替身链路 | 中心与节点包内集成、host 离线回放及跨 app 本地替身；真实系统沙箱隔离未验证 |
 | 安装包 | 脱离源码运行 SEA，加载 t3code 依赖与附带目录 | 打包检查 |
 
 ## 上游参考
@@ -333,13 +332,13 @@ Kiro host 回放使用上述授权转换的夹具，验证范围包括真实 ada
 
 | 项目 | 缺口 | 处理与阻塞范围 |
 |---|---|---|
-| FULL 同步提交耗时 | macOS arm64、Linux x64 与 arm64 的 records.add/remove 负载已有测量；输入 intent、大队列与 Windows 未测 | 测量值与限制见 [发布验证](../release/TECH.md)；后续测量超标时评估 worker_threads |
-| Windows 进程回收 | taskkill 有父进程先退出和 Worker 崩溃后延迟回收两个缺口 | 已接受为第一版范围；Job Object 放第一版之后 |
+| FULL 同步提交耗时 | 四平台串行提交基准已测；多 Thread 高并发输入 intent 与大队列压测待补 | 测量值与限制见 [发布验证](../release/TECH.md)；后续测量超标时评估 `worker_threads` |
+| Windows 进程回收 | `taskkill` 有父进程先退出和 `batond` 被强杀后延迟回收两个缺口 | 已接受为第一版范围；Job Object 放第一版之后 |
 | 上游进程组 | 上游 adapter 自建 detached 进程组时的登记 | `agent-host/reclaim.integration.test.ts` 验证并组与独立 pgid 回收；Kiro `reclaim.integration.test.ts` 以真实 adapter 和本地 ACP 替身验证独立组与 grandchild，正常关闭、仅强杀 host 均回收。Pi、Kiro host 回放覆盖工具中断 |
 | Cursor 认证 | 上游 driver 使用 credential store 与 keyring | 已定：只用设备显式配置的 `CURSOR_API_KEY`，经 adapter 的 `environment` 注入；`ProviderHost.credentials` 保持只读空实现 |
 | Kiro ACP | 离线验证不证明真实账号授权有效 | 程序已安装且认证 valid/unknown 时开放 create/resume，版本和系统不限；reason 提示首次原生执行检查，明确 missing 拒绝；上游不支持 steer 和换模型 |
-| agent-host 冷启动 | 加载 t3code 依赖后的启动耗时未测 | 不计入 Worker 3 秒预算；open 仍受 30 秒原生预算约束，按目标系统单独测量 |
-| t3code 依赖打包 | 已有四模块与 keyring 加载检查，原生依赖放在 SEA 旁；Windows 的 Worker/私有文件仍有验证缺口 | 安装包布局、检查入口和各系统结果见 [发布设计](../release/TECH.md) |
+| `agent-host` 冷启动 | 加载 t3code 依赖后的启动耗时未测 | 在异步 open/resume 30 秒原生预算内执行，不阻塞 1 秒命令接收事务；按目标系统单独测量 |
+| t3code 依赖打包 | 六模块与 keyring 加载检查在打包检查中执行，原生依赖放在 SEA 旁 | 安装包布局、检查入口和各系统结果见 [发布设计](../release/TECH.md) |
 | Antigravity | macOS arm64 上 `agy` 1.4.12 已验证新建、审批、停止与恢复；未登录报错、Windows 和 Linux 未验证 | 不阻塞开放，范围写入诊断 |
 | Droid | macOS arm64 上 `droid` 1.1.0 已验证 ACP 协议交互与离线回放；Windows 和 Linux 未验证 | 不阻塞开放，范围写入诊断 |
 | Grok | 待接入，安装、认证与恢复证据未核查 | 只阻塞自身交付 |
