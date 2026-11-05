@@ -233,7 +233,7 @@ export function ProjectAssistantDialog({
       description={
         device.hasRuntime
           ? '配置项目助手在此设备上使用的订阅、API 连接与命令权限。'
-          : '此设备尚未安装项目助手，请更新 Baton。'
+          : '此设备尚未安装项目助手，请重新安装 Baton。'
       }
       actions={<Button onClick={onClose}>完成</Button>}
     >

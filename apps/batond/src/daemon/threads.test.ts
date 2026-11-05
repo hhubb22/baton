@@ -17,7 +17,6 @@ import { initializeBrowseRoots, loadBrowseRoots } from '../devices/roots.ts'
 import { CommandDeliveryUncertain, makeThreadService } from './threads.ts'
 import type { DaemonWorkerHost } from './host.ts'
 import { IPCError } from './ipc.ts'
-import { saveUpgradeState } from './upgrade.ts'
 import { ensurePrivateDirectory, writePrivateFileAtomic } from '../platform/private.ts'
 import { makePrivateTempDirectory } from '../testing/private.ts'
 
@@ -262,50 +261,6 @@ it('backs off idle polling, wakes on commands and durably collects late reports 
       expect(status).toBeGreaterThan(baseline)
       // A reachable status keeps recovery from spawning a duplicate Worker.
       expect(ensured).toBe(1)
-    }),
-  )
-})
-
-it('persists Worker receipts while draining and rejects ready commands before writing', async () => {
-  await withService(({ commandId, command, host, path, setHandler }) =>
-    Effect.gen(function* () {
-      const ledger = yield* makeNodeLedger(join(path, 'node.db'))
-      const delivered: WorkerRequest[] = []
-      setHandler(async (_id, req) => {
-        if (req.type === 'thread_command_status') return { type: 'result', ok: false, code: 'command_not_found' }
-        if (req.type === 'thread_pending') return { type: 'result', ok: true, thread_reports: [] }
-        delivered.push(req)
-        return accepted(req)
-      })
-      const service = makeThreadService({
-        dataDirectory: path,
-        identity: { node_id: randomUUID() } as NodeIdentity,
-        ledger,
-        host,
-        capability: () => capability,
-      })
-      const state = {
-        operation_id: randomUUID(),
-        source_version: 'development',
-        target_version: 'v1',
-        target_path: path,
-        phase: 'draining' as const,
-      }
-      yield* Effect.promise(() => saveUpgradeState(path, state))
-      expect((yield* Effect.promise(() => service.command(commandId, command))).ok).toBe(true)
-      expect(yield* ledger.pendingCommands()).toEqual([])
-      expect((yield* ledger.command(commandId))?.receipt?.command_id).toBe(commandId)
-      expect(delivered.map((req) => req.command_id)).toEqual([commandId])
-      yield* Effect.promise(() => saveUpgradeState(path, { ...state, phase: 'cancelled' }))
-      yield* Effect.promise(() => service.collectReports())
-      expect(delivered.map((req) => req.command_id)).toEqual([commandId])
-      expect(yield* ledger.pendingCommands()).toEqual([])
-      yield* Effect.promise(() => saveUpgradeState(path, { ...state, phase: 'ready' }))
-      const rejected = randomUUID()
-      expect(
-        yield* Effect.promise(() => service.command(rejected, { ...command, thread_id: randomUUID() })),
-      ).toMatchObject({ ok: false, code: 'node_upgrading' })
-      expect(yield* ledger.command(rejected)).toBeUndefined()
     }),
   )
 })

@@ -42,13 +42,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version }}
-          UPDATE_PUBLIC_KEYS: ${{ vars.BATON_UPDATE_PUBLIC_KEYS }}
+          RELEASE_PUBLIC_KEYS: ${{ vars.BATON_RELEASE_PUBLIC_KEYS }}
         run: |
           node --input-type=module -e 'import { releaseVersion } from "./tools/lib/release.mjs"; releaseVersion(process.env.RELEASE_VERSION)'
           mkdir -p "$RUNNER_TEMP/baton-assets"
-          printf '%s' "$UPDATE_PUBLIC_KEYS" > "$RUNNER_TEMP/update-keys.json"
+          printf '%s' "$RELEASE_PUBLIC_KEYS" > "$RUNNER_TEMP/release-keys.json"
           gh release download "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/baton-assets"
-          node tools/verify-release.mjs "$RUNNER_TEMP/baton-assets" "$RUNNER_TEMP/update-keys.json" "$RELEASE_VERSION" > "$RUNNER_TEMP/server-image.txt"
+          node tools/verify-release.mjs "$RUNNER_TEMP/baton-assets" "$RUNNER_TEMP/release-keys.json" "$RELEASE_VERSION" > "$RUNNER_TEMP/server-image.txt"
       - name: Deploy verified release
         env:
           RELEASE_VERSION: ${{ inputs.version }}

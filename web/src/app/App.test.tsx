@@ -993,45 +993,6 @@ describe('devices', () => {
     return screen.getByRole('button', { name: new RegExp(`^${name}`) })
   }
 
-  it.each([
-    ['draining', '等待升级'],
-    ['ready', '等待升级'],
-    ['migrating', '正在升级'],
-    ['syncing', '正在升级'],
-    ['completed', '正在运行 Baton Dev'],
-    ['failed', '升级已暂停'],
-    ['cancelled', '正在运行 Baton Dev'],
-  ] as const)('shows upgrade phase %s in the existing device status row', async (phase, label) => {
-    const user = userEvent.setup()
-    renderApp('/devices', 'normal', (client) => {
-      const read = client.listDevices.bind(client)
-      client.listDevices = async () =>
-        (await read()).map((device) =>
-          device.id === 'dev-ubuntu'
-            ? {
-                ...device,
-                upgradeState: {
-                  operationId: 'upgrade-one',
-                  sourceVersion: '0.9.1',
-                  targetVersion: '0.9.2',
-                  phase,
-                },
-              }
-            : device,
-        )
-    })
-    await screen.findByRole('button', { name: /^Ubuntu Dev/ })
-    const row = deviceRow('Ubuntu Dev')
-    expect(within(row).getByText(label)).toBeInTheDocument()
-    expect(within(row).queryByText('Online')).not.toBeInTheDocument()
-    if (phase !== 'cancelled' && phase !== 'completed')
-      expect(within(row).queryByText('正在运行 Baton Dev')).not.toBeInTheDocument()
-    await user.click(row)
-    if (phase === 'cancelled' || phase === 'completed') expect(screen.queryByText(/^0\.9\.2 · /)).toBeNull()
-    else expect(screen.getByText(/^0\.9\.2 · /)).toBeInTheDocument()
-    if (phase === 'failed') expect(screen.getByText('0.9.2 · 更新失败')).toBeInTheDocument()
-  })
-
   it('opens device setup without starting a device login', async () => {
     const user = userEvent.setup()
     renderApp('/devices', 'empty')

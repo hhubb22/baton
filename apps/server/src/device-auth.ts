@@ -144,8 +144,8 @@ export const approveSession = Effect.fnUntraced(function* (employeeId: string, i
       const credentialId = randomUUID()
       yield* sql`INSERT INTO nodes(id,employee_id,display_name,system_name,capabilities,registration_seq,registered_at,credential_version)
         VALUES(${nodeId}::uuid,${employeeId}::uuid,${session.display_name},${session.system},ARRAY[]::text[],nextval('node_registration_seq'),clock_timestamp(),1)`
-      yield* sql`INSERT INTO node_credentials(id,node_id,employee_id,version,created_at,expires_at)
-        VALUES(${credentialId}::uuid,${nodeId}::uuid,${employeeId}::uuid,1,clock_timestamp(),NULL)`
+      yield* sql`INSERT INTO node_credentials(id,node_id,employee_id,version,created_at)
+        VALUES(${credentialId}::uuid,${nodeId}::uuid,${employeeId}::uuid,1,clock_timestamp())`
       const updated =
         yield* sql`UPDATE device_login_sessions SET status='approved',employee_id=${employeeId}::uuid,node_id=${nodeId}::uuid,credential_id=${credentialId}::uuid
         WHERE id=${id}::uuid AND status='pending' AND expires_at>clock_timestamp() RETURNING id`
@@ -241,7 +241,6 @@ export const token = Effect.fnUntraced(function* (
               credential_version: credential.version,
               issued_at: Math.floor(credential.created_at.getTime() / 1000),
             }),
-            expires_at: null,
           },
           signing_public_key: signer.signingPublicKey,
         },

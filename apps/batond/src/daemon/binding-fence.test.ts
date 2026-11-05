@@ -15,7 +15,6 @@ import { loadBindingFence } from './binding-fence.ts'
 import { openExecutionLedger, readExecutionState } from '../execution/ledger.ts'
 import { executionPaths } from '../execution/paths.ts'
 import { makeExecutionService } from '../execution/service.ts'
-import { syncingExecutionReports } from './upgrade-execution.ts'
 import { FullOutputStore } from '../worker/full-output.ts'
 import { makeProjectLedger } from '../project/ledger.ts'
 import { loadIdentity, saveDeviceIdentity } from './identity.ts'
@@ -37,7 +36,7 @@ it('logout fences retained queues, reports and execution outputs from a replacem
     capabilities: [],
     registration_seq: 1,
     registered_at: new Date().toISOString(),
-    credential: { id: randomUUID(), token: 'old-secret', version: 1, expires_at: null },
+    credential: { id: randomUUID(), token: 'old-secret', version: 1 },
   }
   const config: WorkerOpenConfig = {
     thread_id: threadId,
@@ -248,7 +247,6 @@ it('logout fences retained queues, reports and execution outputs from a replacem
     const executions = makeExecutionService({ dataDirectory: directory, excludedIds: exclusions })
     await executions.recover()
     expect(await executions.collectReports()).toEqual([])
-    expect(await syncingExecutionReports(directory, exclusions).collectReports()).toEqual([])
     expect(
       await executions.command({
         type: 'execution.command',
@@ -275,7 +273,6 @@ it('logout fences retained queues, reports and execution outputs from a replacem
       ok: true,
     }
     await executions.ack(ack)
-    await syncingExecutionReports(directory, exclusions).ack(ack)
     expect(readExecutionState(paths.ledger)?.reports[0]?.acked).toBe(false)
     await Effect.runPromise(
       Effect.scoped(
@@ -313,7 +310,7 @@ it('device login fences retained execution and Project work when identity was lo
     capabilities: [],
     registration_seq: 1,
     registered_at: new Date().toISOString(),
-    credential: { id: randomUUID(), token: 'new-secret', version: 1, expires_at: null },
+    credential: { id: randomUUID(), token: 'new-secret', version: 1 },
   }
   try {
     await ensurePrivateDirectory(join(directory, 'executions'))

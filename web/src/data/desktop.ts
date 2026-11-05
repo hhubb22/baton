@@ -54,7 +54,6 @@ export interface DesktopDiagnostics {
   platform: string
   processState: string
   lastExit: { at: string; reason: string } | null
-  upgradePhase: string | null
   canRestart: boolean
 }
 

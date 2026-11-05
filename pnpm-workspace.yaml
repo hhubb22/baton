@@ -49,6 +49,7 @@ catalog:
 
 allowBuilds:
   electron: false
+  electron-winstaller: false
   esbuild: true
   '@google/genai': false
   protobufjs: false

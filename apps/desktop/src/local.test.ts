@@ -18,7 +18,6 @@ const info = {
   platform: 'darwin arm64',
   processState: 'online',
   lastExit: null,
-  upgradePhase: null,
   canRestart: true,
 }
 function fixture(path = '/missing-folder') {

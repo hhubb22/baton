@@ -3,11 +3,11 @@ import { createReadStream } from 'node:fs'
 import { lstat, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { verifyUpdateManifest } from '../packages/protocol/src/update-manifest.ts'
+import { verifyReleaseManifest } from '../packages/protocol/src/release-manifest.ts'
 
 export async function verifyRelease(directory, trustedKeys, version) {
-  const manifest = verifyUpdateManifest(
-    JSON.parse(await readFile(join(directory, 'update-manifest.json'), 'utf8')),
+  const manifest = verifyReleaseManifest(
+    JSON.parse(await readFile(join(directory, 'release-manifest.json'), 'utf8')),
     trustedKeys,
   )
   if (manifest.payload.version !== version) throw new Error('发布版本与清单不匹配')

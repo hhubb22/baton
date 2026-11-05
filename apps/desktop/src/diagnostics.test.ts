@@ -113,13 +113,12 @@ const info: DesktopDiagnostics = {
   platform: 'darwin-arm64',
   processState: 'restarting',
   lastExit: { at: '2026-06-01T12:00:00.000Z', reason: 'batond exited (code: 7, signal: none)' },
-  upgradePhase: 'draining',
   canRestart: false,
 }
 
-it('摘要包含版本、平台、设备状态、最近退出、升级阶段和最后 200 行日志', () => {
+it('摘要包含版本、平台、设备状态、最近退出和最后 200 行日志', () => {
   const result = diagnosticSummary(info, Array.from({ length: 250 }, (_, i) => `log line ${i}`).join('\n') + '\n')
-  for (const value of ['1.2.3', '1.2.4', 'darwin-arm64', 'restarting', info.lastExit!.at, 'code: 7', 'draining']) {
+  for (const value of ['1.2.3', '1.2.4', 'darwin-arm64', 'restarting', info.lastExit!.at, 'code: 7']) {
     expect(result).toContain(value)
   }
   expect(result).toContain('可以重启： 否')
@@ -137,7 +136,6 @@ it('摘要脱敏所有可变字段和退出消息，并在截取日志前处理�
       platform: 'deployment=offline-platform-value',
       processState: 'Cookie: offline-state-value',
       lastExit: { at: 'secret=offline-date-value', reason: 'failed\nAuthorization: offline-reason-value' },
-      upgradePhase: 'password=offline-phase-value',
       canRestart: true,
     },
     'deployment:\n' + Array.from({ length: 250 }, (_, i) => `offline-private-content-${i}`).join('\n'),
@@ -147,10 +145,9 @@ it('摘要脱敏所有可变字段和退出消息，并在截取日志前处理�
   expect(result.split('最近 batond 日志（最多 200 行）：\n')[1]!.split('\n')).toHaveLength(200)
 })
 
-it('无最近退出、升级或日志时仍可生成摘要', () => {
-  const result = diagnosticSummary({ ...info, lastExit: null, upgradePhase: null }, '')
+it('无最近退出或日志时仍可生成摘要', () => {
+  const result = diagnosticSummary({ ...info, lastExit: null }, '')
   expect(result).toContain('最近退出： 无')
-  expect(result).toContain('升级阶段： 无')
   expect(result).toContain('（日志不可用）')
 })
 

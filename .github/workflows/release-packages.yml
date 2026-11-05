@@ -59,7 +59,6 @@ jobs:
       RELEASE_VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
       RELEASE_TARGET: ${{ matrix.target }}
       BUILD_DESKTOP: ${{ github.event_name == 'push' || inputs.desktop }}
-      UPDATE_PUBLIC_KEYS: ${{ vars.BATON_UPDATE_PUBLIC_KEYS }}
       BATON_TEST_DATABASE_URL: postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable
     defaults:
       run:
@@ -89,16 +88,11 @@ jobs:
           fi
       - name: Install workspace
         run: pnpm install --frozen-lockfile --ignore-scripts
-      - name: Prepare trusted update keys
-        run: |
-          test -n "$UPDATE_PUBLIC_KEYS"
-          printf '%s' "$UPDATE_PUBLIC_KEYS" > "$RUNNER_TEMP/update-public-keys.json"
-          node --input-type=module -e 'import { updateKeys } from "./tools/lib/release.mjs"; if (!Object.keys(updateKeys(process.argv[1])).length) throw new Error("Missing update public key");' "$RUNNER_TEMP/update-public-keys.json"
       - name: Workspace checks
         run: |
           pnpm check
           pnpm typecheck
-          node --test tools/*.test.mjs tools/release/update-input.test.mjs
+          node --test tools/*.test.mjs tools/release/release-input.test.mjs
       - name: Linux workspace tests and server build
         if: runner.os == 'Linux'
         run: |
@@ -121,7 +115,7 @@ jobs:
       - name: Build native SEA package
         run: |
           mkdir -p bin/releases
-          node tools/package-batond.mjs --out bin/package --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" --update-keys "$RUNNER_TEMP/update-public-keys.json" > bin/releases/package-build.json
+          node tools/package-batond.mjs --out bin/package --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" > bin/releases/package-build.json
       - name: Check installed package
         run: node tools/check-package.mjs bin/package > bin/releases/package-check.json
       - name: Measure Worker startup and FULL ledger
@@ -233,13 +227,9 @@ jobs:
     env:
       RELEASE_VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
       BUILD_DESKTOP: ${{ github.event_name == 'push' || inputs.desktop }}
-      UPDATE_PUBLIC_KEYS: ${{ vars.BATON_UPDATE_PUBLIC_KEYS }}
-      UPDATE_KEY_ID: ${{ vars.BATON_UPDATE_KEY_ID }}
-      UPDATE_SIGNING_KEY: ${{ secrets.BATON_UPDATE_SIGNING_KEY }}
-      MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
-      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      RELEASE_PUBLIC_KEYS: ${{ vars.BATON_RELEASE_PUBLIC_KEYS }}
+      RELEASE_KEY_ID: ${{ vars.BATON_RELEASE_KEY_ID }}
+      RELEASE_SIGNING_KEY: ${{ secrets.BATON_RELEASE_SIGNING_KEY }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
@@ -265,21 +255,18 @@ jobs:
         with:
           name: update-image
           path: release-assets
-      - name: Sign update manifest
+      - name: Sign release manifest
         run: |
-          test -n "$UPDATE_PUBLIC_KEYS" && test -n "$UPDATE_KEY_ID" && test -n "$UPDATE_SIGNING_KEY"
+          test -n "$RELEASE_PUBLIC_KEYS" && test -n "$RELEASE_KEY_ID" && test -n "$RELEASE_SIGNING_KEY"
           umask 077
-          printf '%s' "$UPDATE_PUBLIC_KEYS" > "$RUNNER_TEMP/update-public-keys.json"
-          printf '%s' "$UPDATE_SIGNING_KEY" > "$RUNNER_TEMP/update-private-key.pem"
-          trap 'rm -f "$RUNNER_TEMP/update-private-key.pem"' EXIT
-          auto_flags=(--cli-only)
-          if [[ "$BUILD_DESKTOP" == true ]]; then
-            auto_flags=(--windows-auto-update)
-            if [[ -n "$MAC_CSC_LINK" && -n "$APPLE_API_KEY" && -n "$APPLE_API_KEY_ID" && -n "$APPLE_API_ISSUER" ]]; then auto_flags+=(--mac-auto-update); fi
-          fi
-          node tools/release/update-input.mjs --dir release-assets --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" --out release-assets/release-input.json "${auto_flags[@]}"
-          node tools/sign-update.mjs --metadata release-assets/release-input.json --key "$RUNNER_TEMP/update-private-key.pem" --key-id "$UPDATE_KEY_ID" --out release-assets/update-manifest.json
-          node tools/verify-release.mjs release-assets "$RUNNER_TEMP/update-public-keys.json" "$RELEASE_VERSION" > /dev/null
+          printf '%s' "$RELEASE_PUBLIC_KEYS" > "$RUNNER_TEMP/release-public-keys.json"
+          printf '%s' "$RELEASE_SIGNING_KEY" > "$RUNNER_TEMP/release-private-key.pem"
+          trap 'rm -f "$RUNNER_TEMP/release-private-key.pem"' EXIT
+          release_flags=(--cli-only)
+          if [[ "$BUILD_DESKTOP" == true ]]; then release_flags=(); fi
+          node tools/release/release-input.mjs --dir release-assets --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" --out release-assets/release-input.json "${release_flags[@]}"
+          node tools/sign-release.mjs --metadata release-assets/release-input.json --key "$RUNNER_TEMP/release-private-key.pem" --key-id "$RELEASE_KEY_ID" --out release-assets/release-manifest.json
+          node tools/verify-release.mjs release-assets "$RUNNER_TEMP/release-public-keys.json" "$RELEASE_VERSION" > /dev/null
           rm release-assets/release-input.json
       - name: Publish GitHub Release
         run: |

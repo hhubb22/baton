@@ -34,7 +34,7 @@ const identity = (): NodeIdentity => ({
   registration_seq: 1,
   registered_at: new Date().toISOString(),
   coordinator_url: 'https://coordinator.invalid',
-  credential: { id: randomUUID(), token: 'private-long-lived-token', version: 1, expires_at: null },
+  credential: { id: randomUUID(), token: 'private-long-lived-token', version: 1 },
 })
 async function fixture(options: Partial<RunDaemonOptions> = {}) {
   const directory = await makePrivateTempDirectory('baton-control-')

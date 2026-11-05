@@ -14,7 +14,7 @@ reset_data=${4:-false}
 cd /opt/services/baton
 exec 9>/run/lock/baton-deploy.lock
 flock -n 9 || { echo 'Another deployment is running.' >&2; exit 1; }
-test -f "$staging/assets/update-manifest.json"
+test -f "$staging/assets/release-manifest.json"
 test -f compose.yaml
 test -f .env
 target="/opt/services/baton/release-versions/$version"

@@ -5,7 +5,7 @@ import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
 import { AppError, type NodeSource } from '../errors.ts'
 import { canonical } from '../json.ts'
-import { lockNodeSource, revalidateNodeSource, nodeAllowsNewExecutionSQL } from '../nodes.ts'
+import { lockNodeSource, revalidateNodeSource } from '../nodes.ts'
 import {
   lockProjectAgent,
   projectDecode,
@@ -123,13 +123,13 @@ export const scheduleMemoryJobs = Effect.fn('scheduleMemoryJobs')(function* () {
         const nodes = yield* sql<{
           id: string
           report: P.RuntimeReport
-        }>`SELECT n.id,r.report FROM nodes n JOIN node_presence np ON np.node_id=n.id JOIN node_runtime_reports r ON r.node_id=n.id WHERE n.employee_id=${job.employee_id} AND n.revoked_at IS NULL AND np.online AND np.synced AND ${nodeAllowsNewExecutionSQL(sql)} AND EXISTS(SELECT 1 FROM node_credentials nc WHERE nc.node_id=n.id AND nc.version=n.credential_version AND nc.revoked_at IS NULL) ORDER BY n.registration_seq FOR UPDATE OF n`
+        }>`SELECT n.id,r.report FROM nodes n JOIN node_presence np ON np.node_id=n.id JOIN node_runtime_reports r ON r.node_id=n.id WHERE n.employee_id=${job.employee_id} AND n.revoked_at IS NULL AND np.online AND np.synced AND EXISTS(SELECT 1 FROM node_credentials nc WHERE nc.node_id=n.id AND nc.version=n.credential_version AND nc.revoked_at IS NULL) ORDER BY n.registration_seq FOR UPDATE OF n`
         let chosen = '',
           waiting = 'device_unavailable'
         for (const node of nodes) {
           if (j.kind === 'consolidation' && j.source_node_id && node.id !== j.source_node_id) continue
           const valid =
-            yield* sql`SELECT 1 FROM node_credentials nc JOIN nodes n ON n.id=nc.node_id WHERE n.id=${node.id} AND n.revoked_at IS NULL AND ${nodeAllowsNewExecutionSQL(sql)} AND nc.version=n.credential_version AND nc.revoked_at IS NULL`
+            yield* sql`SELECT 1 FROM node_credentials nc JOIN nodes n ON n.id=nc.node_id WHERE n.id=${node.id} AND n.revoked_at IS NULL AND nc.version=n.credential_version AND nc.revoked_at IS NULL`
           if (!valid.length) continue
           if (node.report.project_runtime?.memory_protocol !== 1) {
             waiting = 'memory_protocol_missing'

@@ -18,7 +18,7 @@ const oldestWait = Metric.gauge('baton.wait.oldest_age_s')
 
 const memoryReason = (reason: string, backoff: boolean): (typeof reasons)[number] | undefined => {
   if (backoff) return 'backoff'
-  if (['device_unavailable', 'node_idle_expired'].includes(reason)) return 'device_offline'
+  if (reason === 'device_unavailable') return 'device_offline'
   if (reason === 'login_required') return 'credential_missing'
   if (['device_busy', 'foreground_priority', ''].includes(reason)) return 'queue'
   return undefined

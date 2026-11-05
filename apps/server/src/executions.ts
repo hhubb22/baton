@@ -192,7 +192,7 @@ export const claimCommands = () =>
       AND n.revoked_at IS NULL AND c.revoked_at IS NULL
       AND e.status IN ('pending','running')
       AND (o.action='stop' OR e.stop_requested_at IS NULL)
-      AND (o.action='stop' OR COALESCE((SELECT u.phase IN ('completed','cancelled') FROM node_upgrades u WHERE u.node_id=n.id ORDER BY u.id DESC LIMIT 1),true))
+
     ORDER BY o.next_attempt_at,o.id LIMIT 32 FOR UPDATE OF o SKIP LOCKED`
       const commands: { message_id: string; employee_id: string; node_id: string; body: P.ExecutionCommand }[] = []
       for (const row of rows) {

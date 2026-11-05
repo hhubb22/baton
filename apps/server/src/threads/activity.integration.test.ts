@@ -10,17 +10,6 @@ import * as threads from './index.ts'
 type Run = TestDatabase['run']
 const query = <A extends object = Record<string, unknown>>(text: string, ...args: string[]) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) => sql.unsafe<A>(text, args))
-const credential = (run: Run, id: string) =>
-  run(query('SELECT expires_at::text,last_business_at::text FROM node_credentials WHERE id=$1', id))
-const reset = async (run: Run, id: string) => {
-  await run(
-    query(
-      "UPDATE node_credentials SET expires_at=NULL,last_business_at=clock_timestamp()-interval '29 days' WHERE id=$1",
-      id,
-    ),
-  )
-  return credential(run, id)
-}
 async function fixture(run: Run) {
   const node = await seedNode(run, {
     report: {
@@ -69,40 +58,27 @@ async function fixture(run: Run) {
   return { ...node, input, thread, command: command!, receipt, report }
 }
 
-it('records business activity only for the first successful receipt and new valid reports on the source device', () =>
+it('accepts repeated receipts and leaves report ordering conflicts on the source device', () =>
   withTestDatabase(async ({ run }) => {
     const f = await fixture(run)
-    const other = await seedNode(run, { employeeId: f.employeeId })
-    const otherBefore = await credential(run, other.credentialId)
-    const before = await reset(run, f.credentialId)
     await run(threads.processReceipt(f.source, f.command.message_id, f.receipt))
-    expect(await credential(run, f.credentialId)).not.toEqual(before)
-    const repeated = await reset(run, f.credentialId)
     await run(threads.processReceipt(f.source, f.command.message_id, f.receipt))
-    expect(await credential(run, f.credentialId)).toEqual(repeated)
     const opened = f.report('thread.opened')
     await run(threads.processReport(f.source, opened))
-    expect(await credential(run, f.credentialId)).not.toEqual(repeated)
-    const duplicate = await reset(run, f.credentialId)
     await run(threads.processReport(f.source, opened))
     await expect(
       run(threads.processReport(f.source, { ...opened, event_id: randomUUID(), worker_seq: 2, kind: 'turn.started' })),
     ).rejects.toMatchObject({ code: 'thread_conflict' })
     const gap = await run(threads.processReport(f.source, { ...opened, event_id: randomUUID(), worker_seq: 10 }))
     expect(gap.ok).toBe(false)
-    expect(await credential(run, f.credentialId)).toEqual(duplicate)
-    expect(await credential(run, other.credentialId)).toEqual(otherBefore)
   }))
 
 it('does not record rejected commands or dispatch or accept work with a revoked credential', () =>
   withTestDatabase(async ({ run }) => {
     const f = await fixture(run)
-    const before = await reset(run, f.credentialId)
     await run(threads.processReceipt(f.source, f.command.message_id, { ...f.receipt, ok: false, code: 'unsupported' }))
-    expect(await credential(run, f.credentialId)).toEqual(before)
     const g = await fixture(run)
     await run(query('UPDATE node_credentials SET revoked_at=clock_timestamp() WHERE id=$1', g.credentialId))
-    const revoked = await credential(run, g.credentialId)
     const attempts = await run(query('SELECT attempts FROM thread_outbox WHERE thread_id=$1', g.thread.id))
     await run(
       query(
@@ -118,7 +94,6 @@ it('does not record rejected commands or dispatch or accept work with a revoked 
     await expect(run(threads.processReport(g.source, g.report('thread.opened')))).rejects.toMatchObject({
       code: 'node_source_rejected',
     })
-    expect(await credential(run, g.credentialId)).toEqual(revoked)
   }))
 
 it('requires a fresh connection-bound Worker status challenge for a long turn', () =>
@@ -139,10 +114,8 @@ it('requires a fresh connection-bound Worker status challenge for a long turn', 
     await run(
       query("UPDATE threads SET last_reported_at=clock_timestamp()-interval '1 minute' WHERE id=$1", f.thread.id),
     )
-    const before = await reset(run, f.credentialId)
     const [check] = (await run(threads.claimCommands())).filter((c) => c.body.action === 'check_activity')
     expect(check).toBeDefined()
-    expect(await credential(run, f.credentialId)).toEqual(before)
     expect((await run(threads.claimCommands())).filter((c) => c.body.action === 'check_activity')).toEqual([])
     const result: P.ThreadCommandResult = {
       ...f.receipt,
@@ -157,7 +130,6 @@ it('requires a fresh connection-bound Worker status challenge for a long turn', 
         }),
       ),
     ).rejects.toMatchObject({ code: 'activity_check_rejected' })
-    expect(await credential(run, f.credentialId)).toEqual(before)
     await run(
       query(
         `UPDATE thread_activity_probes SET checks=jsonb_set(checks,
@@ -170,16 +142,13 @@ it('requires a fresh connection-bound Worker status challenge for a long turn', 
     const [nextCheck] = (await run(threads.claimCommands())).filter((c) => c.body.action === 'check_activity')
     expect(nextCheck!.body.activity_check_seq).toBeGreaterThan(result.activity_check_seq!)
     await run(threads.processReceipt(f.source, check!.message_id, result))
-    expect(await credential(run, f.credentialId)).not.toEqual(before)
     await run(
       threads.processReceipt(f.source, nextCheck!.message_id, {
         ...result,
         activity_check_seq: nextCheck!.body.activity_check_seq!,
       }),
     )
-    const duplicate = await reset(run, f.credentialId)
     await run(threads.processReceipt(f.source, check!.message_id, result))
-    expect(await credential(run, f.credentialId)).toEqual(duplicate)
     const expiredCommand = randomUUID()
     const [expiredCheck] = await run(
       Effect.flatMap(
@@ -200,12 +169,10 @@ it('requires a fresh connection-bound Worker status challenge for a long turn', 
         }),
       ),
     ).rejects.toMatchObject({ code: 'activity_check_rejected' })
-    expect(await credential(run, f.credentialId)).toEqual(duplicate)
     await run(query("UPDATE node_presence SET conn_id='new-connection' WHERE node_id=$1", f.nodeId))
     await expect(
       run(threads.processReceipt({ ...f.source, conn_id: 'new-connection' }, check!.message_id, result)),
     ).rejects.toMatchObject({ code: 'activity_check_rejected' })
-    expect(await credential(run, f.credentialId)).toEqual(duplicate)
     expect(
       await run(query("SELECT id FROM thread_events WHERE kind IN ('turn.activity_check','turn.activity_checked')")),
     ).toEqual([])
@@ -255,13 +222,11 @@ it('migrates live and acknowledged challenges without changing business history 
     for (const statement of migration.split(';').filter((part) => part.trim())) await run(query(statement))
     expect(await run(query('SELECT * FROM thread_events ORDER BY id'))).toEqual(history)
     expect(await run(query('SELECT * FROM thread_messages ORDER BY id'))).toEqual(messages)
-    const before = await credential(run, f.credentialId)
     await run(threads.processReceipt(f.source, commands[0]!, result))
     await run(threads.processReceipt(f.source, commands[2]!, { ...result, activity_check_seq: checks[2]!.check_seq }))
     await expect(
       run(threads.processReceipt(f.source, commands[1]!, { ...result, activity_check_seq: checks[1]!.check_seq })),
     ).rejects.toMatchObject({ code: 'activity_check_rejected' })
-    expect(await credential(run, f.credentialId)).toEqual(before)
     const [sequence] = await run(
       query<{ value: number }>("SELECT nextval('thread_activity_check_seq')::float8 AS value"),
     )

@@ -14,7 +14,7 @@
 
 ## 安装包入口
 
-安装目录包含 `batond`（Windows 为 `batond.exe`）、旁置的 `node_modules/` 和许可文件。设备更新保留固定启动入口和独立版本目录，数据目录单独保存；SEA 中 Worker、watchdog、agent-host 与 Project Runtime 使用对应版本的可执行文件加子命令启动，不解析源码目录。
+安装目录包含 `batond`（Windows 为 `batond.exe`）、旁置的 `node_modules/` 和许可文件。`batond install` 把整个 SEA 目录安装到固定程序目录（默认 `~/.baton/program`，自定义数据目录为 `<目录>/installation`），数据目录单独保存；SEA 中 Worker、watchdog、agent-host 与 Project Runtime 使用同一程序目录的可执行文件加子命令启动，不解析源码目录。
 
 ```sh
 ./batond --version
@@ -22,6 +22,8 @@
 ./batond project-runtime probe
 ./batond project-runtime login-api-key anthropic < key-file
 ```
+
+安装、卸载和诊断输出见 [发布设计](../../specs/release/TECH.md#33-中心与设备替换升级)。`batond install` 仅接受 SEA：先停止运行中的守护进程并等待锁释放，再替换程序目录、写入 `~/.local/bin/batond` 入口，并重载已安装的用户服务；`uninstall` 先停止守护进程与服务，默认保留数据，`--purge` 才删除。`doctor` 只读检查版本、目录、入口、服务和占用空间。
 
 `--version` 输出 JSON，包含发布版本、提交、平台、协议和存储格式、支持的 daemon 版本，以及 `sea`、`node`。`worker --version`、`agent-host --version`、`watchdog --version` 和 `project-runtime --version` 返回同一份身份；未指定构建身份时为 `development`。Worker status、Agent host 和 Runtime probe 的 `release` 字段使用同一来源。`agent-host --probe` 加载四个 host 模块，SEA 中同时加载 keyring 和 Cursor 的 tree-sitter 原生扩展，输出 `agents`、`nativeModules` 与 `release`；不读取系统钥匙串、不进行认证或模型请求。模块加载失败时非零退出并提示检查安装包的 `node_modules` 与平台依赖。`project-runtime` 后的参数直接传给 Runtime，支持 `run`、`probe`、`login`、`login-device`、`login-api-key` 和 `--version`。
 
@@ -107,7 +109,7 @@ Kiro 的 local settings 使用 `agentId: kiro`、`commandPath: kiro-cli`，从 P
 
 使用 `batond env set <名称> --scope <范围>` 从标准输入读取值，`env unset <名称>` 抑制继承，`env reset <名称>` 删除当前范围的设置。范围依次为 `device`、`project:<项目 ID>`、`agent:<类型>`、`project:<项目 ID>:agent:<类型>`；未关联项目的 Thread 可使用工作目录代替项目 ID。各命令支持 `--data-dir`。显式设置值和包含凭据的代理地址保存在独立私有文件中；不采集父进程的全部密钥，也不允许设置 Node 注入选项、TLS 校验关闭变量和 Baton 内部变量。SSH socket 与图形会话地址从当前进程读取，不保存快照。
 
-新进程按系统基础、导入值、设备、项目、Agent 和项目内 Agent 的顺序合并环境。修改配置不会中断正在执行的任务；空闲 Worker 退出后由下一次请求重新启动。daemon 自身的网络代理和证书设置需要重启 daemon 才能生效；更新命令和更新进程启动时读取当前配置。Node 中心连接支持 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` 及小写形式，设置 HTTP 代理时默认启用 `NODE_USE_ENV_PROXY`，可显式设置为 `0`；`ALL_PROXY` 透传给支持它的下游工具。证书路径应位于运行设备上。设备绑定与中心连接使用系统根证书库；Agent 对证书和代理变量的支持由各自的网络库决定。
+新进程按系统基础、导入值、设备、项目、Agent 和项目内 Agent 的顺序合并环境。修改配置不会中断正在执行的任务；空闲 Worker 退出后由下一次请求重新启动。daemon 自身的网络代理和证书设置需要重启 daemon 才能生效。Node 中心连接支持 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` 及小写形式，设置 HTTP 代理时默认启用 `NODE_USE_ENV_PROXY`，可显式设置为 `0`；`ALL_PROXY` 透传给支持它的下游工具。证书路径应位于运行设备上。设备绑定与中心连接使用系统根证书库；Agent 对证书和代理变量的支持由各自的网络库决定。
 
 `open` 返回 Thread ID 和持久接收回执。启动、发送、恢复和停止的实际终态通过 `command --command-id <UUID>` 或 `reports` 查询；Worker 就绪与 Agent 就绪分别报告。`message` 支持 `--message-id`，执行命令支持 `--command-id`，重试时保留原标识。相同命令 ID、相同内容复用回执和结果，内容冲突会被拒绝。
 

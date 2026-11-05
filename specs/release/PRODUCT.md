@@ -1,6 +1,6 @@
 # 发布与升级行为规格
 
-Status: draft
+Status: implemented
 Owner: Asa
 Basis: 内部开发阶段打包发布与去热更新简化对齐；[Baton R-23、R-25](../baton/PRODUCT.md)；[发布技术设计](TECH.md)。
 

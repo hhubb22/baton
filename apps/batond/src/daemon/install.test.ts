@@ -1,22 +1,42 @@
-import { chmod, lstat, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vite-plus/test'
-import { releaseMetadata } from '@baton/protocol/release'
 import { makePrivateTempDirectory } from '../testing/private.ts'
-import { writeUpgradePackage } from '../testing/upgrade.ts'
 import { ensurePrivateDirectory } from '../platform/files.ts'
-import { writePrivateFileAtomic } from '../platform/private.ts'
-import { backupRoot, defaultCredentialsDirectory, defaultDataDirectory, programRoot } from '../platform/layout.ts'
+import { defaultCredentialsDirectory, defaultDataDirectory, programRoot } from '../platform/layout.ts'
+import { acquireProcessLock } from '../platform/lock.ts'
 
+const state = vi.hoisted(() => ({
+  serviceInstalled: true,
+  reload: vi.fn(),
+  uninstall: vi.fn(),
+  onShutdown: async () => {},
+}))
 vi.mock('./service.ts', () => ({
-  manageService: vi.fn(async () => {
-    throw new Error('当前系统没有服务')
-  }),
+  isUserServiceInstalled: vi.fn(async () => state.serviceInstalled),
+  manageService: vi.fn(async (action: string) =>
+    action === 'install'
+      ? state.reload()
+      : action === 'status'
+        ? {
+            installed: true,
+            running: false,
+            program_path: join(defaultDataDirectory(), 'batond'),
+            log_path: join(defaultDataDirectory(), 'logs', 'batond.log'),
+          }
+        : state.uninstall(),
+  ),
+}))
+vi.mock('./control-client.ts', () => ({
+  ControlClient: class {
+    async shutdown() {
+      await state.onShutdown()
+      return { ok: true }
+    }
+  },
 }))
 
-const { diagnoseInstallation, shimPath, uninstallBatond, writeShim } = await import('./install.ts')
-const { dataEntries } = await import('./upgrade-backup.ts')
-const { installationPaths, pruneInstalledVersions } = await import('./update-install.ts')
+const { diagnoseInstallation, installBatond, shimPath, uninstallBatond, writeShim } = await import('./install.ts')
 
 const posixOnly = process.platform === 'win32' ? it.skip : it
 const present = (path: string) =>
@@ -29,29 +49,38 @@ let home: string
 beforeEach(async () => {
   home = await makePrivateTempDirectory('baton-home-')
   vi.stubEnv('HOME', home)
+  state.serviceInstalled = true
+  state.reload.mockClear()
+  state.uninstall.mockClear()
 })
 afterEach(async () => {
   vi.unstubAllEnvs()
   await rm(home, { recursive: true, force: true })
 })
 
-async function defaultInstall() {
+async function sourcePackage() {
+  const source = await makePrivateTempDirectory('baton-package-')
+  await writeFile(join(source, 'batond'), '#!/bin/sh\necho batond\n', { mode: 0o755 })
+  await mkdir(join(source, 'node_modules', 'native'), { recursive: true })
+  await writeFile(join(source, 'node_modules', 'native', 'binding.node'), 'binary')
+  return source
+}
+
+async function installed() {
   const data = defaultDataDirectory()
   await mkdir(data, { recursive: true, mode: 0o700 })
   await writeFile(join(data, 'identity.json'), '{}')
-  await mkdir(join(programRoot(data), 'versions', 'a'.repeat(64)), { recursive: true })
-  await mkdir(backupRoot(data), { recursive: true })
+  await mkdir(programRoot(data), { recursive: true })
+  await writeFile(join(programRoot(data), 'batond'), '#!/bin/sh\necho old\n')
   return data
 }
 
-posixOnly('默认目录把程序和备份放在数据目录旁边，指定目录保持自包含', () => {
+posixOnly('默认目录把程序放在数据目录旁边，指定目录保持自包含', () => {
   const data = defaultDataDirectory()
   expect(data).toBe(join(home, '.baton', 'data'))
   expect(programRoot(data)).toBe(join(home, '.baton', 'program'))
-  expect(backupRoot(data)).toBe(join(home, '.baton', 'backups'))
   expect(defaultCredentialsDirectory()).toBe(join(data, 'credentials'))
   expect(programRoot('/srv/node')).toBe(join('/srv/node', 'installation'))
-  expect(backupRoot('/srv/node')).toBe(join('/srv', 'node.upgrade-backups'))
 })
 
 posixOnly('首次使用时能建立默认数据目录，其他路径的上级缺失仍然报错', async () => {
@@ -60,9 +89,9 @@ posixOnly('首次使用时能建立默认数据目录，其他路径的上级缺
   await expect(ensurePrivateDirectory(join(home, 'missing', 'data'))).rejects.toThrow()
 })
 
-posixOnly('命令入口转发到启动器，且不覆盖同名的其他程序', async () => {
-  const launcher = join(home, "it's", 'batond')
+posixOnly('命令入口转发到安装后的程序，且不覆盖同名的其他程序', async () => {
   const entry = shimPath()
+  const launcher = join(home, "it's", 'batond')
   await writeShim(entry, launcher)
   expect(await readFile(entry, 'utf8')).toContain(`exec '${home}/it'\\''s/batond' "$@"`)
   await writeShim(entry, join(home, 'next'))
@@ -72,18 +101,50 @@ posixOnly('命令入口转发到启动器，且不覆盖同名的其他程序', 
   expect(await readFile(entry, 'utf8')).toContain('echo other')
 })
 
-posixOnly('卸载默认保留数据和备份，只删除程序和自己的入口', async () => {
-  const data = await defaultInstall()
-  await writeShim(shimPath(), join(programRoot(data), 'launcher', 'batond'))
+posixOnly('安装前停止运行中的守护进程，替换程序目录并重载已安装服务', async () => {
+  const source = await sourcePackage()
+  const data = defaultDataDirectory()
+  await mkdir(data, { recursive: true, mode: 0o700 })
+  const release = await acquireProcessLock(join(data, 'daemon.lock'))
+  state.onShutdown = async () => {
+    await release()
+  }
+  try {
+    const result = await installBatond(data, source)
+    expect(result).toMatchObject({ installed: true, replaced: true, data_directory: data })
+    expect(await readFile(join(programRoot(data), 'batond'), 'utf8')).toContain('echo batond')
+    expect(await present(join(programRoot(data), 'node_modules', 'native', 'binding.node'))).toBe(true)
+    expect(await readFile(shimPath(), 'utf8')).toContain(join(programRoot(data), 'batond'))
+    expect(state.reload).toHaveBeenCalledOnce()
+  } finally {
+    await rm(source, { recursive: true, force: true })
+  }
+})
+
+posixOnly('未安装服务时不重载服务', async () => {
+  const source = await sourcePackage()
+  const data = defaultDataDirectory()
+  state.serviceInstalled = false
+  try {
+    await installBatond(data, source)
+    expect(state.reload).not.toHaveBeenCalled()
+  } finally {
+    await rm(source, { recursive: true, force: true })
+  }
+})
+
+posixOnly('卸载默认保留数据，只删除程序和自己的入口', async () => {
+  const data = await installed()
+  await writeShim(shimPath(), join(programRoot(data), 'batond'))
   await uninstallBatond(data, { purge: false })
   expect(await present(programRoot(data))).toBe(false)
   expect(await present(shimPath())).toBe(false)
   expect(await present(join(data, 'identity.json'))).toBe(true)
-  expect(await present(backupRoot(data))).toBe(true)
+  expect(state.uninstall).toHaveBeenCalledOnce()
 })
 
 posixOnly('卸载不删除别的程序占用的入口', async () => {
-  const data = await defaultInstall()
+  const data = await installed()
   await mkdir(join(home, '.local', 'bin'), { recursive: true })
   await writeFile(shimPath(), '#!/bin/sh\necho other\n')
   await uninstallBatond(data, { purge: false })
@@ -91,7 +152,7 @@ posixOnly('卸载不删除别的程序占用的入口', async () => {
 })
 
 posixOnly('彻底卸载删除整个默认目录', async () => {
-  const data = await defaultInstall()
+  const data = await installed()
   await uninstallBatond(data, { purge: true })
   expect(await present(join(home, '.baton'))).toBe(false)
 })
@@ -104,53 +165,15 @@ posixOnly('彻底卸载拒绝删除不像 Baton 数据的指定目录', async ()
   expect(await readFile(join(other, 'notes.txt'), 'utf8')).toBe('keep')
 })
 
-posixOnly('诊断指出多余版本和旧目录，服务不可用时照常输出', async () => {
-  const data = await defaultInstall()
-  for (const id of ['b', 'c']) await mkdir(join(programRoot(data), 'versions', id.repeat(64)))
+posixOnly('诊断报告程序和旧目录，服务不可用时照常输出', async () => {
+  const data = await installed()
   await mkdir(join(home, '.baton-ts'))
   const report = await diagnoseInstallation(data)
   expect(report).toMatchObject({
     data_directory: data,
     program_directory: programRoot(data),
-    versions: 3,
-    service: null,
+    installed: true,
+    service: { installed: true },
   })
-  expect(report.warnings.join('\n')).toContain('保留了 3 个版本')
   expect(report.warnings.join('\n')).toContain(join(home, '.baton-ts'))
-})
-
-posixOnly('更新完成后只保留当前版本、启动器版本和上一版', async () => {
-  const data = await makePrivateTempDirectory('baton-prune-')
-  try {
-    const paths = installationPaths(data)
-    await mkdir(paths.versions, { recursive: true, mode: 0o700 })
-    await chmod(paths.root, 0o700)
-    const [current, launcher, previous, stale] = ['a', 'b', 'c', 'd'].map((id) => id.repeat(64))
-    for (const id of [current!, launcher!, previous!, stale!]) await writeUpgradePackage(join(paths.versions, id))
-    const pointer = (directory: string) => JSON.stringify({ directory, release: releaseMetadata() })
-    await writePrivateFileAtomic(paths.current, pointer(current!))
-    await writePrivateFileAtomic(paths.launcherCurrent, pointer(launcher!))
-    await writeFile(join(paths.root, 'launcher-previous-old.json'), '{}')
-    await writeFile(join(paths.root, 'launcher-previous-now.json'), '{}')
-    await pruneInstalledVersions(data, previous, 'now')
-    expect((await readdir(paths.versions)).toSorted()).toEqual([current, launcher, previous])
-    expect(await present(join(paths.root, 'launcher-previous-old.json'))).toBe(false)
-    expect(await present(join(paths.root, 'launcher-previous-now.json'))).toBe(true)
-  } finally {
-    await rm(data, { recursive: true, force: true })
-  }
-})
-
-posixOnly('升级备份跳过会自行刷新的订阅凭据', async () => {
-  const data = await makePrivateTempDirectory('baton-entries-')
-  try {
-    await mkdir(join(data, 'credentials'), { mode: 0o700 })
-    await writeFile(join(data, 'credentials', 'openai-codex.json'), '{}', { mode: 0o600 })
-    await writeFile(join(data, 'identity.json'), '{}', { mode: 0o600 })
-    const paths = (await dataEntries(data)).map((entry) => entry.path)
-    expect(paths).toContain('identity.json')
-    expect(paths.filter((path) => path.startsWith('credentials'))).toEqual([])
-  } finally {
-    await rm(data, { recursive: true, force: true })
-  }
 })

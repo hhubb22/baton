@@ -13,7 +13,6 @@ if (canExposeBridge(process.isMainFrame, location.origin, origin)) {
     Object.freeze({
       protocol: 1,
       capabilities: desktopCapabilities,
-      update: (): Promise<void> => ipcRenderer.invoke('baton:update'),
       openLocal: (input: { threadId: string; action: 'reveal' | 'editor' }): Promise<void> =>
         ipcRenderer.invoke('baton:open-local', input),
       pickDirectory: (input: { nodeId: string }): Promise<string | null> =>

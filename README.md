@@ -81,11 +81,11 @@ node apps/server/dist/server.cjs serve
 
 macOS / Linux 的 `service install` 将守护进程交给当前用户的 launchd / systemd 服务：先正常停止已有后台实例，再接管启动。`service status` 显示是否安装、运行状态、程序路径与日志路径；`service uninstall` 停止并移除服务，保留本地数据。重复安装使用当前程序路径；系统命令失败时恢复原服务定义。Linux 要求可用的 systemd 用户实例与 `XDG_RUNTIME_DIR`，未开启 linger 时注销将停止服务。Windows 不支持 CLI 用户服务。
 
-macOS 与 Linux 的安装包解压后运行一次 `./batond install`，之后可以删除解压目录，在任意位置使用 `batond`。安装后的文件都在 `~/.baton`：`data/` 放身份、Thread 数据和订阅凭据，`program/` 放程序，`backups/` 放升级备份；命令入口是 `~/.local/bin/batond`，该目录不在 PATH 时命令会提示。每次更新完成后只保留当前版本和用于回滚的上一版。
+macOS 与 Linux 的安装包解压后运行一次 `./batond install`，之后可以删除解压目录，在任意位置使用 `batond`。安装会先通过本地控制通道停止运行中的守护进程并等待 `daemon.lock` 释放，再把当前 SEA 目录整体替换到 `~/.baton/program`；命令入口是 `~/.local/bin/batond`，该目录不在 PATH 时命令会提示。已安装用户服务时，`install` 会重新执行 `service install` 重载服务。
 
-`batond doctor` 输出版本、各目录位置和占用空间、服务状态，并提示旧目录和数据目录不一致等问题。`batond uninstall` 停止服务并删除程序和命令入口，保留数据和备份；加 `--purge` 同时删除数据（含订阅凭据）和备份。
+`batond doctor` 只读输出版本、数据与程序目录、入口、服务状态、占用空间和旧目录提示。`batond uninstall` 先停止守护进程和匹配的用户服务，再删除程序目录与入口，保留数据；加 `--purge` 同时删除数据目录（含订阅凭据）。
 
-指定 `--data-dir` 时，程序放在该目录的 `installation/`，备份放在同级的 `<目录>.upgrade-backups`，一台机器上可以这样运行多份互不影响的安装。
+指定 `--data-dir` 时，程序放在该目录的 `installation/`，一台机器上可以这样运行多份互不影响的安装。
 
 Linux 需要有效的 `XDG_RUNTIME_DIR` 和 systemd 用户实例；`status` 还显示 linger 状态，未开启时提示管理员为需要注销后保持运行的用户开启 linger。Windows 使用桌面客户端，不支持 CLI 用户服务。
 
@@ -97,21 +97,19 @@ Linux 需要有效的 `XDG_RUNTIME_DIR` 和 systemd 用户实例；`status` 还�
 
 客户端通过本地控制通道查询按需拉起的 batond，不自己监管子进程。Devices 页面在本机未绑定时显示「连接这台电脑」，点击后在窗口内展示设备短码，员工确认即完成绑定。关闭窗口后留在托盘，默认登录启动，可从托盘关闭该选项或退出。退出时若未安装 CLI 用户服务，先通知 batond 正常停止再退出；已安装用户服务时只退出客户端。数据目录与 CLI 共用 `~/.baton/data`，替换应用保留身份与配置。网页的「在桌面客户端打开」生成接入链接；客户端桥接、构建和验证范围见 [桌面客户端文档](apps/desktop/README.md)，DMG/NSIS 打包见 [工具说明](tools/README.md#桌面客户端)。
 
-### 设备升级
+### 停机替换升级
 
-设备从已配置中心读取签名发布清单并在后台预下载。首次安装使用发布构建内的可信公钥，或由设备操作者明确配置本地公钥；中心下载响应不能添加信任根。设备详情可发起更新，离线请求在设备重新连接后处理。本地命令如下：
+Baton 不提供在线自更新、后台下载或双版本切换。升级设备端时，停止旧守护进程后覆盖安装新版 CLI，或直接用新版 DMG / NSIS 安装包覆盖桌面客户端；数据目录、设备身份、目录授权和模型凭据保持不变。
 
 ```sh
-batond update --data-dir /原数据目录
-batond update status --data-dir /原数据目录
-batond update policy manual --data-dir /原数据目录
+./batond install --data-dir /原数据目录
+batond doctor --data-dir /原数据目录
+batond uninstall --data-dir /原数据目录
 ```
 
-默认等待正在运行的任务结束；`update policy idle` 允许设备空闲时自动更新，迁移前可用 `batond update cancel` 取消。桌面客户端使用「更新并重启」。升级前设备生成一致备份，目标版本使用独立目录和固定启动入口；断线后继续等待中心，结果补报并确认完成后恢复队列。
+`install` 仅接受 SEA 安装包。运行中的守护进程会先收到控制通道 `shutdown`，程序等待锁释放后再替换；替换失败时保留原程序目录和入口。`uninstall` 不删除数据，`--purge` 才清理数据目录。协议版本不兼容时，中心拒绝业务连接，`status`、桌面客户端和网页提示下载并覆盖安装匹配版本的安装包，设备停止自动重连直到身份重新绑定或被新进程替换。
 
-登出重绑后保留的旧任务和未确认报告仍会被现有更新就绪检查计入阻塞；可先停止守护进程并覆盖安装。旧更新链路的清理由发布切片处理，旧绑定数据继续保留。
-
-正式发布基线之前的本地实验数据可重建。备份、失败恢复与验证范围见 [设备准备与切换](specs/release/TECH.md#设备准备与切换)。
+正式发布基线之前的本地实验数据可重建。备份、失败恢复与验证范围见 [中心与设备替换升级](specs/release/TECH.md#33-中心与设备替换升级)。
 
 ### Project 与模型订阅
 

@@ -905,7 +905,7 @@ test('分页历史、jsonb 键顺序、进程切换保持实际模型请求一�
   assert.equal(first.requests[0].maxRetries, 0)
   const bytes = JSON.stringify(canonical(first.requests[0]))
   const hash = createHash('sha256').update(bytes).digest('hex')
-  if (process.env.BATON_UPDATE_REQUEST_FIXTURE) writeFileSync('test/request.sha256', hash + '\n')
+  if (process.env.BATON_WRITE_REQUEST_FIXTURE) writeFileSync('test/request.sha256', hash + '\n')
   assert.equal(hash, readFileSync('test/request.sha256', 'utf8').trim())
   if (process.env.BATON_REQUEST_ARTIFACT) writeFileSync(process.env.BATON_REQUEST_ARTIFACT, bytes)
 })

@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { upgradePaused, readUpgradeState, upgradeOffline } from '../daemon/upgrade.ts'
 import {
   WorkerRequest,
   isThreadAnswerAllowed,
@@ -212,17 +211,6 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
   const openMs = options.openTimeoutMs ?? 35_000
   const prepareMs = options.prepareTimeoutMs ?? 10_000
   const sendMs = options.sendTimeoutMs ?? 35_000
-  let upgradeWasPaused = false
-  const paused = Effect.tryPromise({
-    try: () => upgradePaused(options.dataDirectory),
-    catch: (cause) => new WorkerFailure('upgrade_state_invalid', '无法读取升级门禁', cause),
-  }).pipe(
-    Effect.tap((value) =>
-      Effect.sync(() => {
-        if (value) upgradeWasPaused = true
-      }),
-    ),
-  )
   const stopMs = options.stopTimeoutMs ?? 60_000
 
   function report(
@@ -1274,7 +1262,6 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         }
         return
       }
-      if (yield* paused) return
       if (operation || state.phase === 'failed' || state.phase === 'empty') return
       const current = yield* ensureAgent()
       const intent = Object.values(state.messages).find((message) => message.state === 'intent')
@@ -1453,7 +1440,6 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
               )
               return
             }
-            if (yield* paused) return
             const preparation = result.value
             if (state.messages[message.input.id]?.state !== 'queued') return
             if (message.input.mode === 'steer') {
@@ -1856,10 +1842,6 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         recovering = false
         return
       }
-      if (yield* paused) {
-        recovering = false
-        return
-      }
       yield* commit((draft) => cancelQuestions(draft, 'Agent restarted; question is no longer available'))
       const current = yield* ensureAgent()
       const recoveryTask = Effect.gen(function* () {
@@ -1944,17 +1926,6 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         }
         return { type: 'result', ok: result.ok, session_result: result }
       }
-      if (
-        commandAction(decoded.type) &&
-        options.dataDirectory &&
-        upgradeOffline(
-          yield* Effect.tryPromise({
-            try: () => readUpgradeState(options.dataDirectory!),
-            catch: (cause) => new WorkerFailure('upgrade_state_invalid', '无法读取升级状态', cause),
-          }),
-        )
-      )
-        return { type: 'result', ok: false, code: 'node_upgrading' }
       const trace = commandAction(decoded.type) ? yield* captureTrace : undefined
       return yield* submit(
         shortRequest({ ...decoded, ...(trace ? { trace_context: trace } : {}) }),
@@ -1999,14 +1970,9 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
   }
   const drain = (environmentChanged: boolean) =>
     submit(
-      Effect.gen(function* () {
-        const upgrading = !environmentChanged && (yield* paused)
-        if (!environmentChanged && !upgrading && upgradeWasPaused) {
-          upgradeWasPaused = false
-          yield* drive()
-        }
+      Effect.sync(() => {
         if (
-          (!environmentChanged && !upgrading) ||
+          !environmentChanged ||
           operation ||
           stopFiber ||
           recovering ||

@@ -1,6 +1,6 @@
 # 打包与发布技术设计
 
-Status: draft
+Status: implemented
 Owner: Asa
 Basis: [发布与升级行为规格](PRODUCT.md) RL-01～RL-09；[Baton TECH](../baton/TECH.md)；[Agent 适配 TECH](../agent-adapters/TECH.md)；[构建与发布工具](../../tools/README.md)。
 
@@ -21,7 +21,7 @@ Basis: [发布与升级行为规格](PRODUCT.md) RL-01～RL-09；[Baton TECH](..
 - **统一构建（`tools/build.mjs`、`tools/package-batond.mjs`）**：使用支持 `--build-sea` 且保留 LICENSE 的官方 Node 26（缓存管理见 `tools/release/cache-node.mjs`），关闭 code cache 与 snapshot，`execArgvExtension` 设为 `none`。后台守护进程（`serve` / `run`）、`agent-host`、`project-runtime` 与 `watchdog` 均通过同一可执行文件的子命令启动，不再拆分独立的 `worker` 或 `execution` 子进程入口。
 - **旁置依赖与许可（`tools/package-dependencies.mjs`）**：将 `@cursor/sdk` 及其平台原生工具、`@napi-rs/keyring`、`pi-ai` / `pi-agent-core`（含模型元数据与 OAuth 动态模块）按目标系统、架构与 glibc 复制到可执行文件旁的 `node_modules/`，由 SEA 通过 `createRequire` 或磁盘 ESM 路径加载，不依赖源码目录或 pnpm 符号链接。`licenses/` 收录 Node、t3code、第三方包许可与 Cursor 来源说明。
 - **桌面打包（`tools/package-desktop.mjs`）**：核对输入 `batond` SEA 实际输出版本与 `release.json` 一致后打入 `resources/batond/`；macOS 执行整体 ad-hoc 签名并保留内置 `batond` 签名，Windows 生成按用户安装、无需管理员提权的 NSIS 安装包。常规 `pnpm install` 与单元测试不下载或启动 Electron。
-- **发布流水线（`.github/workflows/release-packages.yml`）**：在 `macos-15`、`ubuntu-24.04`、`ubuntu-24.04-arm`、`windows-2025` 原生 runner 上构建并执行隔离安装包检查、SQLite `FULL` 提交测量与平台验证，全部通过后推送 GHCR 中心镜像并创建附带 SHA-256 摘要的 GitHub Release。
+- **发布流水线（`.github/workflows/release-packages.yml`）**：在 `macos-15`、`ubuntu-24.04`、`ubuntu-24.04-arm`、`windows-2025` 原生 runner 上构建并执行隔离安装包检查、SQLite `FULL` 提交测量与平台验证，全部通过后推送 GHCR 中心镜像并创建 GitHub Release。发布任务用 Ed25519 对版本、提交、中心镜像摘要和各安装包 SHA-256 组成的 `release-manifest.json` 签名；部署任务用预先配置的公钥验签后才使用资产。设备不读取该清单。
 
 ## 2. 安装包隔离检查（RL-02）
 
@@ -45,7 +45,7 @@ Basis: [发布与升级行为规格](PRODUCT.md) RL-01～RL-09；[Baton TECH](..
 
 ### 3.2 存储格式与事务核验
 
-内部开发阶段统一采用当前 `0001_baseline` 基线，不维护历史实验格式的兼容读取分支；正式发布后通过有序增量迁移演进（RL-07、Baton R-25）。
+内部开发阶段按根目录有序迁移演进，最新迁移为 `0022_stop_replace_updates.sql`，不维护历史实验格式的兼容读取分支；正式发布后继续通过有序增量迁移演进（RL-07、Baton R-25）。
 
 | 存储 | 格式与迁移核验边界 |
 |---|---|
@@ -112,9 +112,9 @@ Windows 当前沿用用户目录下数据目录继承的 ACL，命名管道使�
 
 | Requirement | Setup and observation | Failure condition | Where | Status |
 |---|---|---|---|---|
-| RL-01、RL-02 | 构建 SEA 与桌面包，搬迁至空 `PATH` 与临时 `HOME` 运行 `tools/check-package.mjs`，并做移走 `node_modules/` 负向测试 | 版本身份不一致；本地控制通道或 `node.db` 初始化失败；任一 Agent 模块加载失败；缺依赖未明确报错 | 本地构建 + 4 平台 CI | planned |
-| RL-03 | Linux 低版本 glibc 环境与 Windows 进程树检查脚本运行探测与模式检查 | 未按实际能力准入，或静态白名单误封可用环境 | 平台验证 + 探测单测 | planned |
-| RL-04、RL-05 | 同协议异版本号节点与不兼容协议号节点分别握手连接中心 | 同协议被拒；不兼容协议未被拒或 `batond` 未进入 `rejected` 停止重连 | Gateway 集成 + `batond` 单测 | planned |
-| RL-06、RL-07 | 在途 Turn 执行期间重启并迁移中心；停止 `batond` 覆盖替换同协议新包启动；向 `node.db` 注入未知格式版本启动 | 在途 Turn 中断或补报重复；覆盖升级丢失身份；未知格式未报错而破坏原文件 | `e2e` + 存储格式单测 | planned |
-| RL-08 | 恢复历史 PostgreSQL 快照与配套签名密钥，运行 `admin restore-finalize`（含重复运行与缺失密钥负向用例） | 缺密钥时自动新建密钥；旧浏览器会话仍有效；冻结命令被自动重发；活动 Project 未暂停 | `apps/server` 集成 | planned |
-| RL-09 | 跑通一次完整 Turn、一次异常停止与一次 Project 运行，检查结构化日志、诊断摘要与设备端 `transcript.jsonl` | 缺失组件版本或提交；运行轨迹被截断或泄漏敏感凭据；残留外部遥测请求 | 集成测试 + 打包检查 | planned |
+| RL-01、RL-02 | 构建 SEA 与桌面包，搬迁至空 `PATH` 与临时 `HOME` 运行 `tools/check-package.mjs`，并做移走 `node_modules/` 负向测试 | 版本身份不一致；本地控制通道或 `node.db` 初始化失败；任一 Agent 模块加载失败；缺依赖未明确报错 | 本地构建 + 4 平台 CI | verified |
+| RL-03 | Linux 低版本 glibc 环境与 Windows 进程树检查脚本运行探测与模式检查 | 未按实际能力准入，或静态白名单误封可用环境 | 平台验证 + 探测单测 | platform pending |
+| RL-04、RL-05 | 真实中心拒绝不兼容协议；同协议异版本号节点正常同步；`batond` 进入 `rejected` 并停止重连，`status` 保留原因 | 同协议被拒；不兼容协议未被拒或 `batond` 继续重连 | `apps/server` 集成 + `apps/batond` 单测 + `e2e` | verified |
+| RL-06、RL-07 | 在途 Turn 执行期间重启并迁移中心；运行中的守护进程执行 `batond install` 停机替换；已装服务重载；`uninstall` 保留或按 `--purge` 删除数据 | 在途 Turn 中断或补报重复；覆盖安装丢失身份；服务未重载或数据被误删 | `e2e` + `apps/batond` 单测 | verified |
+| RL-08 | 恢复历史 PostgreSQL 快照与配套签名密钥，运行 `admin restore-finalize`（含重复运行与缺失密钥负向用例） | 缺密钥时自动新建密钥；旧浏览器会话仍有效；冻结命令被自动重发；活动 Project 未暂停 | `apps/server` 集成 | verified |
+| RL-09 | 跑通一次完整 Turn、一次异常停止与一次 Project 运行，检查结构化日志、诊断摘要与设备端 `transcript.jsonl` | 缺失组件版本或提交；运行轨迹被截断或泄漏敏感凭据；残留外部遥测请求 | 集成测试 + 打包检查 | verified |

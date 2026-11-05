@@ -32,7 +32,6 @@ export const identity = (): NodeIdentity => ({
     id: randomUUID(),
     version: 1,
     token: 'server-issued-offline-credential',
-    expires_at: new Date(Date.now() + 3600_000).toISOString(),
   },
 })
 

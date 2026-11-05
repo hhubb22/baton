@@ -443,7 +443,6 @@ export class Gateway {
             ![
               'node.sync',
               'node.runtime_report',
-              'node.upgrade_state',
               'thread.command_result',
               'thread.report',
               'execution.command_result',
@@ -525,7 +524,6 @@ export class Gateway {
                 [
                   'node.sync',
                   'node.runtime_report',
-                  'node.upgrade_state',
                   'thread.command_result',
                   'thread.report',
                   'execution.command_result',

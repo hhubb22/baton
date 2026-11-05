@@ -73,9 +73,9 @@ describe('identity storage on local PostgreSQL', () => {
       '0016_project_trace.sql',
       '0017_outbox_created_at.sql',
       '0018_executions.sql',
-      '0019_node_updates.sql',
       '0020_device_login.sql',
       '0021_drop_node_enrollments.sql',
+      '0022_stop_replace_updates.sql',
     ])
     const names = await run(query<{ current: string }>('SELECT current_schema() AS current'))
     expect(names[0].current).toBe(schema)
@@ -164,8 +164,6 @@ describe('identity storage on local PostgreSQL', () => {
       await writeFile(join(directory, '0017_outbox_created_at.sql'), outboxCreated)
       const executions = await readFile(new URL('../../../migrations/0018_executions.sql', import.meta.url), 'utf8')
       await writeFile(join(directory, '0018_executions.sql'), executions)
-      const nodeUpdates = await readFile(new URL('../../../migrations/0019_node_updates.sql', import.meta.url), 'utf8')
-      await writeFile(join(directory, '0019_node_updates.sql'), nodeUpdates)
       const deviceLogin = await readFile(new URL('../../../migrations/0020_device_login.sql', import.meta.url), 'utf8')
       await writeFile(join(directory, '0020_device_login.sql'), deviceLogin)
       const dropEnrollments = await readFile(
@@ -173,6 +171,11 @@ describe('identity storage on local PostgreSQL', () => {
         'utf8',
       )
       await writeFile(join(directory, '0021_drop_node_enrollments.sql'), dropEnrollments)
+      const stopReplaceUpdates = await readFile(
+        new URL('../../../migrations/0022_stop_replace_updates.sql', import.meta.url),
+        'utf8',
+      )
+      await writeFile(join(directory, '0022_stop_replace_updates.sql'), stopReplaceUpdates)
       const checksums = await run(
         query<{ version: string; checksum: string }>(
           'SELECT version, checksum FROM schema_migrations ORDER BY version',
@@ -207,10 +210,10 @@ describe('identity storage on local PostgreSQL', () => {
         ]),
       )
       await writeFile(
-        join(directory, '0021_ordered.sql'),
+        join(directory, '0023_ordered.sql'),
         "CREATE TABLE migration_order (position integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY, step text NOT NULL); INSERT INTO migration_order(step) VALUES ('first');",
       )
-      await writeFile(join(directory, '0022_ordered.sql'), "INSERT INTO migration_order(step) VALUES ('second');")
+      await writeFile(join(directory, '0024_ordered.sql'), "INSERT INTO migration_order(step) VALUES ('second');")
       await run(migrateDatabase(directory))
       const versions = await run(
         query<{ version: string; applied_at: string }>(
@@ -219,8 +222,8 @@ describe('identity storage on local PostgreSQL', () => {
       )
       expect(versions.map((row) => row.version)).toEqual([
         ...rows.map((row) => row.version),
-        '0021_ordered.sql',
-        '0022_ordered.sql',
+        '0023_ordered.sql',
+        '0024_ordered.sql',
       ])
       await Promise.all([run(migrateDatabase(directory)), run(migrateDatabase(directory))])
       expect(await run(query('SELECT step FROM migration_order ORDER BY position'))).toEqual([
@@ -230,7 +233,7 @@ describe('identity storage on local PostgreSQL', () => {
       expect(await run(query('SELECT version, applied_at::text FROM schema_migrations ORDER BY version'))).toEqual(
         versions,
       )
-      await writeFile(join(directory, '0023_rollback.sql'), 'CREATE TABLE migration_rollback (id int); SELECT 1/0;')
+      await writeFile(join(directory, '0025_rollback.sql'), 'CREATE TABLE migration_rollback (id int); SELECT 1/0;')
       await expect(run(migrateDatabase(directory))).rejects.toMatchObject({ code: 'unavailable' })
       const rolledBack = await run(
         query<{ exists: boolean }>(

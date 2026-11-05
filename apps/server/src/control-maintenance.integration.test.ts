@@ -169,7 +169,7 @@ it('merges credentials per node and rejects unbounded page requests', () =>
     await db.run(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
-        yield* sql`INSERT INTO node_credentials(id,node_id,employee_id,version,created_at,expires_at) VALUES(${randomUUID()}::uuid,${identity.node_id}::uuid,${owner.id}::uuid,2,now(),now()+interval '1 day')`
+        yield* sql`INSERT INTO node_credentials(id,node_id,employee_id,version,created_at) VALUES(${randomUUID()}::uuid,${identity.node_id}::uuid,${owner.id}::uuid,2,now())`
       }),
     )
     await db.run(Nodes.revokeNode(owner.id, identity.node_id))

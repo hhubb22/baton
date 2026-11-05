@@ -177,7 +177,6 @@ export const NodeCredential = Schema.Struct({
   id: Text,
   version: NonNegativeInteger,
   token: Text,
-  expires_at: Schema.NullOr(Timestamp),
 })
 export type NodeCredential = typeof NodeCredential.Type
 
@@ -385,70 +384,7 @@ export const RuntimeExec = Schema.Struct({
 })
 export type RuntimeExec = typeof RuntimeExec.Type
 
-export const NodeUpgradeState = Schema.Struct({
-  operation_id: UUID,
-  source_version: nonemptyText(256),
-  target_version: nonemptyText(256),
-  phase: Schema.Literals(['draining', 'ready', 'migrating', 'syncing', 'completed', 'cancelled', 'failed']),
-})
-export type NodeUpgradeState = typeof NodeUpgradeState.Type
-
-export const NodeUpdatePhase = Schema.Literals([
-  'requested',
-  'downloading',
-  'verifying',
-  'draining',
-  'ready',
-  'migrating',
-  'syncing',
-  'completed',
-  'cancelled',
-  'failed',
-])
-export const NodeUpdateRequest = Schema.Struct({
-  operation_id: UUID,
-  attempt: PositiveInteger,
-  phase: NodeUpdatePhase,
-  reason: Schema.optionalKey(Reason),
-  created_at: Timestamp,
-  management_last_seen: Schema.optionalKey(Timestamp),
-})
-export type NodeUpdateRequest = typeof NodeUpdateRequest.Type
-export const NodeUpdateAvailability = Schema.Struct({
-  status: Schema.Literals(['current', 'available']),
-  version: nonemptyText(128),
-  checked_at: Timestamp,
-})
-export type NodeUpdateAvailability = typeof NodeUpdateAvailability.Type
-export const NodeUpdatePending = Schema.Struct({
-  operation_id: Schema.NullOr(UUID),
-  attempt: Schema.NullOr(PositiveInteger),
-})
-export const NodeUpdateReport = Schema.Struct({
-  operation_id: UUID,
-  attempt: PositiveInteger,
-  phase: NodeUpdatePhase,
-  reason: Schema.optionalKey(Reason),
-})
-
-export const NodeUpgradeStateRequest = Schema.Struct({
-  type: Schema.Literal('node.upgrade_state'),
-  ...NodeUpgradeState.fields,
-})
-export type NodeUpgradeStateRequest = typeof NodeUpgradeStateRequest.Type
-
-export const NodeUpgradeStateResult = Schema.Struct({
-  type: Schema.Literal('node.upgrade_state_result'),
-  operation_id: UUID,
-  phase: NodeUpgradeState.fields.phase,
-  ok: Schema.Boolean,
-  code: Schema.optionalKey(Text),
-})
-export type NodeUpgradeStateResult = typeof NodeUpgradeStateResult.Type
-
 export const RuntimeReport = Schema.Struct({
-  upgrade_protocol: Schema.optionalKey(Schema.Literal(1)),
-  update_protocol: Schema.optionalKey(Schema.Literal(1)),
   batond_version: Schema.optionalKey(nonemptyText(256)),
   user: Schema.optionalKey(nonemptyText(256)),
   agents: Schema.optionalKey(
@@ -467,10 +403,6 @@ export const RuntimeReport = Schema.Struct({
 export type RuntimeReport = typeof RuntimeReport.Type
 
 export const NodeStatus = Schema.Struct({
-  upgrade_state: Schema.optionalKey(Schema.NullOr(NodeUpgradeState)),
-  update_request: Schema.optionalKey(Schema.NullOr(NodeUpdateRequest)),
-  update_management_last_seen: Schema.optionalKey(Timestamp),
-  update_availability: Schema.optionalKey(Schema.NullOr(NodeUpdateAvailability)),
   registered_at: Timestamp,
   runtime_report: Schema.NullOr(RuntimeReport),
   runtime_report_version: NonNegativeInteger,
@@ -487,8 +419,7 @@ export const NodeStatus = Schema.Struct({
   status_updated_at: Schema.NullOr(Timestamp),
   synced: Schema.Boolean,
   executable: Schema.Boolean,
-  credential_state: Schema.optionalKey(Schema.Literals(['active', 'idle_expired', 'revoked'])),
-  idle_expires_at: Schema.optionalKey(Schema.NullOr(Timestamp)),
+  credential_state: Schema.optionalKey(Schema.Literals(['active', 'revoked'])),
   revocation_status: Text,
   revocation: Schema.optionalKey(Schema.NullOr(NodeRevocation)),
 })

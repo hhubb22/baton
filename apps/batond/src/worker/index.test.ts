@@ -1,8 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { rmSync } from 'node:fs'
 import { makePrivateTempDirectory } from '../testing/private.ts'
-import { join, dirname } from 'node:path'
-import { saveUpgradeState } from '../daemon/upgrade.ts'
+import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import {
   WorkerIPCMessage as WorkerIPCMessageSchema,
@@ -486,46 +485,30 @@ describe('reliable Worker', () => {
     ),
   )
 
-  it.effect('recovers queued input after retiring a Worker for an environment change', () =>
+  it.effect('lets queued input finish before retiring a Worker for an environment change', () =>
     fixture((dbPath) =>
-      Effect.gen(function* () {
-        const cfg = config()
-        const first = message(cfg)
-        const queued = message(cfg, 'queued')
-        const upgrade = {
-          operation_id: randomUUID(),
-          source_version: 'development',
-          target_version: 'v1',
-          target_path: '/tmp/package',
-          phase: 'draining' as const,
-        }
-        yield* Effect.scoped(
-          Effect.gen(function* () {
-            const f = yield* fake
-            const worker = yield* makeWorker({ dbPath, dataDirectory: dirname(dbPath), agentFactory: () => f.agent })
-            yield* worker.handle(request(cfg, 'thread_open'))
-            yield* opened(worker)
-            yield* worker.handle(first)
-            yield* completed(worker, first.command_id!)
-            yield* Effect.promise(() => saveUpgradeState(dirname(dbPath), upgrade))
-            yield* worker.handle(queued)
-            expect(yield* worker.drainForEnvironment).toBe(false)
-            yield* Queue.offer(f.events, event(first.client_message_id!, 'end'))
-            yield* until(reports(worker), (rows) => rows.some((row) => row.kind === 'turn.ended'))
-            expect(yield* until(worker.drainForEnvironment, Boolean)).toBe(true)
-          }),
-        )
-        yield* Effect.promise(() => saveUpgradeState(dirname(dbPath), { ...upgrade, phase: 'cancelled' }))
-        yield* Effect.scoped(
-          Effect.gen(function* () {
-            const f = yield* fake
-            const worker = yield* makeWorker({ dbPath, dataDirectory: dirname(dbPath), agentFactory: () => f.agent })
-            yield* completed(worker, queued.command_id!)
-            expect(f.sentInputs.map((input) => input.id)).toContain(queued.client_message_id)
-            yield* Queue.offer(f.events, event(queued.client_message_id!, 'end'))
-          }),
-        )
-      }),
+      Effect.scoped(
+        Effect.gen(function* () {
+          const cfg = config()
+          const first = message(cfg)
+          const queued = message(cfg, 'queued')
+          const f = yield* fake
+          const worker = yield* makeWorker({ dbPath, dataDirectory: dirname(dbPath), agentFactory: () => f.agent })
+          yield* worker.handle(request(cfg, 'thread_open'))
+          yield* opened(worker)
+          yield* worker.handle(first)
+          yield* completed(worker, first.command_id!)
+          yield* worker.handle(queued)
+          expect(yield* worker.drainForEnvironment).toBe(false)
+          yield* Queue.offer(f.events, event(first.client_message_id!, 'end'))
+          yield* completed(worker, queued.command_id!)
+          expect(f.sentInputs.map((input) => input.id)).toContain(queued.client_message_id)
+          expect(yield* worker.drainForEnvironment).toBe(false)
+          yield* Queue.offer(f.events, event(queued.client_message_id!, 'end'))
+          yield* until(reports(worker), (rows) => rows.filter((row) => row.kind === 'turn.ended').length >= 2)
+          expect(yield* until(worker.drainForEnvironment, Boolean)).toBe(true)
+        }),
+      ),
     ),
   )
 

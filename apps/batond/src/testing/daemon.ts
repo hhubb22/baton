@@ -36,7 +36,6 @@ export async function setupDaemon(cleanup: Array<() => Promise<unknown>>) {
       id: randomUUID(),
       token: 'offline-server-issued-token',
       version: 1,
-      expires_at: new Date(Date.now() + 3600_000).toISOString(),
     },
     coordinator_url: 'https://offline.invalid',
   }

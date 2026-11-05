@@ -505,12 +505,7 @@ function FileContent({
   )
 
   let body
-  if (
-    !device ||
-    device.connection !== 'online' ||
-    device.credentialState === 'idle_expired' ||
-    device.credentialState === 'revoked'
-  ) {
+  if (!device || device.connection !== 'online' || device.credentialState === 'revoked') {
     const reason = device?.connection === 'syncing' ? 'syncing' : 'offline'
     const problem = previewProblem({ state: 'unavailable', deviceId, path, reason, size: null }, device)
     body = problem && failed(problem, problemIcons[reason])

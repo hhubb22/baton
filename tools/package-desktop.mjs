@@ -64,7 +64,6 @@ export function desktopConfig({
     npmRebuild: false,
     nodeGypRebuild: false,
     buildDependenciesFromSource: false,
-    publish: { provider: 'generic', url: 'http://127.0.0.1', channel: 'latest' },
     forceCodeSigning: production && (platform === 'darwin' ? hasMacCertificate : hasWindowsCertificate),
     protocols: [{ name: 'Baton 接入链接', schemes: ['baton'] }],
     mac: {

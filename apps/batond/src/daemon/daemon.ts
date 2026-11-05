@@ -1,19 +1,16 @@
 import { BUILD, PROTOCOL_VERSION } from '@baton/protocol/release'
-import { randomBytes, randomUUID } from 'node:crypto'
-import { isSea } from 'node:sea'
-import { unlink, chmod, lstat } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { unlink } from 'node:fs/promises'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { Cause, Clock, Context, Deferred, Effect, Exit, Option, Queue, Schema, Tracer } from 'effect'
+import { Clock, Context, Effect, Exit, Option, Queue, Schema, Tracer } from 'effect'
 import { HttpTraceContext } from 'effect/http'
 import { traceParent, waitEvent } from '@baton/telemetry'
 import type * as Scope from 'effect/Scope'
 import {
   ControlToNodeBody,
   Envelope,
-  NodeUpgradeState,
-  NodeUpdateAvailability,
   type Frame,
   type NodeIdentity,
   type RuntimeAgent,
@@ -38,31 +35,8 @@ import { makeExecutionService } from '../execution/service.ts'
 import { connectWebSocket, reconnectDelay, type DaemonTransport, type DaemonConnection } from './transport.ts'
 import { DaemonStorageFailure, ledgerPromise } from './storage.ts'
 import { pruneDeviceOutputs } from '../worker/full-output.ts'
-import { readLedger } from '../worker/ledger.ts'
-import { workerPaths } from './paths.ts'
-import { readPrivateFile } from '../platform/private.ts'
-import { listenWorker, IPCError } from './ipc.ts'
 import { nodeMetricsLoop } from './telemetry.ts'
 import type { TelemetryRelay } from './telemetry-relay.ts'
-import {
-  readUpgradeState,
-  prepareUpgradeRequest,
-  cancelUpgrade,
-  saveUpgradeState,
-  upgradeBlockers,
-  upgradePaths,
-  upgradePaused,
-  upgradeOffline,
-  type UpgradeState,
-} from './upgrade.ts'
-import { upgradeStatus } from './upgrade-management.ts'
-import { syncingExecutionReports } from './upgrade-execution.ts'
-import { pendingNodeUpdate, reportNodeUpdate, reportUpdateAvailability } from './update-network.ts'
-import { bootstrapInstallation } from './update-install.ts'
-import { beginLocalUpdate, startUpdate } from './update-orchestrator.ts'
-import { checkBackgroundUpdate, tryIdleUpdate } from './update-background.ts'
-import { isUpdateIdle } from './update-idle.ts'
-import { assertNoUpdateRollback, readUpdateState } from './update-state.ts'
 import { readOwnProcessIdentity } from '../platform/identity.ts'
 export { DaemonStorageFailure } from './storage.ts'
 
@@ -140,8 +114,6 @@ const terminal = (code?: string) =>
     'node_source_rejected',
     'credential_revoked',
     'node_revoked',
-    'credential_expired',
-    'node_idle_expired',
   ].includes(code ?? '')
 
 async function connected(options: {
@@ -180,8 +152,6 @@ async function connected(options: {
   const started = performance.now()
   let reportPending: { id: string; hash: string; sent: number } | undefined
   let reportAcked = ''
-  let upgradePending: { id: string; state: NodeUpgradeState; hash: string; sent: number } | undefined
-  let upgradeAcked = ''
   const sentReports = new Map<string, { report: ThreadReport; sentAt: number; span: Tracer.Span }>()
   const sentExecutions = new Map<string, { report: import('@baton/protocol').ExecutionReport; sentAt: number }>()
   let executionPollAt = 0
@@ -277,33 +247,6 @@ async function connected(options: {
         heartbeatAt = now + options.heartbeatMs
       }
       if (synced) {
-        const saved = await readUpgradeState(options.dataDirectory)
-        if (saved) {
-          const state = Schema.decodeUnknownSync(NodeUpgradeState)({
-            operation_id: saved.operation_id,
-            source_version: saved.source_version,
-            target_version: saved.target_version,
-            phase:
-              saved.phase === 'syncing' &&
-              reportAcked &&
-              ledger &&
-              sentReports.size === 0 &&
-              (await ledgerPromise(ledger.pendingReports())).length === 0 &&
-              sentExecutions.size === 0 &&
-              (!executions || (await executions.collectReports()).length === 0)
-                ? 'completed'
-                : saved.phase,
-          })
-          const hash = contentHash(state)
-          if (
-            hash !== upgradeAcked &&
-            (upgradePending?.hash !== hash || now - upgradePending.sent >= options.heartbeatMs)
-          ) {
-            const id = upgradePending?.hash === hash ? upgradePending.id : randomUUID()
-            upgradePending = { id, state, hash, sent: now }
-            await envelope({ type: 'node.upgrade_state', ...state }, undefined, id)
-          }
-        }
         const report = await options.report()
         if (report !== previousReport) {
           reportHash = contentHash(report)
@@ -428,24 +371,6 @@ async function connected(options: {
         }
         continue
       }
-      if (body.type === 'node.upgrade_state_result') {
-        if (
-          upgradePending &&
-          env.correlation_id === upgradePending.id &&
-          body.operation_id === upgradePending.state.operation_id &&
-          body.phase === upgradePending.state.phase &&
-          body.ok
-        ) {
-          if (body.phase === 'completed') {
-            const saved = await readUpgradeState(options.dataDirectory)
-            if (saved?.operation_id === body.operation_id && saved.phase === 'syncing')
-              await saveUpgradeState(options.dataDirectory, { ...saved, phase: 'completed' })
-          }
-          upgradeAcked = upgradePending.hash
-          upgradePending = undefined
-        }
-        continue
-      }
       if (body.type === 'thread.report_result') {
         if (!synced || !ledger) continue
         await ledgerPromise(ledger.acknowledge(body))
@@ -518,7 +443,6 @@ async function connected(options: {
         case 'execution.command':
           if (synced)
             schedule(async () => {
-              if (body.action === 'start' && (await upgradePaused(options.dataDirectory))) return
               await envelope(await executions.command(body), env.message_id)
             })
           break
@@ -632,7 +556,6 @@ const runBoundDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error, S
     if (heartbeatMs < 100 || heartbeatMs > 120_000 || pollMs < 10 || probeMs < 100)
       return yield* Effect.fail(new Error('节点轮询或心跳间隔无效'))
     if (process.platform !== 'win32') process.umask(0o077)
-    yield* attempt(() => assertNoUpdateRollback(options.dataDirectory))
     yield* attempt(async () => {
       await ensurePrivateDirectory(options.dataDirectory)
     })
@@ -677,156 +600,6 @@ const runBoundDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error, S
     }
     const url = yield* Effect.try({ try: () => normalizeRelay(address!), catch: () => new Error('Relay 地址无效') })
     const ca: string | undefined = undefined
-    let serial: Promise<unknown> = Promise.resolve()
-    const paths = upgradePaths(options.dataDirectory)
-    const shutdown = yield* Deferred.make<void>()
-    if (isSea())
-      yield* Effect.forkScoped(
-        Effect.gen(function* () {
-          while (true) {
-            yield* attempt(async () => {
-              const pending = await pendingNodeUpdate(options.dataDirectory)
-              const availabilityPath = join(options.dataDirectory, 'update-availability-pending.json')
-              try {
-                const bytes = await readPrivateFile(availabilityPath)
-                const availability = Schema.decodeUnknownSync(NodeUpdateAvailability)(
-                  JSON.parse(bytes.toString('utf8')),
-                )
-                await reportUpdateAvailability(options.dataDirectory, availability)
-                if ((await readPrivateFile(availabilityPath)).equals(bytes)) await unlink(availabilityPath)
-              } catch (error) {
-                if (!isMissing(error)) throw error
-              }
-              if (pending.operation_id && pending.attempt) {
-                await bootstrapInstallation(options.dataDirectory)
-                await startUpdate(options.dataDirectory, {
-                  operation_id: pending.operation_id,
-                  attempt: pending.attempt,
-                })
-              }
-              const progress = await readUpdateState(options.dataDirectory)
-              if (progress && progress.phase !== 'requested')
-                await reportNodeUpdate(options.dataDirectory, {
-                  operation_id: progress.operation_id,
-                  attempt: progress.attempt,
-                  phase: progress.phase,
-                  ...(progress.phase === 'failed' ? { reason: 'update_failed' } : {}),
-                })
-            }).pipe(Effect.catch(() => Effect.void))
-            yield* Effect.sleep('10 seconds')
-          }
-        }),
-      )
-    if (isSea())
-      yield* Effect.forkScoped(
-        Effect.gen(function* () {
-          while (true) {
-            yield* attempt(async () => {
-              await tryIdleUpdate(options.dataDirectory, {
-                isIdle: () => isUpdateIdle(options.dataDirectory),
-                start: async () => {
-                  await beginLocalUpdate(options.dataDirectory)
-                },
-              })
-            }).pipe(Effect.catch(() => Effect.void))
-            yield* Effect.sleep('30 seconds')
-          }
-        }),
-      )
-    if (isSea())
-      yield* Effect.forkScoped(
-        Effect.gen(function* () {
-          while (true) {
-            yield* attempt(async () => {
-              await bootstrapInstallation(options.dataDirectory)
-              const result = await checkBackgroundUpdate(options.dataDirectory, {
-                isIdle: () => isUpdateIdle(options.dataDirectory),
-                start: async () => {
-                  await beginLocalUpdate(options.dataDirectory)
-                },
-              })
-              const availability = {
-                status: result.status === 'current' ? ('current' as const) : ('available' as const),
-                version: result.version,
-                checked_at: new Date().toISOString(),
-              }
-              await writePrivateFileAtomic(
-                join(options.dataDirectory, 'update-availability.json'),
-                JSON.stringify(availability),
-              )
-              await writePrivateFileAtomic(
-                join(options.dataDirectory, 'update-availability-pending.json'),
-                JSON.stringify(availability),
-              )
-              await reportUpdateAvailability(options.dataDirectory, availability)
-              await unlink(join(options.dataDirectory, 'update-availability-pending.json')).catch((error: unknown) => {
-                if (!isMissing(error)) throw error
-              })
-            }).pipe(Effect.catch(() => Effect.void))
-            yield* Effect.sleep('6 hours')
-          }
-        }),
-      )
-    yield* attempt(async () => {
-      await ensurePrivateDirectory(join(options.dataDirectory, 'ipc'))
-      try {
-        await readPrivateFile(paths.token)
-      } catch (error) {
-        if (!isMissing(error)) throw error
-        await writePrivateFileAtomic(paths.token, randomBytes(32).toString('hex'))
-      }
-      if (process.platform !== 'win32') {
-        try {
-          const socket = await lstat(paths.endpoint)
-          if (!socket.isSocket() || socket.uid !== process.getuid?.()) throw new Error('Invalid daemon IPC endpoint')
-          await unlink(paths.endpoint)
-        } catch (error) {
-          if (!isMissing(error)) throw error
-        }
-      }
-    })
-    yield* Effect.addFinalizer(() =>
-      Effect.promise(async () => {
-        await serial
-      }),
-    )
-    yield* listenWorker({
-      endpoint: paths.endpoint,
-      token: (yield* attempt(() => readPrivateFile(paths.token))).toString('utf8'),
-      onResponse: (request, response) => {
-        if (request.type === 'upgrade_shutdown' && response.ok) Effect.runSync(Deferred.succeed(shutdown, undefined))
-      },
-      handle: (request) =>
-        attempt(async () => {
-          const task = serial.then(async () => {
-            let state = await readUpgradeState(options.dataDirectory)
-            if (request.type === 'upgrade_prepare')
-              state = await prepareUpgradeRequest(options.dataDirectory, request.payload, ca)
-            else if (request.type === 'upgrade_cancel') state = await cancelUpgrade(options.dataDirectory)
-            else if (request.type === 'upgrade_shutdown') {
-              if (!state || state.phase !== 'ready' || state.operation_id !== request.payload)
-                throw new IPCError('upgrade_conflict', '升级未就绪或操作身份不匹配')
-            } else if (request.type !== 'upgrade_status') throw new IPCError('unsupported', '仅支持升级管理命令')
-            return {
-              type: 'result' as const,
-              ok: true,
-              payload: JSON.stringify({ state: state ?? null, ...(await upgradeBlockers(options.dataDirectory)) }),
-            }
-          })
-          serial = task.catch(() => {})
-          try {
-            return await task
-          } catch (error) {
-            return {
-              type: 'result' as const,
-              ok: false,
-              code: error instanceof IPCError ? error.code : 'upgrade_failed',
-              message: error instanceof Error ? error.message : '升级管理失败',
-            }
-          }
-        }),
-    })
-    if (process.platform !== 'win32') yield* attempt(() => chmod(paths.endpoint, 0o600))
     const incarnation = randomUUID()
     const connect = (
       runtime: Pick<
@@ -884,83 +657,6 @@ const runBoundDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error, S
 
     const lifecycle = Effect.gen(function* () {
       while (true) {
-        const state = yield* attempt(() => readUpgradeState(options.dataDirectory))
-        if (state?.phase === 'draining') {
-          yield* attempt(async () => {
-            const task = serial.then(() => upgradeStatus(options.dataDirectory, true))
-            serial = task.catch(() => {})
-            await task
-          })
-          yield* Effect.sleep(100)
-          continue
-        }
-        if (upgradeOffline(state)) {
-          yield* Effect.scoped(
-            Effect.gen(function* () {
-              if (state?.phase === 'syncing')
-                yield* controlAttempt(async () => {
-                  const file = await openPrivateFile(join(options.dataDirectory, 'node.db'))
-                  await file.close()
-                })
-              const ledger =
-                state?.phase === 'syncing'
-                  ? yield* makeNodeLedger(
-                      join(options.dataDirectory, 'node.db'),
-                      identity.node_id,
-                      excludedThreads,
-                    ).pipe(Effect.mapError((cause) => new DaemonStorageFailure(cause)))
-                  : undefined
-              if (ledger)
-                yield* controlAttempt(async () => {
-                  // 补齐已退出 Worker 的持久报告，不启动 Worker 或原生会话。
-                  for (const worker of await ledgerPromise(ledger.workers())) {
-                    try {
-                      const path = workerPaths(options.dataDirectory, worker.threadId).ledger
-                      const file = await openPrivateFile(path)
-                      await file.close()
-                      const state = readLedger(path, worker.config).initial
-                      for (const entry of state.outbox)
-                        if (!entry.acked) await ledgerPromise(ledger.ingest(entry.report))
-                    } catch (error) {
-                      if (!isMissing(error)) throw error
-                    }
-                  }
-                })
-              yield* Effect.raceFirst(
-                connect({
-                  ...(ledger
-                    ? {
-                        ledger,
-                        executions: {
-                          ...makeExecutionService({
-                            dataDirectory: options.dataDirectory,
-                            excludedIds: excludedExecutions,
-                          }),
-                          ...syncingExecutionReports(options.dataDirectory, excludedExecutions),
-                        },
-                      }
-                    : {}),
-                  report: async () => ({
-                    upgrade_protocol: 1,
-                    ...(isSea() ? { update_protocol: 1 } : {}),
-                    batond_version: BUILD.version,
-                    agents: [],
-                    roots: [],
-                    repos: [],
-                    exec: { enabled: false, shell: process.platform === 'win32' ? 'pwsh' : '/bin/sh' },
-                  }),
-                  refreshDevices: () => {},
-                }),
-                Effect.gen(function* () {
-                  while (upgradeOffline(yield* attempt(() => readUpgradeState(options.dataDirectory))))
-                    yield* Effect.sleep(100)
-                }),
-              )
-            }),
-          )
-          continue
-        }
-        let draining: UpgradeState | undefined
         yield* Effect.scoped(
           Effect.gen(function* () {
             yield* controlAttempt(async () => {
@@ -1053,8 +749,6 @@ const runBoundDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error, S
             const report = async (): Promise<RuntimeReport> => {
               if (cachedReport?.agents === agents && cachedReport.devices === deviceReport) return cachedReport.value
               const value = boundRuntimeReport({
-                upgrade_protocol: 1,
-                ...(isSea() ? { update_protocol: 1 } : {}),
                 batond_version: BUILD.version,
                 ...(username ? { user: username } : {}),
                 agents,
@@ -1094,7 +788,6 @@ const runBoundDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error, S
             const probe = Effect.gen(function* () {
               while (true) {
                 yield* controlAttempt(async (signal) => {
-                  if (await upgradePaused(options.dataDirectory)) return
                   try {
                     const probed = await services.probe(signal)
                     agents = Array.isArray(probed) ? [...probed] : [probed]
@@ -1105,74 +798,31 @@ const runBoundDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error, S
                 yield* Effect.sleep(probeMs)
               }
             })
-            const drain = Effect.gen(function* () {
-              while (true) {
-                const state = yield* attempt(() => readUpgradeState(options.dataDirectory))
-                if (state && !['cancelled', 'completed'].includes(state.phase)) {
-                  const status = yield* attempt(() => upgradeBlockers(options.dataDirectory))
-                  if (state.phase === 'draining' && status.blockers.length === 0) {
-                    draining = state
-                    return
-                  }
-                }
-                yield* Effect.sleep(1000)
-              }
-            })
-            yield* Effect.raceFirst(
-              Effect.all(
-                [
-                  connect({
-                    ledger,
-                    threads,
-                    executions,
-                    projects,
-                    devices,
-                    report,
-                    refreshDevices: () => {
-                      devicesDirty = true
-                    },
-                  }),
-                  collect,
-                  probe,
-                  collectDevices,
-                  pruneOutputs,
-                ],
-                { concurrency: 'unbounded' },
-              ),
-              drain,
+            yield* Effect.all(
+              [
+                connect({
+                  ledger,
+                  threads,
+                  executions,
+                  projects,
+                  devices,
+                  report,
+                  refreshDevices: () => {
+                    devicesDirty = true
+                  },
+                }),
+                collect,
+                probe,
+                collectDevices,
+                pruneOutputs,
+              ],
+              { concurrency: 'unbounded' },
             )
           }),
-        ).pipe(
-          Effect.catchCause((cause) =>
-            Effect.gen(function* () {
-              const state = yield* attempt(() => readUpgradeState(options.dataDirectory))
-              if (!state || ['cancelled', 'completed'].includes(state.phase)) return yield* Effect.failCause(cause)
-              if (state.phase === 'draining' && hasCode(Cause.squash(cause), 'node_version_incompatible')) return
-              yield* attempt(() =>
-                saveUpgradeState(options.dataDirectory, {
-                  ...state,
-                  phase: 'failed',
-                  reason: Cause.pretty(cause).slice(0, 2048),
-                }),
-              )
-            }),
-          ),
         )
-        if (draining) {
-          const completed = draining as UpgradeState
-          yield* attempt(async () => {
-            const finish = serial.then(async () => {
-              const current = await readUpgradeState(options.dataDirectory)
-              if (current?.operation_id === completed.operation_id && current.phase === 'draining')
-                await upgradeStatus(options.dataDirectory, true)
-            })
-            serial = finish.catch(() => {})
-            await finish
-          })
-        }
       }
     })
-    yield* Effect.raceFirst(lifecycle, Deferred.await(shutdown))
+    yield* lifecycle
   })
   return program.pipe(
     Effect.provideService(DaemonServices, {

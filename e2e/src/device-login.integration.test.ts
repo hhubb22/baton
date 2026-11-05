@@ -134,7 +134,6 @@ test('device-code approval binds a resident daemon through HTTP and authenticate
     await vi.waitFor(async () => expect((await status()).state).toBe('online'), { timeout: 8000 })
     const identity = await loadIdentity(dataDirectory)
     expect(identity.employee_id).toBe(employee.id)
-    expect(identity.credential.expires_at).toBeNull()
     expect(((await browser('/nodes').then((response) => response.json())) as P.NodesResponse).nodes).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: identity.node_id, online: true, synced: true })]),
     )

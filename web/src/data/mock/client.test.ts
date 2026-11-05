@@ -448,7 +448,7 @@ describe('operations', () => {
     expect(compat.stop?.kind).toBe('folderMissing')
     await expect(client.sendMessage({ threadId: 'thr-compat', body: 'Again', clientId: 'c1' })).rejects.toBeTruthy()
     scheduler.advance(browserLatency.run)
-    expect((await client.listMessages('thr-upgrade')).filter((item) => item.delivery === 'unknown')).toHaveLength(1)
+    expect((await client.listMessages('thr-restart')).filter((item) => item.delivery === 'unknown')).toHaveLength(1)
   })
 
   it('resumes an interrupted thread or reports lost history', async () => {

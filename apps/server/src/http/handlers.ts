@@ -6,7 +6,6 @@ import { BatonHttpApi, CurrentBrowserSession, DefaultDeviceResponse } from '@bat
 import * as Auth from '../auth.ts'
 import * as Nodes from '../nodes.ts'
 import * as DeviceAuth from '../device-auth.ts'
-import * as NodeUpdates from '../node-updates.ts'
 import * as Threads from '../threads/index.ts'
 import * as Executions from '../executions.ts'
 import type { HTTPOptions } from './options.ts'
@@ -188,16 +187,6 @@ export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
           ),
         )
         .handle('setDefaultDevice', ({ payload }) => httpBusiness(defaultDevice(payload.node_id)))
-        .handle('requestUpdate', ({ params }) =>
-          httpBusiness(
-            Effect.gen(function* () {
-              const { employee } = yield* CurrentBrowserSession
-              const result = yield* NodeUpdates.requestUpdate(employee.id, params.nodeId)
-              options.gateway().notify(employee.id, { type: 'nodes.changed', node_id: params.nodeId })
-              return yield* decodeResponse(P.NodeUpdateRequest)(result)
-            }),
-          ),
-        )
         .handle('setDefaultPC', ({ payload }) => httpBusiness(defaultDevice(payload.node_id)))
         .handle('revoke', ({ params }) =>
           httpBusiness(

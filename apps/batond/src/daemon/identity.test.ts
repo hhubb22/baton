@@ -26,7 +26,6 @@ function identity(): NodeIdentity {
       id: randomUUID(),
       token: 'offline-token',
       version: 1,
-      expires_at: '2099-01-01T00:00:00Z',
     },
   }
 }

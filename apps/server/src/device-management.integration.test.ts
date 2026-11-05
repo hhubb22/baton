@@ -79,15 +79,9 @@ describe('authenticated device management confirmation', () => {
     ).toEqual({ connection })
   })
   it.each(['files', 'roots-read', 'roots-set', 'login', 'exec'] as const)(
-    'records business only after a confirmed %s response',
+    'accepts a confirmed %s response',
     async (kind) => {
-      const { identity, source } = await node()
-      const sqlRun = <A, E>(query: (sql: SqlClient.SqlClient) => Effect.Effect<A, E>) =>
-        run(Effect.flatMap(SqlClient.SqlClient, query))
-      await sqlRun(
-        (sql) =>
-          sql`UPDATE node_credentials SET last_business_at=clock_timestamp()-interval '1 day' WHERE id=${source.credential_id}`,
-      )
+      const { identity } = await node()
       const transport = gateway(async (body) => ({
         type:
           kind === 'files'
@@ -123,13 +117,6 @@ describe('authenticated device management confirmation', () => {
       else if (kind === 'login')
         await run(Devices.startSubscriptionLogin(alice.id, identity.node_id, 'chatgpt', transport))
       else await run(Devices.setProjectExec(alice.id, identity.node_id, true, transport))
-      const [state] = await sqlRun(
-        (sql) =>
-          sql<{
-            renewed: boolean
-          }>`SELECT last_business_at>clock_timestamp()-interval '1 minute' AND expires_at IS NULL AS renewed FROM node_credentials WHERE id=${source.credential_id}`,
-      )
-      expect(state.renewed).toBe(true)
     },
   )
 
@@ -137,14 +124,6 @@ describe('authenticated device management confirmation', () => {
     const { identity, source } = await node()
     const sqlRun = <A, E>(query: (sql: SqlClient.SqlClient) => Effect.Effect<A, E>) =>
       run(Effect.flatMap(SqlClient.SqlClient, query))
-    await sqlRun(
-      (sql) =>
-        sql`UPDATE node_credentials SET created_at=clock_timestamp()-interval '31 days',last_business_at=clock_timestamp()-interval '31 days' WHERE id=${source.credential_id}`,
-    )
-    const [before] = await sqlRun(
-      (sql) =>
-        sql<{ value: string }>`SELECT expires_at::text AS value FROM node_credentials WHERE id=${source.credential_id}`,
-    )
     for (const result of [
       { ok: false, code: 'denied' },
       { ok: true, exec: { enabled: false, shell: '/bin/sh' } },
@@ -174,11 +153,6 @@ describe('authenticated device management confirmation', () => {
     await expect(run(Devices.setProjectExec(alice.id, identity.node_id, true, replaced))).rejects.toMatchObject({
       code: 'node_source_rejected',
     })
-    const [after] = await sqlRun(
-      (sql) =>
-        sql<{ value: string }>`SELECT expires_at::text AS value FROM node_credentials WHERE id=${source.credential_id}`,
-    )
-    expect(after.value).toBe(before.value)
     const revoked = gateway(async (body) => {
       await sqlRun(
         (sql) => sql`UPDATE node_credentials SET revoked_at=clock_timestamp() WHERE id=${source.credential_id}`,

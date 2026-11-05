@@ -38,8 +38,6 @@ export function notificationCause(reason: string): string {
       return 'The Agent could not start.'
     case 'lease_expired':
       return 'The project assistant connection expired.'
-    case 'node_idle_expired':
-      return 'The device credential expired after inactivity.'
     case 'node_revoked':
       return 'The device credential was revoked.'
     default:

@@ -17,13 +17,6 @@ const stateLabels: Record<string, string> = {
   external: '由外部服务管理',
   stopping: '正在停止',
   online: '在线',
-  draining: '等待任务结束',
-  ready: '准备就绪',
-  migrating: '正在升级',
-  syncing: '正在同步',
-  completed: '已完成',
-  cancelled: '已取消',
-  failed: '失败',
 }
 const stateLabel = (state: string) => (Object.hasOwn(stateLabels, state) ? stateLabels[state]! : state)
 
@@ -104,12 +97,6 @@ function Diagnostics({ nodeId, bridge, state }: { nodeId: string; bridge: Deskto
             </dd>
             <dt {...stylex.props(text.caption, styles.label)}>平台</dt>
             <dd {...stylex.props(styles.value)}>{data.platform}</dd>
-            {data.upgradePhase && (
-              <>
-                <dt {...stylex.props(text.caption, styles.label)}>更新</dt>
-                <dd {...stylex.props(styles.value)}>{stateLabel(data.upgradePhase)}</dd>
-              </>
-            )}
           </dl>
           <div aria-busy={pending !== null} {...stylex.props(styles.actions)}>
             {data.canRestart && !external && bridge.restartDaemon && (

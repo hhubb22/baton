@@ -317,7 +317,7 @@ async function main() {
       const result = run(executable, ['--help'], options)
       assert.equal(result.status, 0, result.stderr)
       assert.match(result.stdout, /Baton/i)
-      assert.match(result.stdout, /register/)
+      assert.match(result.stdout, /install/)
       return { exitCode: result.status }
     })
     await check('version', () => {
@@ -331,13 +331,15 @@ async function main() {
       report.runtime = version
       return version
     })
-    await check('updateModules', async () => {
-      const directory = join(root, 'update-data')
+    await check('installation', async () => {
+      const directory = join(root, 'install-data')
       await mkdir(directory, { mode: 0o700 })
-      const result = run(executable, ['update', 'policy', '--data-dir', directory], options)
+      const result = run(executable, ['doctor', '--data-dir', directory], options)
       assert.equal(result.status, 0, result.stderr)
-      assert.equal(JSON.parse(result.stdout).policy, 'manual')
-      return { policy: 'manual' }
+      const report = JSON.parse(result.stdout)
+      assert.equal(report.installed, false)
+      assert.equal(report.data_directory, directory)
+      return { installed: report.installed }
     })
     await check('releaseMetadata', async () => {
       const metadata = JSON.parse(await readFile(join(installed, 'release.json'), 'utf8'))

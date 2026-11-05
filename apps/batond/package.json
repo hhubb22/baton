@@ -9,7 +9,6 @@
     "./daemon/control": "./src/daemon/control.ts",
     "./daemon/control-client": "./src/daemon/control-client.ts",
     "./daemon/identity": "./src/daemon/identity.ts",
-    "./daemon/update-version": "./src/daemon/update-version.ts",
     "./daemon/transport": "./src/daemon/transport.ts",
     "./daemon/telemetry-relay": "./src/daemon/telemetry-relay.ts",
     "./devices/roots": "./src/devices/roots.ts",
@@ -27,7 +26,6 @@
     "./testing/codex/transcripts": "./src/testing/codex/transcripts.ts",
     "./testing/kiro/transcripts": "./src/testing/kiro/transcripts.ts",
     "./testing/daemon": "./src/testing/daemon.ts",
-    "./testing/upgrade": "./src/testing/upgrade.ts",
     "./cli": "./src/cli.ts"
   },
   "scripts": {

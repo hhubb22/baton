@@ -111,7 +111,7 @@ it('binds only after browser authentication, Origin, CSRF and matching short cod
   expect(first.status).toBe('approved')
   if (first.status !== 'approved') throw new Error('approval required')
   expect(first.identity.employee_id).toBe(employee.id)
-  expect(first.identity.credential).toMatchObject({ version: 1, expires_at: null })
+  expect(first.identity.credential).toMatchObject({ version: 1 })
   expect(
     JSON.parse(Buffer.from(first.identity.credential.token.split('.')[1]!, 'base64url').toString()).exp,
   ).toBeUndefined()

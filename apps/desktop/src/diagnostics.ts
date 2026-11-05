@@ -6,7 +6,6 @@ export type DesktopDiagnostics = {
   platform: string
   processState: string
   lastExit: { at: string; reason: string } | null
-  upgradePhase: string | null
   canRestart: boolean
 }
 
@@ -78,7 +77,6 @@ export function diagnosticSummary(info: DesktopDiagnostics, log: string): string
     `设备状态： ${safe(info.processState)}`,
     `最近退出： ${info.lastExit ? safe(info.lastExit.at) : '无'}`,
     ...(info.lastExit ? [`退出原因： ${safe(info.lastExit.reason)}`] : []),
-    `升级阶段： ${info.upgradePhase === null ? '无' : safe(info.upgradePhase)}`,
     `可以重启： ${info.canRestart ? '是' : '否'}`,
     '',
     '最近 batond 日志（最多 200 行）：',

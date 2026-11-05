@@ -114,10 +114,6 @@ export const WorkerIPCMessage = Schema.Struct({
     'thread_ack',
     'session_request',
     'thread_command_status',
-    'upgrade_prepare',
-    'upgrade_status',
-    'upgrade_cancel',
-    'upgrade_shutdown',
   ]),
   token: Schema.optionalKey(Schema.String),
   ok: Schema.Boolean,
@@ -272,22 +268,6 @@ export const WorkerRequest = Schema.Union([
   WorkerPending,
   WorkerAck,
   WorkerSessionRequest,
-  WorkerIPCMessage.mapFields(
-    (fields) => ({
-      ...fields,
-      type: Schema.Literal('upgrade_prepare'),
-      payload: Schema.String.check(Schema.isMinLength(1)),
-    }),
-    preserveChecks,
-  ),
-  WorkerIPCMessage.mapFields(
-    (fields) => ({ ...fields, type: Schema.Literals(['upgrade_status', 'upgrade_cancel']) }),
-    preserveChecks,
-  ),
-  WorkerIPCMessage.mapFields(
-    (fields) => ({ ...fields, type: Schema.Literal('upgrade_shutdown'), payload: UUID }),
-    preserveChecks,
-  ),
 ]).check(jsonLimit(256 * 1024))
 export type WorkerRequest = typeof WorkerRequest.Type
 export type WorkerCommandAction = typeof WorkerCommandAction.Type

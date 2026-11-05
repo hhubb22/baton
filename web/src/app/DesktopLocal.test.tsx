@@ -20,7 +20,6 @@ const diagnostics: DesktopDiagnostics = {
   platform: 'darwin arm64',
   processState: 'stopped',
   lastExit: { at: '2026-10-27T14:32:00Z', reason: 'Unexpected exit · code 1' },
-  upgradePhase: null,
   canRestart: true,
 }
 
@@ -222,16 +221,14 @@ describe('native folder selection', () => {
 })
 
 describe('local device diagnostics', () => {
-  it('shows local details, exit time and update phase, and invokes restart, logs and copy by device ID', async () => {
+  it('shows local details, exit time, and invokes restart, logs and copy by device ID', async () => {
     const f = fixture('/devices?device=dev-mac')
-    f.desktop.bridge.diagnostics.mockResolvedValue({ ...diagnostics, upgradePhase: 'migrating' })
     f.show()
     const section = await screen.findByRole('region', { name: '本机诊断' })
     expect(await within(section).findByText('Baton 0.1.0 · batond 0.1.1')).toBeInTheDocument()
     expect(section).toHaveTextContent('darwin arm64')
     expect(section).toHaveTextContent('Unexpected exit · code 1')
     expect(section.querySelector('time')).toHaveAttribute('datetime', diagnostics.lastExit!.at)
-    expect(section).toHaveTextContent('正在升级')
     await f.user.click(within(section).getByRole('button', { name: '打开日志文件夹' }))
     await f.user.click(within(section).getByRole('button', { name: '复制诊断摘要' }))
     expect(await within(section).findByRole('button', { name: '诊断摘要已复制' })).toBeInTheDocument()

@@ -38,7 +38,7 @@ async function fixture(ledger = true) {
     capabilities: [],
     registration_seq: 1,
     registered_at: '2026-01-01T00:00:00Z',
-    credential: { id: randomUUID(), token: 'offline-secret', version: 1, expires_at: '2099-01-01T00:00:00Z' },
+    credential: { id: randomUUID(), token: 'offline-secret', version: 1 },
   }
   await writePrivateFileAtomic(join(data, 'identity.json'), JSON.stringify(identity))
   await updateBrowseRoots(data, { action: 'add', path: root, id: 'work' })

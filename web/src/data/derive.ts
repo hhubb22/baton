@@ -492,19 +492,8 @@ export function lastSeen(at: number, now: number) {
   return new Date(at).toDateString() === new Date(now).toDateString() ? time : `${day.format(at)}, ${time}`
 }
 
-// 设备行优先显示升级暂停；普通连接状态与 Project 助手运行信息随后显示。
+// 设备行显示连接状态与 Project 助手运行信息。
 export function deviceConnectionView(device: Device, projects: Project[], now: number): StatusView {
-  switch (device.upgradeState?.phase) {
-    case 'draining':
-    case 'ready':
-      return { tone: 'neutral', label: '等待升级' }
-    case 'migrating':
-    case 'syncing':
-      return { tone: 'neutral', label: '正在升级' }
-    case 'failed':
-      return { tone: 'attention', label: '升级已暂停' }
-  }
-  if (device.credentialState === 'idle_expired') return { tone: 'attention', label: '需要登录' }
   switch (device.connection) {
     case 'offline':
       return { tone: 'neutral', label: `离线 · 最后在线 ${lastSeen(device.lastSeenAt, now)}` }
@@ -687,7 +676,7 @@ export function setupSteps(device: Device) {
     if (agent.problem === 'notInstalled') return [`安装 ${name}`]
     return []
   })
-  if (!device.hasRuntime) steps.push('更新 Baton 以使用项目助手')
+  if (!device.hasRuntime) steps.push('重新安装 Baton 以使用项目助手')
   else if (
     !subscriptionCanRun(device) &&
     !device.agents.some((agent) => agent.account === 'ChatGPT' && agent.problem)

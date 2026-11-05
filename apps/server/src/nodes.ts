@@ -10,12 +10,7 @@ import {
 import { constants } from 'node:fs'
 import { link, lstat, mkdir, open, unlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import {
-  RuntimeReport,
-  NodeUpgradeStateRequest,
-  type NodeUpgradeState,
-  type NodeUpgradeStateResult,
-} from '@baton/protocol'
+import { RuntimeReport } from '@baton/protocol'
 import { Effect, Schema } from 'effect'
 import { waitEvent } from '@baton/telemetry'
 import * as SqlClient from 'effect/sql/SqlClient'
@@ -48,7 +43,6 @@ export interface NodeIdentity extends SyncInput {
     readonly id: string
     readonly version: number
     readonly token: string
-    readonly expires_at: string | null
   }
   readonly signing_public_key: string
 }
@@ -301,10 +295,7 @@ export const revalidateNodeSource = (source: NodeSource, requireSynced = true): 
 /** 有效业务由调用方在同一事务保存，来源已持有 Node、Credential 写锁。 */
 export const recordNodeBusiness = (source: NodeSource): DatabaseEffect<void> =>
   Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
     yield* revalidateNodeSource(source)
-    yield* sql`UPDATE node_credentials SET last_business_at=GREATEST(last_business_at,clock_timestamp())
-      WHERE id=${source.credential_id}::uuid`
   }).pipe(Effect.mapError(dbError))
 
 export const claimConnection = (source: NodeSource): DatabaseEffect<void> =>
@@ -415,79 +406,6 @@ export const saveRuntimeReport = (source: NodeSource, report: Record<string, unk
     )
   }).pipe(Effect.mapError(dbError))
 
-export const saveNodeUpgradeState = (
-  source: NodeSource,
-  input: typeof NodeUpgradeStateRequest.Type,
-): DatabaseEffect<NodeUpgradeStateResult> =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    const report = yield* Effect.try({
-      try: () => Schema.decodeUnknownSync(NodeUpgradeStateRequest)(input),
-      catch: () => new AppError(400, 'invalid_request'),
-    })
-    return yield* sql.withTransaction(
-      Effect.gen(function* () {
-        yield* lockNodeSource(source, false)
-        type Upgrade = NodeUpgradeState & {
-          id: string
-          node_id: string
-          reported_phases: readonly NodeUpgradeState['phase'][]
-        }
-        const [previous] =
-          yield* sql<Upgrade>`SELECT * FROM node_upgrades WHERE operation_id=${report.operation_id}::uuid`
-        const [current] =
-          yield* sql<Upgrade>`SELECT * FROM node_upgrades WHERE node_id=${source.node_id}::uuid ORDER BY id DESC LIMIT 1`
-        const conflict = () => new AppError(409, 'upgrade_conflict', '升级操作的目标或阶段与已保存状态冲突')
-        if (previous) {
-          if (
-            previous.node_id !== source.node_id ||
-            previous.source_version !== report.source_version ||
-            previous.target_version !== report.target_version
-          )
-            return yield* Effect.fail(conflict())
-          if (!previous.reported_phases.includes(report.phase)) {
-            if (
-              previous.id !== current?.id ||
-              previous.phase === 'cancelled' ||
-              previous.phase === 'completed' ||
-              report.phase === 'draining' ||
-              (report.phase === 'ready' && ['migrating', 'syncing'].includes(previous.phase)) ||
-              (report.phase === 'migrating' && previous.phase === 'syncing') ||
-              (report.phase === 'cancelled' &&
-                previous.reported_phases.some((phase) => ['migrating', 'syncing'].includes(phase))) ||
-              (previous.phase === 'failed' && report.phase === 'ready')
-            )
-              return yield* Effect.fail(conflict())
-            yield* sql`UPDATE node_upgrades SET phase=${report.phase},reported_phases=array_append(reported_phases,${report.phase}) WHERE operation_id=${report.operation_id}::uuid`
-          }
-        } else {
-          yield* sql`INSERT INTO node_upgrades(node_id,employee_id,operation_id,source_version,target_version,phase,reported_phases)
-          VALUES(${source.node_id}::uuid,${source.employee_id}::uuid,${report.operation_id}::uuid,${report.source_version},${report.target_version},${report.phase},ARRAY[${report.phase}]::text[])`
-        }
-        yield* revalidateNodeSource(source, false)
-        return {
-          type: 'node.upgrade_state_result' as const,
-          operation_id: report.operation_id,
-          phase: report.phase,
-          ok: true,
-        }
-      }),
-    )
-  }).pipe(
-    Effect.catchTag('SqlError', (error) =>
-      Effect.fail(
-        error.reason._tag === 'UniqueViolation' && error.reason.constraint === 'node_upgrades_operation_id_key'
-          ? new AppError(409, 'upgrade_conflict', '升级操作已用于其他设备')
-          : dbError(error),
-      ),
-    ),
-    Effect.mapError(dbError),
-  )
-
-/** 使用当前节点别名 n，只判断新执行是否可以交付。 */
-export const nodeAllowsNewExecutionSQL = (sql: SqlClient.SqlClient) => sql`COALESCE(
-  (SELECT u.phase IN ('completed','cancelled') FROM node_upgrades u WHERE u.node_id=n.id ORDER BY u.id DESC LIMIT 1),true)`
-
 export const localProcessNotice = '吊销连接凭据不会停止离线节点上的本地进程。重新接入需要新的连接凭据。'
 const revocationMessage = (status: string) =>
   status === 'effective' ? '吊销已生效。同一连接凭据不能再连接。' : '吊销正在处理，尚未生效。'
@@ -506,10 +424,6 @@ type NodeRow = {
   last_contact_at: Date | null
   status_updated_at: Date | null
   runtime_report: Record<string, unknown> | null
-  upgrade_state: NodeUpgradeState | null
-  update_request: Record<string, unknown> | null
-  update_management_last_seen: Date | null
-  update_availability: Record<string, unknown> | null
   runtime_report_version: number
   runtime_reported_at: Date | null
   requested_at: Date | null
@@ -523,10 +437,6 @@ const nodeRows = (employeeId: string, nodeId?: string): DatabaseEffect<readonly 
     const sql = yield* SqlClient.SqlClient
     return yield* sql<NodeRow>`SELECT n.id::text, n.display_name, n.system_name AS system, n.capabilities,
     n.registration_seq::float8, n.registered_at, n.revoked_at IS NOT NULL AS revoked,c.revoked_at IS NOT NULL AS credential_revoked,
-    (SELECT jsonb_build_object('operation_id',u.operation_id,'source_version',u.source_version,'target_version',u.target_version,'phase',u.phase) FROM node_upgrades u WHERE u.node_id=n.id ORDER BY u.id DESC LIMIT 1) AS upgrade_state,
-    (SELECT jsonb_build_object('operation_id',u.operation_id,'attempt',u.attempt,'phase',u.phase,'reason',u.reason,'created_at',u.created_at,'management_last_seen',u.management_last_seen) FROM node_update_requests u WHERE u.node_id=n.id ORDER BY u.created_at DESC LIMIT 1) AS update_request,
-    (SELECT last_seen FROM node_update_management m WHERE m.node_id=n.id) AS update_management_last_seen,
-    (SELECT availability FROM node_update_management m WHERE m.node_id=n.id) AS update_availability,
     COALESCE(p.online,false) AS online, COALESCE(p.synced,false) AS synced, p.last_contact_at, p.status_updated_at,
     r.report AS runtime_report, COALESCE(r.report_version,0)::float8 AS runtime_report_version, r.reported_at AS runtime_reported_at,
     v.requested_at, v.applied_at, v.operator_id, COALESCE(v.credential_ids,ARRAY[]::text[]) AS credential_ids
@@ -563,22 +473,8 @@ const nodeFrom = (row: NodeRow): Record<string, unknown> => ({
   registered_at: timestamp(row.registered_at),
   online: row.online,
   synced: row.synced,
-  executable:
-    row.online &&
-    row.synced &&
-    !row.revoked &&
-    !row.credential_revoked &&
-    (!row.upgrade_state || ['completed', 'cancelled'].includes(row.upgrade_state.phase)),
-  upgrade_state: row.upgrade_state,
-  ...(row.update_management_last_seen
-    ? { update_management_last_seen: timestamp(row.update_management_last_seen) }
-    : {}),
-  update_availability: row.update_availability,
-  update_request: row.update_request
-    ? Object.fromEntries(Object.entries(row.update_request).filter(([, value]) => value !== null))
-    : null,
+  executable: row.online && row.synced && !row.revoked && !row.credential_revoked,
   credential_state: row.revoked || row.credential_revoked ? 'revoked' : 'active',
-  idle_expires_at: null,
   last_contact_at: timestamp(row.last_contact_at),
   status_updated_at: timestamp(row.status_updated_at),
   runtime_report: row.runtime_report,

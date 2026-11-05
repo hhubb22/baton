@@ -8,8 +8,6 @@ export function createTray(actions: {
   open: () => void
   restart: () => void
   restartAvailable: () => boolean
-  update: () => void
-  updateLabel: () => string
   logs: () => void
   quit: () => void
   loginEnabled: () => boolean
@@ -81,7 +79,6 @@ export function createTray(actions: {
           { label: '设置…', click: actions.settings },
           { type: 'separator' },
           { label: '打开 Baton', click: actions.open },
-          { label: actions.updateLabel(), click: actions.update },
           ...(!actions.restartAvailable() ? [] : [{ label: '重启设备服务', click: actions.restart }]),
           { label: '打开日志文件夹', click: actions.logs },
           { label: '退出 Baton', click: actions.quit },

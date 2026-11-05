@@ -163,11 +163,6 @@ const Nodes = HttpApiGroup.make('nodes')
   .add(
     Endpoint.get('list', '/api/v1/nodes', { success: D.NodesResponse }),
     Endpoint.get('get', '/api/v1/nodes/:nodeId', { params: nodeParams, success: D.NodeStatus }),
-    Endpoint.post('requestUpdate', '/api/v1/nodes/:nodeId/update', {
-      params: nodeParams,
-      payload: EmptyInput,
-      success: D.NodeUpdateRequest,
-    }),
     Endpoint.put('setDefaultDevice', '/api/v1/me/default-device', {
       payload: D.SetDefaultDeviceInput,
       success: DefaultDeviceResponse,

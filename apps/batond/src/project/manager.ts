@@ -1,6 +1,4 @@
 import { createHash } from 'node:crypto'
-import { upgradePaused, readUpgradeState, upgradeOffline } from '../daemon/upgrade.ts'
-import { assertNoUpdateRollback } from '../daemon/update-state.ts'
 import { IPCError } from '../daemon/ipc.ts'
 import { join } from 'node:path'
 import { rm, open } from 'node:fs/promises'
@@ -177,22 +175,13 @@ class Manager implements ProjectManager {
     if (this.cancel.signal.aborted) return
     this.serial = this.serial
       .then(async () => {
-        const paused = await upgradePaused(this.options.dataDir)
-        if (paused) {
-          for (const run of this.runs.values()) {
-            if (run.command.type === 'project_memory_start') this.stop(run)
-            else run.waits.notify()
-          }
-        } else {
-          for (const row of await safePromise(this.ledger.pending())) {
-            if (this.cancel.signal.aborted || (await upgradePaused(this.options.dataDir))) break
-            const command = Schema.decodeUnknownSync(ProjectRunCommand)(JSON.parse(row.payload))
-            if (command.type === 'project_run_wake') this.wake(command)
-            else await this.reserve(command)
-            const saved = await safePromise(this.ledger.get(command.run_id))
-            if (!saved || !['starting', 'queued'].includes(saved.state))
-              await safePromise(this.ledger.delivered(row.id))
-          }
+        for (const row of await safePromise(this.ledger.pending())) {
+          if (this.cancel.signal.aborted) break
+          const command = Schema.decodeUnknownSync(ProjectRunCommand)(JSON.parse(row.payload))
+          if (command.type === 'project_run_wake') this.wake(command)
+          else await this.reserve(command)
+          const saved = await safePromise(this.ledger.get(command.run_id))
+          if (!saved || !['starting', 'queued'].includes(saved.state)) await safePromise(this.ledger.delivered(row.id))
         }
       })
       .catch(() => {})
@@ -239,7 +228,7 @@ class Manager implements ProjectManager {
       )
       this.lease(run)
       if (result.ok) run.lastRenew = started
-      else if (['lease_lost', 'claim_lost', 'node_idle_expired'].includes(result.code ?? '')) this.stop(run)
+      else if (['lease_lost', 'claim_lost'].includes(result.code ?? '')) this.stop(run)
     } catch {
       this.stop(run)
     } finally {
@@ -266,23 +255,15 @@ class Manager implements ProjectManager {
     if (run.owned) this.track(this.runner.reap(run.owned)).catch(() => {})
   }
   async command(input: ProjectRunCommand) {
-    await assertNoUpdateRollback(this.options.dataDir)
     const decoded = Schema.decodeUnknownOption(ProjectRunCommand)(input)
     if (decoded._tag === 'None' || decoded.value.lease_epoch <= 0 || this.cancel.signal.aborted) return
     const command = decoded.value
     if (this.options.excludedRunIds?.has(command.run_id))
       throw new IPCError('binding_mismatch', 'Project Run 属于已解除的设备绑定')
-    if (upgradeOffline(await readUpgradeState(this.options.dataDir)))
-      throw new IPCError('node_upgrading', '设备已准备升级')
     const queued = this.serial.then(async () => {
       const { trace: _trace, ...content } = command
       const id = createHash('sha256').update(JSON.stringify(content)).digest('hex')
       await safePromise(this.ledger.enqueue(id, command))
-      if (
-        (await upgradePaused(this.options.dataDir)) &&
-        !['project_run_stop', 'project_memory_stop'].includes(command.type)
-      )
-        return
       if (command.type === 'project_run_wake') this.wake(command)
       else await this.reserve(command)
       const saved = await safePromise(this.ledger.get(command.run_id))
@@ -416,13 +397,6 @@ class Manager implements ProjectManager {
       await ensurePrivateDirectory(run.control)
       this.lease(run)
       const config = await readProjectRuntimeConfig(this.options.dataDir)
-      if (await upgradePaused(this.options.dataDir)) {
-        // 尚未启动的运行回到持久命令队列，保留原租约身份。
-        run.deferred = true
-        await safePromise(this.ledger.state(run.command.run_id, 'queued', ''))
-        this.runs.delete(run.command.run_id)
-        return
-      }
       run.owned = await this.runner.spawn(
         [
           run.command.type === 'project_memory_start' ? 'memory' : 'run',
@@ -537,8 +511,6 @@ class Manager implements ProjectManager {
   private async runtimeRequest(run: Run, value: Record<string, unknown>): Promise<ProjectRuntimeResult> {
     try {
       const started = this.lease(run)
-      if (value.operation === 'poll_wake' && (await upgradePaused(this.options.dataDir)))
-        return { type: 'project_runtime.result', ok: true, data: {} }
       if (value.operation === 'poll_wake')
         return await run.waits.poll(value.payload, run.cancel.signal, () => this.lease(run))
       const decoded = Schema.decodeUnknownOption(ProjectRuntimeRequest)({
@@ -549,16 +521,6 @@ class Manager implements ProjectManager {
       })
       if (decoded._tag === 'None') return failure('invalid_request')
       const request = decoded.value
-      if (
-        run.command.type !== 'project_memory_start' &&
-        request.operation === 'claim_inputs' &&
-        (await upgradePaused(this.options.dataDir))
-      ) {
-        await this.call({ ...request, operation: 'finish', reason: 'idle' }, run.cancel.signal)
-        // 领取下一批输入之前已保存当前回合，可以关闭 Runtime 而不撤回输入。
-        this.stop(run)
-        return failure('lease_lost')
-      }
       if (
         !(
           run.command.type === 'project_memory_start'
@@ -609,7 +571,7 @@ class Manager implements ProjectManager {
           },
         })
       }
-      if (result.code === 'lease_lost' || result.code === 'claim_lost' || result.code === 'node_idle_expired') {
+      if (result.code === 'lease_lost' || result.code === 'claim_lost') {
         const timer = setTimeout(() => this.stop(run), 100)
         timer.unref()
       }

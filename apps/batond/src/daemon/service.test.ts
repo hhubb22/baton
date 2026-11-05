@@ -38,7 +38,6 @@ async function fixture(platform: 'darwin' | 'linux') {
       id: 'c6559d72-c581-4f4d-bef0-3f80724d1856',
       token: 'offline-test-token',
       version: 1,
-      expires_at: '2099-01-01T00:00:00Z',
     },
   }
   await writeFile(join(data, 'identity.json'), JSON.stringify(identity), { mode: 0o600 })

@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { signUpdate } from './sign-update.mjs'
+import { signRelease } from './sign-release.mjs'
 import { verifyRelease } from './verify-release.mjs'
 
 test('deployment verifies signature, version, artifact bytes and pinned image before upload', async () => {
@@ -26,11 +26,11 @@ test('deployment verifies signature, version, artifact bytes and pinned image be
         artifacts: [{ kind: 'daemon', platform: 'linux', arch: 'x64', file: 'baton.tar.gz' }],
       }),
     )
-    await signUpdate({
+    await signRelease({
       metadataPath: join(directory, 'input.json'),
       keyPath: join(directory, 'key.pem'),
       keyId: 'release',
-      output: join(directory, 'update-manifest.json'),
+      output: join(directory, 'release-manifest.json'),
     })
     assert.equal((await verifyRelease(directory, keys, 'v1.2.3')).image, image)
     await assert.rejects(verifyRelease(directory, {}, 'v1.2.3'), /不受信任/)

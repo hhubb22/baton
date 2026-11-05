@@ -6,16 +6,16 @@
 
 ## 配置
 
-- 仓库变量 `BATON_UPDATE_PUBLIC_KEYS`：与安装包内置公钥一致的 JSON 公钥列表。
+- 仓库变量 `BATON_RELEASE_PUBLIC_KEYS`：用于核对发布清单签名的 JSON 公钥列表。
 - `production` secret `DEPLOY_KEY`：允许以 `ops` 登录 `2.29.124.38` 的 SSH 私钥。
 - `production` secret `DEPLOY_KNOWN_HOSTS`：经管理员独立核对的 SSH 主机公钥记录。
 - 部署任务通过自身具有 `packages: read` 权限的临时 `GITHUB_TOKEN` 拉取 GHCR 镜像。凭据存入本次部署的私有临时目录，任务退出后删除；服务器无需保存个人 GitHub Token。
 
 服务器沿用 `/opt/services/baton/compose.yaml`、`.env`、`data/server` 和 `data/postgres`，部署用户须可通过 `sudo -n` 执行部署脚本。网关、域名、数据库用户和私密配置由服务器维护。工作流不修改其他服务。
 
-## 更新过程
+## 部署过程
 
-发布资产包含 `update-manifest.json`、清单列出的完整原始安装包和 feed，以及 `server-image.txt` 中固定到 SHA-256 digest 的中心镜像。工作流用预先配置的公钥验签，核对版本、所有文件大小和摘要，然后上传。
+发布资产包含 `release-manifest.json`、清单列出的完整原始安装包和 `server-image.txt` 中固定到 SHA-256 digest 的中心镜像。工作流用预先配置的公钥验签，核对版本、所有文件大小和摘要后上传；设备安装包不读取该清单。
 
 `tools/deploy-edge.sh` 使用独占锁，拉取镜像，将制品写入 `release-versions/<版本>` 目录。同版本重试要求全部制品字节一致。停止中心后，它把 PostgreSQL dump、中心身份目录、Compose 配置和私有 `.env` 保存到权限为 0700 的 `backups/deploy-*`，再生成 `compose.release.json`，用新镜像和同版本制品启动中心并等待健康检查。数据库和网关容器继续运行。
 
@@ -31,4 +31,4 @@ sudo docker compose -f compose.yaml -f compose.release.json logs --tail 100 bato
 
 首次建立发布基线时，管理员可以明确将 `reset_data` 设为 `true`。脚本先备份完整旧数据库，再重建数据库并执行当前迁移，恢复原登录账号和口令哈希后才启动中心。旧 Project、Thread、设备和会话不会恢复，设备须重新接入。普通升级保持此选项为 `false`。
 
-macOS 正式自动更新需 Developer ID 签名；没有证书时可完成 CLI 和中心发布、本地更新测试，桌面正式签名安装仍需单独验证。
+macOS 正式签名与公证、Windows Authenticode 签名仍需对应平台验证；设备升级通过停机覆盖安装，不依赖在线更新。

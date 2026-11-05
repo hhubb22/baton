@@ -1303,10 +1303,7 @@ it('commits a report with long-lived credentials after waiting for the Thread lo
     const f = await fixture(run)
     const t = await open(run, f)
     await run(
-      query(
-        "UPDATE node_credentials SET created_at=clock_timestamp()-interval '366 days',last_business_at=clock_timestamp()-interval '366 days',expires_at=NULL WHERE id=$1",
-        f.credential,
-      ),
+      query("UPDATE node_credentials SET created_at=clock_timestamp()-interval '366 days' WHERE id=$1", f.credential),
     )
     const release = await holdLock(run, 'threads', t.id)
     let pid = 0

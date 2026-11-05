@@ -24,9 +24,6 @@ import { DaemonClient, stopDaemonForQuit } from './daemon-client.ts'
 import { type DesktopStatus } from './status.ts'
 import { createTray } from './tray.ts'
 import { autostart } from './autostart.ts'
-import { prepareDesktopInstaller } from './update-feed.ts'
-import { desktopArtifact, shouldHandoffDesktop } from './update-handoff.ts'
-import { compareUpdateVersions } from '@baton/batond/daemon/update-version'
 import {
   notificationState,
   notificationPresenter,
@@ -165,11 +162,7 @@ async function start() {
         await reconcile(true)
       }).catch(reportError)
     },
-    restartAvailable: () => status.service_installed !== true && !deviceUpdateError && !blocksDaemon(deviceUpdate),
-    update: () => {
-      void showUpdate().catch(reportError)
-    },
-    updateLabel: () => '更新并重启',
+    restartAvailable: () => status.service_installed !== true,
     logs: () => {
       void shell.openPath(join(dataDirectory, 'logs')).catch(reportError)
     },
@@ -190,152 +183,7 @@ async function start() {
       void login.set(enabled).then(refresh).catch(reportError)
     },
   })
-  let deviceUpdate: Awaited<ReturnType<Batond['updateStatus']>> = null
-  let deviceUpdateError = ''
-  let updateBusy = false
-  let handoffError = ''
-  let handoffAttempt = ''
-  const blocksDaemon = (state: typeof deviceUpdate) =>
-    !!state &&
-    (state.phase === 'ready' || state.phase === 'migrating' || (state.phase === 'failed' && !state.rollback_complete))
-  const updatePhases: Record<string, string> = {
-    draining: '等待工作结束',
-    ready: '准备就绪',
-    migrating: '正在迁移',
-    syncing: '正在同步',
-    completed: '更新完成',
-    cancelled: '已取消',
-    failed: '更新失败',
-  }
-
-  async function refreshDeviceUpdate() {
-    try {
-      deviceUpdate = await batond.updateStatus()
-      deviceUpdateError = ''
-    } catch (error) {
-      deviceUpdateError = error instanceof Error ? error.message : '无法读取设备更新状态'
-    }
-    return deviceUpdate
-  }
-
-  async function continueUpdate() {
-    if (deviceUpdateError || !deviceUpdate) return
-    if (['ready', 'migrating'].includes(deviceUpdate.phase)) return
-    if (!shouldHandoffDesktop(deviceUpdate)) return
-    if (deviceUpdate.target_version) {
-      const key = `${deviceUpdate.operation_id}:${deviceUpdate.attempt}`
-      if (handoffAttempt === key) {
-        if (!handoffError && deviceUpdate.target_version === version && deviceUpdate.phase === 'syncing')
-          await reconcile()
-        return
-      }
-      handoffAttempt = key
-      try {
-        if (deviceUpdate.target_version === version) {
-          const manifest = await batond.updateManifest()
-          desktopArtifact(manifest, deviceUpdate.target_version)
-          if (manifest.payload.commit !== release.commit) throw new Error('相同版本的桌面构建与签名清单不一致')
-          if (deviceUpdate.phase === 'syncing') await reconcile()
-        } else await handoffDesktop()
-      } catch (error) {
-        handoffError = error instanceof Error ? error.message : '桌面更新失败，请重试。'
-      }
-      return
-    }
-  }
-
-  async function handoffDesktop() {
-    if (!configuration || !deviceUpdate?.target_version) throw new Error('无法确认更新目标')
-    const selected = deviceUpdate
-    const manifest = await batond.updateManifest()
-    desktopArtifact(manifest, selected.target_version!)
-    if (
-      version !== 'development' &&
-      (compareUpdateVersions(manifest.payload.version, version) < 0 ||
-        (manifest.payload.version === version && manifest.payload.commit !== release.commit))
-    )
-      throw new Error('更新目标早于或不同于当前桌面版本')
-    const downloaded = await batond.downloadDesktopFeed(selected.operation_id, selected.attempt)
-    const installer = await prepareDesktopInstaller({ manifest, dataDirectory, downloaded })
-    const current = await batond.updateStatus()
-    if (
-      current?.operation_id !== selected.operation_id ||
-      current.attempt !== selected.attempt ||
-      current.target_version !== selected.target_version ||
-      !['syncing', 'completed'].includes(current.phase)
-    ) {
-      installer.close()
-      throw new Error('更新目标已变化，请重新检查')
-    }
-    clearInterval(poll)
-    clearInterval(permissionPoll)
-    tray.destroy()
-    quitting = true
-    installer.install()
-  }
-
-  async function showUpdate() {
-    if (updateBusy || quitting) return
-    updateBusy = true
-    try {
-      await refreshDeviceUpdate()
-      const detail = deviceUpdate
-        ? `${deviceUpdate.phase === 'syncing' && deviceUpdate.target_version !== version ? '等待安装桌面应用' : (updatePhases[deviceUpdate.phase] ?? deviceUpdate.phase)} · ${deviceUpdate.target_version ?? ''}\n${deviceUpdate.reason ?? ''}`
-        : deviceUpdateError || '尚无更新操作'
-      const result = await dialog.showMessageBox({
-        title: 'Baton 更新',
-        message: '更新并重启 Baton',
-        detail: `${detail}\n当前版本：${version}${handoffError ? `\n${handoffError}` : ''}${process.platform === 'win32' ? '\nWindows 可能显示安全警告；未签名安装包的系统发布者身份未经认证。' : '\nmacOS 自动安装需要经过 Developer ID 签名和公证的发布包。'}`,
-        buttons: [
-          '关闭',
-          handoffError ? '重试' : '更新并重启',
-          '更新设置',
-          ...(deviceUpdate && ['draining', 'ready'].includes(deviceUpdate.phase) ? ['取消更新'] : []),
-        ],
-        cancelId: 0,
-        noLink: true,
-      })
-      if (result.response === 1) {
-        if (handoffError && deviceUpdate && ['syncing', 'completed'].includes(deviceUpdate.phase)) {
-          handoffError = ''
-          handoffAttempt = ''
-        } else {
-          const manifest = await batond.updateManifest()
-          desktopArtifact(manifest, manifest.payload.version)
-          if (
-            version !== 'development' &&
-            (compareUpdateVersions(manifest.payload.version, version) < 0 ||
-              (manifest.payload.version === version && manifest.payload.commit !== release.commit))
-          )
-            throw new Error('签名更新目标早于或不同于当前桌面版本')
-          await batond.update()
-          await refreshDeviceUpdate()
-          await refresh()
-        }
-      } else if (result.response === 2) {
-        const policy = await batond.updatePolicy()
-        const choice = await dialog.showMessageBox({
-          title: '更新设置',
-          message: '选择安装更新的方式',
-          detail: policy === 'idle' ? '当前：空闲时自动更新' : '当前：手动更新',
-          buttons: ['取消', '手动更新', '空闲时自动更新'],
-          cancelId: 0,
-          noLink: true,
-        })
-        if (choice.response === 1) await batond.updatePolicy('manual')
-        else if (choice.response === 2) await batond.updatePolicy('idle')
-      } else if (result.response === 3) {
-        await batond.cancelUpdate()
-        await refreshDeviceUpdate()
-        await reconcile()
-      }
-    } finally {
-      updateBusy = false
-    }
-  }
   function updateWindowMenu() {
-    const label = '更新并重启'
-    if (window && !window.isDestroyed()) window.setTitle(`Baton · ${label}`)
     Menu.setApplicationMenu(
       Menu.buildFromTemplate([
         ...(process.platform === 'darwin'
@@ -359,12 +207,6 @@ async function start() {
         {
           label: 'Baton',
           submenu: [
-            {
-              label,
-              click: () => {
-                void showUpdate().catch(reportError)
-              },
-            },
             {
               label: '设置…',
               click: () => {
@@ -441,7 +283,16 @@ async function start() {
     }
     if (window && !window.isDestroyed()) window.webContents.send('baton:status-changed', status)
     if (status.rejection?.code === 'node_version_incompatible' && previous !== status.rejection.code && configuration) {
-      void showUpdate().catch(reportError)
+      void dialog
+        .showMessageBox({
+          type: 'error',
+          title: 'Baton 需要更新',
+          message: '本机节点与中心协议不兼容',
+          detail: `${status.rejection.message}\n请下载与中心匹配的安装包，停止本机守护进程后覆盖安装并重新启动。`,
+          buttons: ['知道了'],
+          noLink: true,
+        })
+        .catch(reportError)
     }
     return status
   }
@@ -528,8 +379,7 @@ async function start() {
       lastExit: current.last_error
         ? { at: current.last_error.at, reason: redactDiagnostics(current.last_error.message) }
         : null,
-      upgradePhase: deviceUpdate?.phase ?? null,
-      canRestart: current.service_installed !== true && !deviceUpdateError && !blocksDaemon(deviceUpdate) && !quitting,
+      canRestart: current.service_installed !== true && !quitting,
     }
   }
   const localActions = new LocalActions({
@@ -575,10 +425,6 @@ async function start() {
     authorize,
     localActions,
   )
-  ipcMain.handle('baton:update', async (event) => {
-    authorize(event)
-    await showUpdate()
-  })
   ipcMain.handle('baton:notification-cursor', (event, input: unknown) => {
     authorize(event)
     return notices.cursor(notificationScope(Schema.decodeUnknownSync(NotificationScope)(input)))
@@ -694,7 +540,6 @@ async function start() {
       await saveCoordinator(userData, candidate)
       configuration = { format: 1, coordinator_url: candidate }
       await replaceWindow()
-      await refreshDeviceUpdate()
       await reconcile()
     }).catch(reportError)
   }
@@ -720,18 +565,12 @@ async function start() {
   })
   const hidden = process.argv.includes('--hidden') || app.getLoginItemSettings().wasOpenedAtLogin
   await replaceWindow(hidden)
-  const initialUpdate = await refreshDeviceUpdate()
-  if (quitting) return
-  await continueUpdate()
-  if (!initialUpdate || !['syncing', 'ready', 'migrating'].includes(initialUpdate.phase)) await reconcile()
-  else await refresh()
+  await reconcile()
   if (quitting) return
   for (const link of pendingLinks.splice(0)) receiveLink(link)
   poll = setInterval(() => {
     if (!quitting)
       void serialize(async () => {
-        await refreshDeviceUpdate()
-        await continueUpdate()
         await refresh()
       }).catch(reportError)
   }, 1000)

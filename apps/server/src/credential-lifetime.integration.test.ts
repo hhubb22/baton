@@ -47,22 +47,20 @@ const business = (source: NodeSource) =>
 
 beforeAll(async () => {
   db = await openTestDatabase()
-  employee = await run(Auth.createEmployee('idle', 'Idle', 'offline-password-123'))
+  employee = await run(Auth.createEmployee('lifetime', 'Lifetime', 'offline-password-123'))
 }, 30000)
 afterAll(async () => {
   await db?.close()
 })
 
-it('keeps long-lived credentials valid after long inactivity and never renews an expiry', async () => {
+it('keeps credentials valid after long inactivity until they are revoked', async () => {
   const { identity, source } = await register()
-  expect(identity.credential.expires_at).toBeNull()
   const jwt = JSON.parse(Buffer.from(identity.credential.token.split('.')[1]!, 'base64url').toString())
   expect(jwt.exp).toBeUndefined()
   await run(
-    query(
-      "UPDATE node_credentials SET created_at=clock_timestamp()-interval '366 days',last_business_at=clock_timestamp()-interval '366 days',expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",
-      [identity.credential.id],
-    ),
+    query("UPDATE node_credentials SET created_at=clock_timestamp()-interval '366 days' WHERE id=$1", [
+      identity.credential.id,
+    ]),
   )
   await run(Nodes.authenticateNode(identity.credential.token, signer))
   await run(Nodes.touchNode(source))
@@ -74,6 +72,17 @@ it('keeps long-lived credentials valid after long inactivity and never renews an
   expect(await run(Nodes.getNode(employee.id, identity.node_id))).toMatchObject({
     credential_state: 'active',
     executable: true,
-    idle_expires_at: null,
+  })
+
+  await run(query('UPDATE node_credentials SET revoked_at=clock_timestamp() WHERE id=$1', [identity.credential.id]))
+  await expect(run(Nodes.authenticateNode(identity.credential.token, signer))).rejects.toMatchObject({
+    code: 'credential_revoked',
+  })
+  await expect(run(Nodes.claimConnection({ ...source, conn_id: randomUUID() }))).rejects.toMatchObject({
+    code: 'node_source_rejected',
+  })
+  expect(await run(Nodes.getNode(employee.id, identity.node_id))).toMatchObject({
+    credential_state: 'revoked',
+    executable: false,
   })
 })

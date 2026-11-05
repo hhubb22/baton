@@ -6,20 +6,20 @@ import { parseArgs } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { Schema } from 'effect'
 import {
-  SignedUpdateManifest,
-  UpdatePayload,
-  updatePayloadBytes,
-  verifyUpdateManifest,
-} from '../packages/protocol/src/update-manifest.ts'
+  ReleasePayload,
+  SignedReleaseManifest,
+  releasePayloadBytes,
+  verifyReleaseManifest,
+} from '../packages/protocol/src/release-manifest.ts'
 
-export async function signUpdate({ metadataPath, keyPath, keyId, output }) {
+export async function signRelease({ metadataPath, keyPath, keyId, output }) {
   const source = JSON.parse(await readFile(metadataPath, 'utf8'))
   const artifacts = []
   for (const entry of source.artifacts ?? []) {
-    if (typeof entry.file !== 'string' || basename(entry.file) !== entry.file) throw new Error('更新包文件名无效')
+    if (typeof entry.file !== 'string' || basename(entry.file) !== entry.file) throw new Error('发布文件名无效')
     const path = join(dirname(metadataPath), entry.file)
     const info = await stat(path)
-    if (!info.isFile()) throw new Error('更新包必须是普通文件')
+    if (!info.isFile()) throw new Error('发布文件必须是普通文件')
     const hash = createHash('sha256')
     for await (const chunk of createReadStream(path)) hash.update(chunk)
     artifacts.push({
@@ -31,7 +31,7 @@ export async function signUpdate({ metadataPath, keyPath, keyId, output }) {
       sha256: hash.digest('hex'),
     })
   }
-  const payload = Schema.decodeUnknownSync(UpdatePayload)({
+  const payload = Schema.decodeUnknownSync(ReleasePayload)({
     version: source.version,
     commit: source.commit,
     protocol_version: source.protocol_version,
@@ -39,14 +39,16 @@ export async function signUpdate({ metadataPath, keyPath, keyId, output }) {
     artifacts,
   })
   const key = createPrivateKey(await readFile(keyPath))
-  if (key.asymmetricKeyType !== 'ed25519') throw new Error('更新签名需要 Ed25519 私钥')
-  const manifest = Schema.decodeUnknownSync(SignedUpdateManifest)({
+  if (key.asymmetricKeyType !== 'ed25519') throw new Error('发布签名需要 Ed25519 私钥')
+  const manifest = Schema.decodeUnknownSync(SignedReleaseManifest)({
     format: 1,
     key_id: keyId,
     payload,
-    signature: sign(null, updatePayloadBytes(payload), key).toString('base64url'),
+    signature: sign(null, releasePayloadBytes(payload), key).toString('base64url'),
   })
-  verifyUpdateManifest(manifest, { [keyId]: createPublicKey(key).export({ type: 'spki', format: 'pem' }).toString() })
+  verifyReleaseManifest(manifest, {
+    [keyId]: createPublicKey(key).export({ type: 'spki', format: 'pem' }).toString(),
+  })
   await writeFile(output, JSON.stringify(manifest) + '\n', { mode: 0o644 })
   return manifest
 }
@@ -63,9 +65,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     })
     if (!values.metadata || !values.key || !values['key-id'] || !values.out)
       throw new Error(
-        '用法：node tools/sign-update.mjs --metadata <文件> --key <私钥文件> --key-id <标识> --out <清单>',
+        '用法：node tools/sign-release.mjs --metadata <文件> --key <私钥文件> --key-id <标识> --out <清单>',
       )
-    await signUpdate({
+    await signRelease({
       metadataPath: resolve(values.metadata),
       keyPath: resolve(values.key),
       keyId: values['key-id'],

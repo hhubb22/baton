@@ -88,7 +88,6 @@ const codes = new Set([
   'migration_checksum_mismatch',
   'missing_correlation',
   'node_busy',
-  'node_idle_expired',
   'node_offline',
   'node_source_rejected',
   'node_syncing',
@@ -114,7 +113,6 @@ const codes = new Set([
   'unavailable',
   'unknown_tool',
   'unsupported_message',
-  'upgrade_conflict',
   'username_required',
   'username_taken',
 ])

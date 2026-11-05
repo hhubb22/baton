@@ -27,13 +27,6 @@ const report: RuntimeReport = {
 it('the server maintenance loop closes revoked credentials and revokes foreground leases without heartbeats', async () => {
   await withTestDatabase(async ({ run }) => {
     const node = await seedNode(run, { online: false, synced: false, report })
-    await run(
-      Effect.flatMap(
-        SqlClient.SqlClient,
-        (sql) =>
-          sql`UPDATE node_credentials SET created_at=clock_timestamp()-interval '31 days',last_business_at=clock_timestamp()-interval '31 days' WHERE id=${node.credentialId}`,
-      ),
-    )
     const signer = CredentialSigner.generate()
     const scope = await Effect.runPromise(Scope.make())
     try {
@@ -125,13 +118,6 @@ it('the server maintenance loop closes revoked credentials and revokes foregroun
 it('memory placement and dispatch exclude revoked credentials and maintenance releases their claims', async () => {
   await withTestDatabase(async ({ run }) => {
     const node = await seedNode(run, { report })
-    await run(
-      Effect.flatMap(
-        SqlClient.SqlClient,
-        (sql) =>
-          sql`UPDATE node_credentials SET created_at=clock_timestamp()-interval '31 days',last_business_at=clock_timestamp()-interval '31 days' WHERE id=${node.credentialId}`,
-      ),
-    )
     const project = await run(
       projects.createProject(node.employeeId, {
         title: 'Background',

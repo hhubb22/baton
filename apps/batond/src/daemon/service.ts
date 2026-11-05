@@ -9,6 +9,7 @@ import { promisify } from 'node:util'
 import { Schema } from 'effect'
 import { PositiveInteger, Timestamp } from '@baton/protocol'
 import { currentBatondCommand, type BatondCommand } from './host.ts'
+import { installedBatond } from './install.ts'
 import { isMissing } from './identity.ts'
 import { ensurePrivateDirectory, readPrivateFile } from '../platform/private.ts'
 import { acquireProcessLock, processLockIsHeld, ProcessLockBusy, readProcessLock } from '../platform/lock.ts'
@@ -375,7 +376,7 @@ export async function manageService(
     options.command !== undefined
       ? options.command
       : isSea()
-        ? await (await import('./update-install.ts')).bootstrapInstallation(directory)
+        ? { executable: installedBatond(directory), args: [] }
         : currentBatondCommand()
   const definition = {
     command: { ...command, executable: await realpath(command.executable) },

@@ -19,7 +19,6 @@ import {
 } from '../data/derive'
 import {
   useDevices,
-  useClient,
   useDownloads,
   useProjects,
   useRemoveDevice,
@@ -149,17 +148,6 @@ interface Notice {
 }
 
 const unreachableNotice: Notice = { title: '无法保存默认设备', detail: '请重试。' }
-// 已结束且没有问题的更新不显示。
-const upgradeLabels: Partial<Record<NonNullable<Device['updateRequest']>['phase'], string>> = {
-  requested: '等待设备更新',
-  downloading: '正在下载',
-  verifying: '正在校验',
-  draining: '等待工作结束',
-  ready: '准备就绪',
-  migrating: '正在迁移',
-  syncing: '正在同步',
-  failed: '更新失败',
-}
 // 操作后的提示。移除默认设备后要等用户选出替代设备，替代设备按当前列表现算。
 type Feedback = { kind: 'notice'; notice: Notice } | { kind: 'chooseDefault'; removed: string }
 
@@ -229,15 +217,10 @@ function DeviceDetails({
   onDefault: () => void
   onDisconnect: () => void
 }) {
-  const client = useClient()
-  const [updateState, setUpdateState] = useState<'idle' | 'sending' | 'accepted' | 'failed'>('idle')
   // 离线或同步中的设备只显示操作，Agent 信息要等设备同步完才准确。
   const connected = device.connection === 'online'
   const assistant = connected ? projectAssistantSummary(device) : null
   const coding = connected ? codingAgentsSummary(device) : null
-  const upgrade = device.updateRequest ?? device.upgradeState
-  const upgradeLabel = upgrade && upgradeLabels[upgrade.phase]
-  const availableVersion = device.updateAvailability?.status === 'available' ? device.updateAvailability : null
 
   return (
     <div id={`device-${device.id}`} {...stylex.props(styles.details)}>
@@ -252,15 +235,6 @@ function DeviceDetails({
           <span {...stylex.props(text.small, coding.attention ? styles.attention : text.muted)}>{coding.text}</span>
         </div>
       )}
-      {upgradeLabel && (
-        <span {...stylex.props(text.small, text.muted)}>
-          {device.upgradeState?.operationId === upgrade.operationId && `${device.upgradeState.targetVersion} · `}
-          {upgradeLabel}
-          {device.updateRequest?.reason && ` · ${device.updateRequest.reason}`}
-        </span>
-      )}
-      {updateState === 'accepted' && !device.updateRequest && <span role="status">等待设备更新</span>}
-      {updateState === 'failed' && <span role="alert">无法更新，请重试。</span>}
       {device.connection === 'offline' && <span {...stylex.props(text.small, text.muted)}>新对话将等待设备就绪。</span>}
       <div {...stylex.props(styles.actions)}>
         {connected && (
@@ -272,25 +246,6 @@ function DeviceDetails({
               项目助手
             </Button>
           </>
-        )}
-        {device.updateProtocol === 1 && device.updateAvailability?.status !== 'current' && (
-          <Button
-            small
-            disabled={updateState === 'sending'}
-            onClick={() => {
-              setUpdateState('sending')
-              void client.updateDevice(device.id).then(
-                () => setUpdateState('accepted'),
-                () => setUpdateState('failed'),
-              )
-            }}
-          >
-            {updateState === 'sending'
-              ? '正在提交…'
-              : availableVersion
-                ? `更新到 ${availableVersion.version}`
-                : '更新设备'}
-          </Button>
         )}
         {!isDefault && (
           <Button small onClick={onDefault}>

@@ -1,15 +1,17 @@
 import { randomUUID } from 'node:crypto'
-import { lstat, mkdir, readdir, readFile, rename, rm, rmdir, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, readdir, readFile, realpath, rename, rm, rmdir, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { delimiter, dirname, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { BUILD } from '@baton/protocol/release'
 import { processLockIsHeld } from '../platform/lock.ts'
-import { backupRoot, batonHome, defaultDataDirectory, isDefaultDataDirectory, programRoot } from '../platform/layout.ts'
+import { batonHome, defaultDataDirectory, isDefaultDataDirectory, programRoot } from '../platform/layout.ts'
 import { isMissing } from './identity.ts'
 
 const shimMarker = '# Baton 固定入口，由 batond install 生成'
+const binaryName = process.platform === 'win32' ? 'batond.exe' : 'batond'
 export const shimPath = () => join(homedir(), '.local', 'bin', 'batond')
+export const installedBatond = (dataDirectory: string) => join(programRoot(dataDirectory), binaryName)
 const shellQuote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`
 const renderShim = (launcher: string) => `#!/bin/sh\n${shimMarker}\nexec ${shellQuote(launcher)} "$@"\n`
 
@@ -47,22 +49,64 @@ export async function writeShim(path: string, launcher: string) {
   }
 }
 
-/** 把当前安装包放进默认目录并建立命令入口，之后在任意目录都能运行 batond。 */
-export async function installBatond() {
+async function stopDaemon(dataDirectory: string) {
+  const lock = join(dataDirectory, 'daemon.lock')
+  if (!(await processLockIsHeld(lock))) return
+  const { ControlClient } = await import('./control-client.ts')
+  await new ControlClient(dataDirectory).shutdown().catch(() => undefined)
+  for (let attempt = 0; attempt < 100 && (await processLockIsHeld(lock)); attempt++) await delay(100)
+  if (await processLockIsHeld(lock)) throw new Error('本机守护进程未停止，请先退出桌面客户端或停止前台进程后重试')
+}
+
+async function replaceProgram(source: string, target: string) {
+  const from = await realpath(source)
+  const to = (await exists(target)) ? await realpath(target) : target
+  if (from === to) return false
+  const staging = join(dirname(target), `.installation-${randomUUID()}`)
+  const previous = join(dirname(target), `.installation-previous-${randomUUID()}`)
+  let moved = false
+  try {
+    await cp(from, staging, { recursive: true, force: false, errorOnExist: true, preserveTimestamps: true })
+    if (await exists(target)) {
+      await rename(target, previous)
+      moved = true
+    }
+    await rename(staging, target)
+  } catch (error) {
+    if (moved) await rename(previous, target).catch(() => undefined)
+    throw error
+  } finally {
+    await rm(staging, { recursive: true, force: true })
+    await rm(previous, { recursive: true, force: true })
+  }
+  return true
+}
+
+/** 把当前 SEA 安装包替换到程序目录并建立命令入口。 */
+export async function installBatond(
+  dataDirectory = defaultDataDirectory(),
+  sourceDirectory = dirname(process.execPath),
+) {
   if (process.platform === 'win32') throw new Error('Windows 请使用 Baton 桌面客户端')
-  const dataDirectory = defaultDataDirectory()
-  await mkdir(dataDirectory, { recursive: true, mode: 0o700 })
-  const { bootstrapInstallation } = await import('./update-install.ts')
-  const command = await bootstrapInstallation(dataDirectory)
+  const target = resolve(dataDirectory)
+  await mkdir(target, { recursive: true, mode: 0o700 })
+  const { isUserServiceInstalled, manageService } = await import('./service.ts')
+  const serviceInstalled = await isUserServiceInstalled(target)
+  await stopDaemon(target)
+  const program = programRoot(target)
+  await mkdir(dirname(program), { recursive: true, mode: 0o700 })
+  const replaced = await replaceProgram(sourceDirectory, program)
   const entry = shimPath()
-  await writeShim(entry, command.executable)
+  await writeShim(entry, installedBatond(target))
+  if (serviceInstalled) await manageService('install', target)
   const onPath = (process.env.PATH ?? '').split(delimiter).includes(dirname(entry))
   return {
     installed: true,
+    replaced,
     entry,
     on_path: onPath,
-    data_directory: dataDirectory,
-    program_directory: programRoot(dataDirectory),
+    data_directory: target,
+    program_directory: program,
     ...(onPath ? {} : { message: `请把 ${dirname(entry)} 加入 PATH` }),
   }
 }
@@ -96,24 +140,14 @@ const sameDirectory = (left: string, right: string) => {
   return isDefaultDataDirectory(left) && isDefaultDataDirectory(right)
 }
 
-/** 汇总这份安装的位置、服务状态和占用空间，并指出会造成误判的旧文件。 */
+/** 只读汇总安装位置、入口、服务和占用空间。 */
 export async function diagnoseInstallation(dataDirectory: string) {
   const program = programRoot(dataDirectory)
-  const backups = backupRoot(dataDirectory)
-  const versions = join(program, 'versions')
-  const installedVersions = await readdir(versions).then(
-    (names) => names.filter((name) => /^[a-f0-9]{64}$/.test(name)),
-    (error: unknown) => {
-      if (isMissing(error)) return []
-      throw error
-    },
-  )
   const service = await serviceStatus(dataDirectory)
   const entry = shimPath()
   const warnings: string[] = []
   if (service?.data_directory && !sameDirectory(service.data_directory, dataDirectory))
     warnings.push(`服务使用的数据目录是 ${service.data_directory}，当前查看的是 ${dataDirectory}，请加上 --data-dir`)
-  if (installedVersions.length > 2) warnings.push(`保留了 ${installedVersions.length} 个版本，下次更新完成后只留两个`)
   for (const legacy of [join(homedir(), '.baton-ts'), join(batonHome(), 'project-runtime')])
     if (await exists(legacy)) warnings.push(`发现旧目录 ${legacy}，确认不再需要后可以删除`)
   return {
@@ -121,7 +155,7 @@ export async function diagnoseInstallation(dataDirectory: string) {
     commit: BUILD.commit,
     data_directory: dataDirectory,
     program_directory: program,
-    backup_directory: backups,
+    installed: await exists(installedBatond(dataDirectory)),
     entry: { path: entry, installed: await ownsShim(entry) },
     service: service
       ? {
@@ -131,11 +165,9 @@ export async function diagnoseInstallation(dataDirectory: string) {
           data_directory: service.data_directory,
         }
       : null,
-    versions: installedVersions.length,
     bytes: {
       data: await diskBytes(dataDirectory),
       program: await diskBytes(program),
-      backups: await diskBytes(backups),
     },
     warnings,
   }
@@ -145,13 +177,9 @@ async function assertStopped(dataDirectory: string) {
   for (let n = 0; n < 100 && (await processLockIsHeld(join(dataDirectory, 'daemon.lock'))); n++) await delay(100)
   if (await processLockIsHeld(join(dataDirectory, 'daemon.lock')))
     throw new Error('batond 仍在运行，请先退出桌面客户端或停止前台进程')
-  const { upgradeBlockers } = await import('./upgrade.ts')
-  const { blockers } = await upgradeBlockers(dataDirectory)
-  if (blockers.some((blocker) => blocker.kind === 'process' || blocker.reason === 'worker_alive'))
-    throw new Error('仍有 Thread 进程在运行，请等它们退出后重试')
 }
 
-/** 移除服务和程序；只有 purge 才删除身份、Thread 数据、凭据和备份。 */
+/** 移除服务和程序；只有 purge 才删除身份、Thread 数据和凭据。 */
 export async function uninstallBatond(dataDirectory: string, options: { purge: boolean }) {
   if (process.platform === 'win32') throw new Error('Windows 请卸载 Baton 桌面客户端')
   const target = resolve(dataDirectory)
@@ -169,6 +197,7 @@ export async function uninstallBatond(dataDirectory: string, options: { purge: b
     const { manageService } = await import('./service.ts')
     await manageService('uninstall', target)
   }
+  await stopDaemon(target)
   await assertStopped(target)
   const removed: string[] = []
   const remove = async (path: string) => {
@@ -179,9 +208,8 @@ export async function uninstallBatond(dataDirectory: string, options: { purge: b
   await remove(programRoot(target))
   if (isDefault && (await ownsShim(shimPath()))) await remove(shimPath())
   if (options.purge) {
-    await remove(backupRoot(target))
     await remove(target)
     if (isDefault) await rmdir(dirname(target)).catch(() => undefined)
   }
-  return { uninstalled: true, removed, ...(options.purge ? {} : { kept: [target, backupRoot(target)] }) }
+  return { uninstalled: true, removed, ...(options.purge ? {} : { kept: [target] }) }
 }

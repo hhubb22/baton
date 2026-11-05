@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { createTransport, HttpError } from './transport'
 import { mockDownloads } from '../mock/downloads'
 import { createHttpClient, mapDevice } from './client'
-import { assistantBlock, capabilityLines, deviceConnectionView, setupNeeded, setupSteps, usableAgents } from '../derive'
+import { assistantBlock, capabilityLines, setupNeeded, setupSteps, usableAgents } from '../derive'
 
 function requestURL(input: RequestInfo | URL): string {
   return input instanceof Request ? input.url : input.toString()
@@ -28,15 +28,6 @@ const fetcher = () => vi.fn<typeof fetch>()
 afterEach(() => vi.useRealTimers())
 
 describe('HTTP transport', () => {
-  it('submits a device update with an empty JSON body', async () => {
-    const fetch = fetcher()
-      .mockResolvedValueOnce(response({ employee, csrf_token: 'token' }))
-      .mockResolvedValueOnce(response({ operation_id: 'operation' }, 202))
-    const client = createHttpClient({ fetch, WebSocket: null })
-    await client.updateDevice('node/one')
-    expect(requestURL(fetch.mock.calls[1]![0])).toBe('/api/v1/nodes/node%2Fone/update')
-    expect(fetch.mock.calls[1]![1]).toMatchObject({ method: 'POST', body: '{}' })
-  })
   it('uses session cookies and recovers CSRF from me before a write', async () => {
     const fetch = fetcher()
       .mockResolvedValueOnce(response({ employee, csrf_token: 'csrf-one' }))
@@ -150,78 +141,7 @@ describe('HTTP device login', () => {
 })
 
 describe('HTTP account and devices', () => {
-  it('maps update availability and the management channel independently of business connection', () => {
-    const device = mapDevice({
-      id: 'desk',
-      display_name: 'Desk',
-      system: 'linux',
-      online: false,
-      synced: false,
-      revocation_status: 'none',
-      update_management_last_seen: '2026-10-30T10:00:00Z',
-      update_availability: { status: 'available', version: 'v1.2.3', checked_at: '2026-10-30T09:00:00Z' },
-    })
-    expect(device).toMatchObject({
-      connection: 'offline',
-      updateManagementLastSeen: Date.parse('2026-10-30T10:00:00Z'),
-      updateAvailability: { status: 'available', version: 'v1.2.3', checkedAt: Date.parse('2026-10-30T09:00:00Z') },
-    })
-  })
-  it.each([
-    ['draining', 'neutral', '等待升级'],
-    ['ready', 'neutral', '等待升级'],
-    ['migrating', 'neutral', '正在升级'],
-    ['syncing', 'neutral', '正在升级'],
-    ['completed', 'success', '在线'],
-    ['failed', 'attention', '升级已暂停'],
-    ['cancelled', 'success', '在线'],
-  ] as const)('preserves upgrade phase %s separately from the connection', (phase, tone, label) => {
-    const device = mapDevice({
-      id: 'desk',
-      display_name: 'Desk',
-      system: 'linux',
-      online: true,
-      synced: true,
-      revocation_status: 'none',
-      upgrade_state: {
-        operation_id: 'upgrade-one',
-        source_version: '0.9.1',
-        target_version: '0.9.2',
-        phase,
-      },
-    })
-    expect(device).toMatchObject({
-      connection: 'online',
-      upgradeState: {
-        operationId: 'upgrade-one',
-        sourceVersion: '0.9.1',
-        targetVersion: '0.9.2',
-        phase,
-      },
-    })
-    expect(deviceConnectionView(device, [], Date.now())).toEqual({ tone, label })
-    if (phase !== 'cancelled' && phase !== 'completed') {
-      for (const connection of ['offline', 'syncing'] as const) {
-        expect(deviceConnectionView({ ...device, connection }, [], Date.now())).toEqual({ tone, label })
-      }
-    }
-  })
-
-  it.each([undefined, null])('keeps ordinary status when upgrade state is %s', (upgrade_state) => {
-    const device = mapDevice({
-      id: 'desk',
-      display_name: 'Desk',
-      system: 'linux',
-      online: true,
-      synced: true,
-      revocation_status: 'none',
-      upgrade_state,
-    })
-    expect(device.upgradeState).toBeNull()
-    expect(deviceConnectionView(device, [], Date.now())).toEqual({ tone: 'success', label: '在线' })
-  })
-
-  it.each(['active', 'idle_expired', 'revoked'] as const)('maps device credentials in state %s', (state) => {
+  it.each(['active', 'revoked'] as const)('maps device credentials in state %s', (state) => {
     const device = mapDevice({
       id: 'desk',
       display_name: 'Desk',
@@ -235,8 +155,6 @@ describe('HTTP account and devices', () => {
       credentialState: state,
       connection: state === 'active' ? 'online' : 'offline',
     })
-    if (state === 'idle_expired')
-      expect(deviceConnectionView(device, [], Date.now())).toEqual({ tone: 'attention', label: '需要登录' })
   })
 
   it.each([
