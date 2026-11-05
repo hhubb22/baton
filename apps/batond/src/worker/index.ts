@@ -169,7 +169,6 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
   let agent: ThreadAgent | undefined
   let nativeReady = false
   let idleTimer: Fiber.Fiber<void> | undefined
-  let sleeping = false
   const idleHostTimeoutMs = options.idleHostTimeoutMs ?? IDLE_HOST_TIMEOUT_MS
   const ownedAgents = new Set<ThreadAgent>()
   let operation: Operation | undefined
@@ -371,30 +370,32 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         if (running) yield* Fiber.interrupt(running)
         return
       }
-      if (idleTimer || !agent || closed || closing || frozen || sleeping) return
+      if (idleTimer || !agent || closed || closing || frozen) return
       const epoch = state.epoch
-      const fiber = yield* Effect.forkIn(
-        Effect.gen(function* () {
-          yield* Effect.sleep(idleHostTimeoutMs)
-          if (closed || closing || frozen || epoch !== state.epoch || !idleEligible() || agent === undefined) return
-          const current = agent
-          idleTimer = undefined
-          sleeping = true
-          const stopped = yield* current
-            .close()
-            .pipe(Effect.andThen(current.reap()), Effect.timeout(stopMs), Effect.exit)
-          if (Exit.isFailure(stopped) || !stopped.value.processTreeStopped) {
-            yield* Effect.logWarning('Idle agent-host cleanup was not confirmed; keeping its process record')
-            sleeping = false
-            return
-          }
-          yield* retireAgent(current)
-          sleeping = false
-          yield* Effect.logDebug('Idle agent-host reclaimed', { thread_id: state.config?.thread_id })
-        }),
+      idleTimer = yield* Effect.forkIn(
+        Effect.sleep(idleHostTimeoutMs).pipe(Effect.andThen(post(Effect.suspend(() => sleepAgent(epoch))))),
         scope,
       )
-      idleTimer = fiber
+    })
+  }
+  // Runs on the Thread queue; the cleanup operation holds later input until the host is reclaimed.
+  function sleepAgent(epoch: number): Effect.Effect<void, WorkerFailure> {
+    return Effect.gen(function* () {
+      idleTimer = undefined
+      const current = agent
+      if (epoch !== state.epoch || !idleEligible() || current === undefined) return
+      if (operation) return yield* syncIdleTimer()
+      nativeReady = false
+      yield* launch(newOperation('cleanup'), cleanupAgent(current), (result) =>
+        Effect.gen(function* () {
+          if (Exit.isSuccess(result) && result.value.processTreeStopped) {
+            yield* retireAgent(current)
+            yield* Effect.logDebug('Idle agent-host reclaimed', { thread_id: state.config?.thread_id })
+            return
+          }
+          yield* uncertain('Idle agent-host cleanup was not confirmed')
+        }),
+      )
     })
   }
   function commit<A>(change: (draft: State) => A): Effect.Effect<A, WorkerFailure> {
@@ -1214,7 +1215,8 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
                 nativeReady = true
                 return
               }
-              const reason = reasonOf(Exit.isFailure(result) ? Cause.squash(result.cause) : new Error('Resume failed'))
+              const failure = Exit.isFailure(result) ? Cause.squash(result.cause) : new Error('Resume failed')
+              const reason = reasonOf(failure)
               yield* Effect.logWarning('Idle host resume failed')
               const reaped = yield* cleanupAgent(current).pipe(Effect.timeout(openMs), Effect.exit)
               yield* commit((draft) => {
@@ -1222,9 +1224,8 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
                 draft.phase = 'stopped'
                 draft.resumeRequested = false
                 draft.processTreeStopped = Exit.isSuccess(reaped) && reaped.value.processTreeStopped
-                const code = /history|session|not found|missing|不存在|会话/i.test(reason)
-                  ? 'history_lost'
-                  : 'start_failed'
+                const code =
+                  failure instanceof AgentError && failure.historyUnavailable ? 'history_lost' : 'start_failed'
                 report(draft, 'thread.stopped', { stop_code: code, reason })
               })
               if (Exit.isSuccess(reaped) && reaped.value.processTreeStopped) yield* retireAgent(current)

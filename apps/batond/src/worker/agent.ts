@@ -15,6 +15,8 @@ export class AgentError extends Error {
     message: string,
     readonly cause?: unknown,
     readonly modelRejected = false,
+    /** resumeThread failed after the host session opened. */
+    readonly historyUnavailable = false,
   ) {
     super(message)
   }

@@ -96,6 +96,8 @@ export class AgentHostError extends Schema.TaggedError<AgentHostError>()('AgentH
   message: Schema.String,
   /** Explicit native model rejection before input submission. */
   modelRejected: Schema.optionalKey(Schema.Boolean),
+  /** resumeThread failed after the host session opened; upstream does not report why. */
+  historyUnavailable: Schema.optionalKey(Schema.Boolean),
 }) {}
 
 const ProbeDetail = Schema.Union([Schema.String, Schema.Number, Schema.Boolean])

@@ -582,7 +582,16 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
               modelSelection: authorized.selection,
               runtimePolicy: authorized.policy,
             })
-            .pipe(Effect.mapError((cause) => fail('resume thread', cause)))
+            .pipe(
+              Effect.mapError((cause) =>
+                cause instanceof AgentHostError
+                  ? cause
+                  : new AgentHostError({
+                      message: operationError(label, 'resume thread', cause).message,
+                      historyUnavailable: true,
+                    }),
+              ),
+            )
           const result = yield* attach(input, runtime, thread, authorized.selection)
           yield* openTranscript(input)
           record('session.resumed', {

@@ -119,8 +119,8 @@ Turn 从一条 `queue` 消息被 Agent 接受开始，到 `agent-host` 驱动报
 - 默认空闲休眠时限 `IDLE_HOST_TIMEOUT_MS = 10 * 60 * 1000`（10 分钟）。
 - 当 Turn 结束使 Thread 进入 `idle`、无待发 `queued` 消息且无挂起问题时，状态机启动绑定当前控制 `epoch` 的 10 分钟空闲计时 fiber。
 - 计时期间若收到新消息、显式 `resume`、`stop` 或 `archive`，立即取消计时器并直接复用当前存活的 `agent-host`（热路径零冷启动开销）。
-- 满 10 分钟仍无活动时，状态机有序调用 `agent.close()` + `agent.reap()` 回收该 `agent-host` 子进程树、清理 `node_processes` 登记并释放内存中的 `ThreadAgent` 实例，**不发出 `thread.stopped` 报告**，本地与中心的 Thread 状态继续保持 `idle`。
-- 当处于 `idle` 且当前无存活 `agent-host` 的 Thread 收到下一条消息时，状态机先按持久保存的 `NativeMapping` 与最近确认模型透明启动 `agent-host` 执行 `resume`，成功后再执行 `prepareInput` 与 `send`；若原生历史已被外部删除导致恢复失败，则将消息撤回并报告 `thread.stopped`（`stop_code: 'history_lost'` 或 `'start_failed'`）。
+- 满 10 分钟仍无活动时，状态机在 Thread 串行队列里登记一个 `cleanup` 操作，调用 `agent.close()` + `agent.reap()` 回收该 `agent-host` 子进程树、清理 `node_processes` 登记并释放内存中的 `ThreadAgent` 实例，**不发出 `thread.stopped` 报告**，本地与中心的 Thread 状态继续保持 `idle`。回收期间到达的消息保持 `queued`，回收完成后走下面的透明恢复。`reap` 失败或无法确认进程树已停止时，Thread 进入 `unknown`，按不确定状态流程再次回收并上报 `thread.unknown`。
+- 当处于 `idle` 且当前无存活 `agent-host` 的 Thread 收到下一条消息时，状态机先按持久保存的 `NativeMapping` 与最近确认模型透明启动 `agent-host` 执行 `resume`，成功后再执行 `prepareInput` 与 `send`；恢复失败时将消息撤回并报告 `thread.stopped`：宿主会话已打开、provider 的 `resumeThread` 失败时，`AgentHostError.historyUnavailable` 为真，`stop_code` 为 `history_lost`；进程启动、认证、`openSession` 或超时等其余失败为 `start_failed`。上游 `ProviderAdapterResumeThreadError` 不区分失败原因，`history_lost` 因此也包括 `resumeThread` 期间的连接中断或进程退出。设置 `resumeOnOpen` 的 Droid、Kiro 和 Antigravity 在 `openSession` 时载入历史，历史缺失同样报 `start_failed`。
 
 ### 停止（R-11）
 

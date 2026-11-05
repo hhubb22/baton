@@ -2260,17 +2260,15 @@ describe('in-process agent-host lifecycle', () => {
     ),
   )
 
-  it.effect('withdraws queued input and reports history loss when the transparent resume fails', () =>
+  it.effect('holds input that arrives while an idle host is closing and resumes it on a fresh host', () =>
     fixture((dbPath) =>
       Effect.gen(function* () {
         const cfg = config()
         const first = yield* fake
         const second = yield* fake
-        const failing = {
-          ...second.agent,
-          resume: () => Effect.fail(new AgentError('native session not found')),
-        }
-        const instances = [first.agent, failing]
+        const gate = yield* Deferred.make<void>()
+        first.reapTask = Deferred.await(gate)
+        const instances = [first.agent, second.agent]
         let factory = 0
         const worker = yield* makeWorker({
           dbPath,
@@ -2288,14 +2286,84 @@ describe('in-process agent-host lifecycle', () => {
         )
         const input = message(cfg)
         yield* worker.handle(input)
-        const stopped = yield* until(reports(worker), (items) =>
-          items.some((report) => report.kind === 'thread.stopped' && report.stop_code === 'history_lost'),
+        for (let step = 0; step < 50; step++) yield* Effect.yieldNow
+        expect(first.calls.filter((call) => call.startsWith('prepare:') || call.startsWith('send:'))).toEqual([])
+
+        yield* Deferred.succeed(gate, undefined)
+        yield* until(
+          Effect.sync(() => second.calls),
+          (calls) => calls.includes(`send:${input.client_message_id}`),
         )
-        expect(stopped.find((report) => report.kind === 'thread.stopped')).toMatchObject({
-          stop_code: 'history_lost',
-        })
-        expect((yield* worker.handle({ type: 'status', ok: true })).agent_ready).toBe(false)
+        expect(second.calls[0]).toBe('resume')
+        expect(
+          (yield* reports(worker)).some(
+            (report) => report.kind === 'thread.unknown' || report.kind === 'thread.stopped',
+          ),
+        ).toBe(false)
       }),
     ),
   )
+
+  it.effect('reports uncertainty when an idle host cannot be confirmed stopped', () =>
+    fixture((dbPath) =>
+      Effect.gen(function* () {
+        const cfg = config()
+        const first = yield* fake
+        first.reapTask = Effect.fail(new AgentError('process tree is still running'))
+        const worker = yield* makeWorker({
+          dbPath,
+          dataDirectory: dirname(dbPath),
+          threadId: cfg.thread_id,
+          idleHostTimeoutMs: 1000,
+          agentFactory: () => first.agent,
+        })
+        yield* worker.handle(request(cfg, 'thread_open'))
+        yield* opened(worker)
+        yield* TestClock.adjust('1 second')
+        const items = yield* until(reports(worker), (entries) =>
+          entries.some((report) => report.kind === 'thread.unknown'),
+        )
+        expect(items.find((report) => report.kind === 'thread.unknown')).toMatchObject({
+          reason: 'Idle agent-host cleanup was not confirmed',
+        })
+      }),
+    ),
+  )
+
+  for (const [label, error, code] of [
+    ['history loss', new AgentError('Codex resume thread failed', undefined, false, true), 'history_lost'],
+    ['a start failure', new AgentError('Codex resume failed (ProviderAdapterOpenSessionError)'), 'start_failed'],
+  ] as const)
+    it.effect(`withdraws queued input and reports ${label} when the transparent resume fails`, () =>
+      fixture((dbPath) =>
+        Effect.gen(function* () {
+          const cfg = config()
+          const first = yield* fake
+          const second = yield* fake
+          const failing = { ...second.agent, resume: () => Effect.fail(error) }
+          const instances = [first.agent, failing]
+          let factory = 0
+          const worker = yield* makeWorker({
+            dbPath,
+            dataDirectory: dirname(dbPath),
+            threadId: cfg.thread_id,
+            idleHostTimeoutMs: 1000,
+            agentFactory: () => instances[factory++]!,
+          })
+          yield* worker.handle(request(cfg, 'thread_open'))
+          yield* opened(worker)
+          yield* TestClock.adjust('1 second')
+          yield* until(
+            Effect.sync(() => first.calls),
+            (calls) => calls.includes('reap'),
+          )
+          yield* worker.handle(message(cfg))
+          const stopped = yield* until(reports(worker), (items) =>
+            items.some((report) => report.kind === 'thread.stopped'),
+          )
+          expect(stopped.find((report) => report.kind === 'thread.stopped')).toMatchObject({ stop_code: code })
+          expect((yield* worker.handle({ type: 'status', ok: true })).agent_ready).toBe(false)
+        }),
+      ),
+    )
 })

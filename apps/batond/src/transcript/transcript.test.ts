@@ -50,6 +50,15 @@ it('marks an unfinished final line and supports byte offsets', async () => {
   expect(Buffer.from(first.page.data, 'base64').toString('utf8')).toContain('"partial"')
   const second = await readTranscriptPage(file, first.page.next_offset)
   expect(second).toMatchObject({ ok: true, page: { offset: first.page.next_offset, done: true } })
+
+  const resumed = await TranscriptWriter.open({ file, dataDirectory })
+  resumed.write('turn.started', { message: 'again' })
+  await resumed.close()
+  const lines = (await readFile(file, 'utf8')).split('\n')
+  expect(lines).toHaveLength(4)
+  expect(lines[1]).toBe('{"seq":2,"kind":"partial"')
+  expect(JSON.parse(lines[2]!)).toMatchObject({ seq: 2, kind: 'turn.started' })
+  expect(lines[3]).toBe('')
 })
 
 it('redacts nested credentials and key formats', () => {

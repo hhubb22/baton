@@ -14,15 +14,17 @@ const readTail = async (file: FileHandle, size: number): Promise<Buffer> => {
   return buffer.subarray(0, bytesRead)
 }
 
-const lastSequence = async (file: FileHandle): Promise<number> => {
+// 进程在写一行的中途退出时，文件末尾留下没有换行的残行；返回值标出这种情况。
+const inspectTail = async (file: FileHandle): Promise<{ sequence: number; partial: boolean }> => {
   const size = (await file.stat()).size
-  if (size === 0) return 0
+  if (size === 0) return { sequence: 0, partial: false }
   const tail = await readTail(file, size)
+  const partial = tail.at(-1) !== 0x0a
   const end = tail.lastIndexOf(0x0a)
-  if (end < 0) return 0
+  if (end < 0) return { sequence: 0, partial }
   const start = tail.lastIndexOf(0x0a, end - 1) + 1
   const match = /"seq":(\d+)/.exec(tail.subarray(start, end).toString('utf8'))
-  return match ? Number(match[1]) : 0
+  return { sequence: match ? Number(match[1]) : 0, partial }
 }
 
 const openAppend = async (path: string): Promise<FileHandle> => {
@@ -79,7 +81,10 @@ export class TranscriptWriter {
     }
     await validatePrivateDirectory(directory)
     const handle = await openAppend(options.file)
-    const sequence = await lastSequence(handle).catch(() => 0)
+    const tail = await inspectTail(handle).catch(() => ({ sequence: 0, partial: false }))
+    // 先结束残行，新记录从新的一行开始。
+    if (tail.partial) await handle.write('\n')
+    const sequence = tail.sequence
     return new TranscriptWriter(handle, sequence, await loadTranscriptSecrets(options.dataDirectory), options.onError)
   }
 

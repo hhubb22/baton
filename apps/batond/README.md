@@ -123,11 +123,11 @@ Kiro 的 local settings 使用 `agentId: kiro`、`commandPath: kiro-cli`，从 P
 
 默认数据目录为 `~/.baton/data`，设备和 Thread 命令支持 `--data-dir`。安装、卸载和诊断命令见 [发布设计](../../specs/release/TECH.md)。POSIX 目录权限为 0700、文件为 0600；已有权限不符合要求时拒绝使用。UDS 路径超过系统限制时，使用更短的数据目录。Windows 使用令牌认证的命名管道和私有目录 ACL，平台限制见 [platform 文档](src/platform/README.md)。
 
-每个 Thread 的目录只保存原生会话映射、SDK store 和完整输出，不再有 Worker 锁、IPC 令牌或独立 `thread.db`。`node.db` 使用 WAL 与 `synchronous=FULL`，同一事务保存命令回执、排队状态、消息、报告 outbox 和进程登记；原生发送前把本地准备文档与 intent 原子提交。提交结果无法核查时，状态机冻结执行并关闭本次运行资源。
+每个 Thread 的目录只保存原生会话映射、SDK store 和完整输出，Thread 状态统一写入 `node.db`。`node.db` 使用 WAL 与 `synchronous=FULL`，同一事务保存命令回执、排队状态、消息、报告 outbox 和进程登记；原生发送前把本地准备文档与 intent 原子提交。提交结果无法核查时，状态机冻结执行并关闭本次运行资源。
 
 daemon 启动时读取 `node.db` 恢复 Thread 与 Execution 状态机。queued 输入可继续调度；已有 intent 只用新的只读 host 核对原生快照，无法证明已接收时标记 unknown，保留原消息结果。新输入或 resume 先确认旧进程树已回收，再恢复既有原生会话，旧 queued 撤回、旧 unknown 输入保持终态。恢复绑定原生会话、工作目录和私有 store，不重发输入、不新建空会话。Thread 报告先写入 node.db outbox，再由 daemon 上报中心；中心 ACK 与 Worker 本地消费 ACK 分开记录，重启后按原 event ID 和序号补送。
 
-agent-host 在 Thread 空闲且没有待处理问题时启动十分钟计时，到时关闭并回收进程树，不产生 `thread.stopped`。下一条输入透明 resume 同一原生会话；恢复失败按原因上报 `thread.stopped`，历史不可用时为 `history_lost`。停止先持久登记，再中断启动、准备或发送，撤回 queued 输入；已提交的 intent 通过只读快照核对裁决。取消响应与真实终止分别处理，最多一分钟后回收所属进程树。POSIX 的 agent-host 组和 Windows 的持久进程身份由 `node_processes` 登记，watchdog 负责回收。
+agent-host 在 Thread 空闲且没有待处理问题时启动十分钟计时，到时在 Thread 队列中关闭并回收进程树，不产生 `thread.stopped`；回收期间到达的输入排队等待，回收完成后由新 host 透明 resume 同一原生会话。无法确认进程树已停止时 Thread 进入 unknown，沿用不确定状态的回收流程。resume 失败时撤回排队输入并上报 `thread.stopped`：宿主会话已打开、provider 的 `resumeThread` 失败时为 `history_lost`，其余失败为 `start_failed`。上游把 `resumeThread` 的各种失败包成同一个错误，因此 `history_lost` 也包括这一步的连接中断或进程退出；Droid、Kiro 和 Antigravity 在 `openSession` 时载入历史，这一步失败报 `start_failed`。停止先持久登记，再中断启动、准备或发送，撤回 queued 输入；已提交的 intent 通过只读快照核对裁决。取消响应与真实终止分别处理，最多一分钟后回收所属进程树。POSIX 的 agent-host 组和 Windows 的持久进程身份由 `node_processes` 登记，watchdog 负责回收。
 
 ## 日志
 
