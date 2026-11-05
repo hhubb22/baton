@@ -1,8 +1,13 @@
 FROM node:26.11.1-bookworm-slim AS build
 WORKDIR /src
 RUN npm install --global pnpm@12.11.2
+# 依赖层只随锁文件、工作区配置和补丁变化，源码改动时复用下载结果。
+COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches ./patches
+COPY upstream/t3code/patches ./upstream/t3code/patches
+RUN pnpm fetch --ignore-scripts
 COPY . .
-RUN pnpm install --frozen-lockfile --ignore-scripts
+RUN pnpm install --offline --frozen-lockfile --ignore-scripts
 ARG BATON_VERSION=development
 ARG BATON_COMMIT=development
 RUN node tools/build/server.mjs --version "$BATON_VERSION" --commit "$BATON_COMMIT"

@@ -38,6 +38,7 @@ export async function packageBatond({
   node = process.execPath,
   version: releaseVersion,
   commit,
+  bundle: bundleOutput,
 } = {}) {
   const identity = buildInfo({ version: releaseVersion, commit })
   output = resolve(output)
@@ -54,7 +55,8 @@ export async function packageBatond({
   try {
     const executable = join(output, target.platform === 'win32' ? 'batond.exe' : 'batond')
     let bundledDependencies
-    const bundle = await buildBatond(join(buildDirectory, 'batond.cjs'), {
+    // 指定 bundle 路径时，SEA 使用的 bundle 同时留作开发 bundle。
+    const bundle = await buildBatond(bundleOutput ? resolve(bundleOutput) : join(buildDirectory, 'batond.cjs'), {
       ...identity,
       onMetafile: async ({ inputs }) => {
         bundledDependencies = await bundledPackages(inputs, repository)
@@ -145,11 +147,14 @@ if (import.meta.main) {
       node: { type: 'string' },
       version: { type: 'string' },
       commit: { type: 'string' },
+      bundle: { type: 'string' },
     },
     allowPositionals: true,
   })
   if (positionals.length > 1)
-    throw new Error('用法：node tools/package-batond.mjs [输出目录] [--out 目录] [--node 官方Node路径]')
+    throw new Error(
+      '用法：node tools/package-batond.mjs [输出目录] [--out 目录] [--node 官方Node路径] [--bundle 节点bundle路径]',
+    )
   try {
     console.log(
       JSON.stringify(
@@ -158,6 +163,7 @@ if (import.meta.main) {
           node: values.node,
           version: values.version,
           commit: values.commit,
+          bundle: values.bundle,
         }),
         null,
         2,

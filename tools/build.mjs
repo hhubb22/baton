@@ -21,11 +21,17 @@ export function build(run = runCommand, release = {}) {
   const identity = buildInfo(release)
   const args = identity.version === 'development' ? [] : ['--version', identity.version, '--commit', identity.commit]
   run('pnpm', ['install', '--frozen-lockfile', '--ignore-scripts'])
-  run('pnpm', ['--dir', 'web', 'typecheck'])
   // 中心构建同时生成 bundle 旁的 web/ 和 migrations/。
   run('pnpm', ['--filter', '@baton/server', 'build', ...args])
-  run('pnpm', ['--filter', '@baton/batond', 'build', ...args])
-  run(process.execPath, ['tools/package-batond.mjs', '--out', 'bin', ...args])
+  // SEA 打包同时把节点 bundle 写到 apps/batond/dist，节点只打包一次。
+  run(process.execPath, [
+    'tools/package-batond.mjs',
+    '--out',
+    'bin',
+    '--bundle',
+    'apps/batond/dist/batond.cjs',
+    ...args,
+  ])
 }
 
 if (import.meta.main) {

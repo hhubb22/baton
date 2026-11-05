@@ -5,10 +5,8 @@ import { webBuildEnvironment } from './build/server.mjs'
 
 const expected = [
   ['pnpm', ['install', '--frozen-lockfile', '--ignore-scripts']],
-  ['pnpm', ['--dir', 'web', 'typecheck']],
   ['pnpm', ['--filter', '@baton/server', 'build']],
-  ['pnpm', ['--filter', '@baton/batond', 'build']],
-  [process.execPath, ['tools/package-batond.mjs', '--out', 'bin']],
+  [process.execPath, ['tools/package-batond.mjs', '--out', 'bin', '--bundle', 'apps/batond/dist/batond.cjs']],
 ]
 
 test('网页构建使用中心构建身份并覆盖继承的身份', () => {
@@ -33,13 +31,13 @@ test('同一发布身份传给中心、节点 bundle 与 SEA 打包，输入不�
     calls,
     expected.map(([command, args], index) => {
       assert.ok(Array.isArray(args))
-      return [command, index >= 2 ? [...args, ...suffix] : args]
+      return [command, index >= 1 ? [...args, ...suffix] : args]
     }),
   )
   assert.throws(() => build(() => assert.fail('不应开始构建'), { version: identity.version }))
 })
 
-for (const [index, name] of ['依赖安装', '网页类型检查', '中心和网页构建', '节点构建', 'SEA 打包'].entries()) {
+for (const [index, name] of ['依赖安装', '中心和网页构建', '节点 bundle 与 SEA 打包'].entries()) {
   test(`${name}失败时停止构建并保留错误`, () => {
     const calls = []
     const failure = new Error(`${name}失败`)

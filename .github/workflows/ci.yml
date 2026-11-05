@@ -16,6 +16,54 @@ env:
   BATON_TEST_DATABASE_URL: postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable
 
 jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out t3code submodule
+        run: git submodule update --init --depth 1 upstream/t3code
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '12.11.2'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26.11.1'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install workspace
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Workspace checks
+        run: |
+          pnpm check
+          pnpm typecheck
+
+  package:
+    name: Package
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out t3code submodule
+        run: git submodule update --init --depth 1 upstream/t3code
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '12.11.2'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26.11.1'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install workspace
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Build
+        run: |
+          node --test tools/*.test.mjs
+          node tools/build.mjs
+      - name: Check package
+        run: node tools/check-package.mjs bin
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -36,6 +84,9 @@ jobs:
           --health-retries 12
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 合并提交的第一个父提交是目标分支，用于取 PR 改动的文件。
+          fetch-depth: 2
       - name: Check out t3code submodule
         run: git submodule update --init --depth 1 upstream/t3code
       - uses: pnpm/action-setup@v4
@@ -48,22 +99,13 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
       - name: Install workspace
         run: pnpm install --frozen-lockfile --ignore-scripts
-      - name: Workspace checks
+      - name: Workspace tests
         run: |
-          pnpm check
-          pnpm typecheck
-          pnpm test
-      - name: Build
-        run: |
-          node --test tools/*.test.mjs
-          node tools/build.mjs
-      - name: Check package
-        run: node tools/check-package.mjs bin
-      - name: Web format
-        run: pnpm --dir web format:check
-      - name: Web lint
-        run: pnpm --dir web lint
-      - name: Web typecheck
-        run: pnpm --dir web typecheck
-      - name: Web unit tests
-        run: pnpm --dir web test
+          # upstream 包不依赖 Baton 的包；PR 未改动 upstream、依赖锁定和根配置时跳过它们，推送 main 始终全量测试。
+          script=test
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            changed=$(git diff --name-only HEAD^1 HEAD)
+            pattern='^(upstream/|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|package\.json$|vite\.config\.ts$|tsconfig[^/]*\.json$|\.github/workflows/ci\.yml$)'
+            if ! grep -qE "$pattern" <<< "$changed"; then script=test:baton; fi
+          fi
+          pnpm "$script"

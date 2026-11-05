@@ -89,7 +89,7 @@ node tools/package-desktop.mjs --batond bin --out apps/desktop/dist/installers
 
 ## Effect 与开发工具
 
-包内复用的测试辅助代码放在 `src/testing/`，静态数据放在其中的 `data/`；只供单个测试文件使用的小函数留在该文件内。跨 app 测试放在 `e2e/`，通过声明的 workspace 依赖与包导出访问源码。中心的 PostgreSQL 测试使用 `*.integration.test.ts`，根 Vitest 配置按文件名分为 `unit` 和 `integration`，两个 app 支持 `test:unit` 与 `test:integration`。`pnpm test` 包含全部组及 e2e；按包筛选受影响测试时用 `pnpm --filter '...@baton/batond' --workspace-concurrency=1 test` 包含依赖该包的 e2e。
+包内复用的测试辅助代码放在 `src/testing/`，静态数据放在其中的 `data/`；只供单个测试文件使用的小函数留在该文件内。跨 app 测试放在 `e2e/`，通过声明的 workspace 依赖与包导出访问源码。中心的 PostgreSQL 测试使用 `*.integration.test.ts`，根 Vitest 配置按文件名分为 `unit` 和 `integration`，两个 app 支持 `test:unit` 与 `test:integration`。`pnpm test` 包含全部组及 e2e，`pnpm test:baton` 跳过 `upstream/t3code` 的包；按包筛选受影响测试时用 `pnpm --filter '...@baton/batond' --workspace-concurrency=1 test` 包含依赖该包的 e2e。
 
 工作区通过根目录 `vite.config.ts` 配置 Vite+ 的 Oxlint、Oxfmt 与类型检查，采用推荐规则。`pnpm lint` 和 `pnpm check` 将警告视为失败；`pnpm check` 统一执行格式、lint 和 TypeScript Go 检查，`pnpm typecheck` 保留各包编译器检查；`pnpm test` 按依赖顺序串行执行各包测试，数据库与进程集成测试不缓存。Project Runtime 测试使用根 Vitest 配置直接运行源码，包含 CLI 和恢复子进程，不写入或读取 Runtime 的 `dist/`，可与统一构建并行执行。网页使用 Vite+，Node bundle 使用 esbuild。
 
