@@ -105,6 +105,24 @@ export const projectHttpHandlers = (options: HTTPOptions) => {
             ),
           ),
         )
+        .handle('runs', ({ params, query }) =>
+          current((employee) =>
+            Projects.projectRuns(employee, params.projectId, limit(query.limit)).pipe(
+              Effect.flatMap(decodeResponse(P.ProjectRunsResponse)),
+            ),
+          ),
+        )
+        .handle('runTranscript', ({ params, query }) =>
+          current((employee) =>
+            Projects.projectRunTranscript(
+              options.gateway(),
+              employee,
+              params.projectId,
+              params.runId,
+              Number(query.offset ?? 0),
+            ),
+          ),
+        )
         .handle('memory', ({ params, query }) =>
           current((employee) =>
             Memory.listProjectMemory(

@@ -10,17 +10,17 @@ Baton 不连接外部遥测采集后端，也不录制网页操作回放，将�
 
 1. **进程结构化 JSON 日志**：中心、`batond`、`agent-host` 与 `project-runtime` 输出轻量结构化事件日志（含发布版本、提交、实体标识与固定错误码），用于进程级排障。
 2. **数据库实时诊断接口**：中心直接查询 PostgreSQL 实时表状态提供管理员诊断与员工状态视图，无需后台轮询合成。
-3. **设备端无损 Agent 运行记录（Append-Only `transcript.jsonl`）**：在设备私有数据目录内，为每个执行 Thread（6 种 hosted Agent 与内部 `shell`）和每次 Project Agent 运行（前台主对话、上下文压缩、后台记忆整理）**实时追加**完整运行轨迹；网页与本机 CLI 按需流式分页拉取查看，中心 PostgreSQL 不存储大体积运行原文。
+3. **设备端无损 Agent 运行记录（Append-Only `transcript.jsonl`）**：在设备私有数据目录内，为每个执行 Thread（Pi、Codex、Kiro、Cursor、Grok、Antigravity、Droid）和每次 Project Agent 运行（前台主对话、上下文压缩、后台记忆整理）**实时追加**完整运行轨迹；网页与本机 CLI 按需分页读取，中心 PostgreSQL 不存储大体积运行原文。
 
 ```text
-Thread 执行（agent-host / shell）
+Thread 执行（agent-host）
   └─ 实时顺序追加 ──► <data-dir>/threads/<thread-id>/<storage-generation>/transcript.jsonl
 
 Project 运行（project-runtime：foreground / compaction / memory）
   └─ 实时顺序追加 ──► <data-dir>/project-runs/<project-id>/<run-id>.jsonl
 
 查看路径：
-  ├─ 本机 CLI：batond transcript --thread-id <UUID> | --run-id <UUID> [--follow]
+  ├─ 本机 CLI：batond transcript --thread-id <UUID> 或 --project-id <UUID> --run-id <UUID> [--follow]
   └─ 网页 UI：GET /api/v1/threads/:id/transcript 或 /api/v1/projects/:id/runs/:runId/transcript
                 └─ 中心校验员工归属 ──► WSS 分页字节读取 ──► 设备私有 JSONL 文件
 ```
@@ -33,8 +33,8 @@ Project 运行（project-runtime：foreground / compaction / memory）
 
 | 运行类别 | 私有路径 | 生命周期与保留 |
 |---|---|---|
-| Thread 执行 Agent | `<data-dir>/threads/<thread-id>/<storage-generation>/transcript.jsonl` | 与该代次 `full-output/` 绑定，默认保留 30 天（`output-retention.json` 可配置），计入节点 1 GiB 存储预算 |
-| Project Agent 运行 | `<data-dir>/project-runs/<project-id>/<run-id>.jsonl` | 与中心 `agent_runs.id` 一一对应，默认保留 30 天并随过期清理任务回收，计入节点 1 GiB 存储预算 |
+| Thread 执行 Agent | `<data-dir>/threads/<thread-id>/<storage-generation>/transcript.jsonl` | 与该代次 `full-output/` 同目录；读取端默认按 30 天过期（`output-retention.json` 可配置） |
+| Project Agent 运行 | `<data-dir>/project-runs/<project-id>/<run-id>.jsonl` | 与中心 `agent_runs.id` 一一对应；读取端默认按 30 天过期，本地文件尚未接入后台清理任务 |
 
 **实时追加与防崩溃丢失**：
 - `TranscriptWriter` 在事件发生时立即按序写入单行 JSON（不在内存中攒批等待 Turn 或 Run 结束）。即使 `agent-host` 或 `project-runtime` 在工具执行中途卡死、OOM 或被 `SIGKILL` 强杀，此前已发出的提示词、思考片段、进行中的工具命令与部分输出均已落盘可读。
@@ -56,14 +56,14 @@ interface TranscriptLine {
 }
 ```
 
-#### （1）Thread 执行 Agent 记录事件（`agent-host` 与内部 `shell`）
+#### （1）Thread 执行 Agent 记录事件（`agent-host`）
 
 在 `apps/batond/src/agent-host/driver.ts` 与状态机边界实时记录，不做 `shortenLongest` 或 32 KiB 截断：
 
 | `kind` | 记录时机与完整 `data` 内容 |
 |---|---|
-| `session.opened` / `session.resumed` | `thread_id`、`storage_generation`、`agent_type`、`native_session_id`、`working_directory`、`runtime_mode`、初始 `model` 与思考档位配置 |
-| `turn.started` | `worker_turn_seq`、`client_message_id`、`execution_id`、`mode`（`queue` \| `steer`）、完整用户输入文本、实际生效 `modelSelection` 与 `runtimePolicy` |
+| `session.opened` / `session.resumed` | `thread_id`、`storage_generation`、`agent_type`、`native_session_id`、`working_directory`、`runtime_mode`、初始 `model` 与思考档位配置；原生适配器不暴露 provider 的系统指令原文，因此 `system_instructions` 固定为 `null` 并附 `system_instructions_note` 说明 |
+| `turn.started` | Thread 与运行标识、`worker_turn_seq`、`client_message_id`、`mode`（`queue` \| `steer`）、完整用户输入文本与输入对象、实际生效 `model_selection` 与 `runtime_policy` |
 | `reasoning` | 原生 provider 产出的思考/推理内容块（含流式合并后的完整推理文本与关联 `item_id`） |
 | `item.started` / `item.updated` / `item.completed` | **含运行中状态与终态**的完整 `OrchestrationV2TurnItem`：命令执行输入与完整 stdout/stderr/退出码、文件修改完整 diff、MCP/动态工具完整参数与返回、文件/网页搜索结果、子任务进度 |
 | `question.asked` / `question.answered` | 原生权限审批、`user_input` 或 `mcp-elicitation` 的完整问题选项，以及员工提交的决策与回答 |
@@ -92,27 +92,27 @@ interface TranscriptLine {
 复用 `FullOutputStore` 验证成熟的分页字节切片模式（每页最大 `64 KiB` 原始字节，base64 编码传输，严格控制在网关 256 KiB 控制帧预算以内）：
 
 1. **Thread 运行记录**：
-   - 节点协议：`SessionRequest` 新增 `action: 'transcript'`（携带 `session_id`、`storage_generation`、字节偏移 `cursor`），返回 `{ ok: true, transcript: { storage_generation, offset, next_offset, total_bytes, expires_at, encoding: 'base64', data, done } }`；文件缺失或已过期返回明确错误码 `transcript_missing` / `transcript_expired`。
-   - 中心 HTTP：`GET /api/v1/threads/:id/transcript?offset=<bytes>&download=1`
+   - 节点协议：`SessionRequest` 新增 `action: 'transcript'`（携带 `session_id`、可选 `storage_generation` 与字节偏移 `cursor`），返回 `{ ok: true, transcript: { offset, next_offset, total_bytes, expires_at, encoding: 'base64', data, done, incomplete_tail } }`；文件缺失或已过期返回明确错误码 `transcript_missing` / `transcript_expired`。设备未收到代次时读取该 Thread 最近写入的 `transcript.jsonl`。
+   - 中心 HTTP：`GET /api/v1/threads/:id/transcript?offset=<bytes>`，每次返回一页 `TranscriptPage`。
      - 严格校验当前登录员工拥有该 Thread（Project Agent 工具不开放读取原始 `transcript.jsonl`，防止超长原始轨迹撑爆协调上下文）。
-     - 设备离线时返回 HTTP 409 `device_offline`。
-     - `download=1` 时中心按页流式拉取并以 `application/x-ndjson`（`Content-Disposition: attachment; filename="thread-<id>.jsonl"`）流式响应给浏览器。
+     - 设备离线时返回 HTTP 409 `device_offline`，提示运行记录暂不可取回。
 
 2. **Project Run 运行记录**：
    - 中心列表接口：`GET /api/v1/projects/:id/runs?limit=50`
-     - 从中心已有 `agent_runs` 表按时间倒序返回该 Project 的前台运行与后台记忆整理运行摘要（`run_id`、`node_id`、`kind`、`memory_job_id`、`state`、`started_at`、`ended_at`、`error_code`）。
-   - 节点协议与中心拉取：`GET /api/v1/projects/:id/runs/:runId/transcript?offset=<bytes>&download=1`
-     - 中心校验员工拥有该 Project，查出 `agent_runs.node_id`，通过 WSS 向该节点发送 `ProjectRunTranscriptRequest { project_id, run_id, offset }` 分页读取 `<data-dir>/project-runs/<project-id>/<run-id>.jsonl`。
+     - 从中心已有 `agent_runs` 表按时间倒序返回该 Project 的前台运行与后台记忆整理运行摘要（`run_id`、`node_id`、`kind`、`memory_job_id`、`memory_kind`、`state`、`provider`、`model`、`started_at`、`ended_at`、`error_code`）。
+   - 节点协议与中心拉取：`GET /api/v1/projects/:id/runs/:runId/transcript?offset=<bytes>`
+     - 中心校验员工拥有该 Project，查出 `agent_runs.node_id`，通过 WSS 向该节点发送 `ProjectRunTranscriptRequest { project_id, run_id, offset }` 分页读取 `<data-dir>/project-runs/<project-id>/<run-id>.jsonl`；设备离线同样返回 HTTP 409 `device_offline`。
+     - 下载由网页按页拼接 `TranscriptPage.data` 后生成 `.jsonl` Blob，不增加中心流式下载分支。
 
 ### 3.2 本机 CLI 与网页查看入口
 
 - **本机 CLI**：
   - `batond transcript --thread-id <UUID> [--follow]`
   - `batond transcript --project-id <UUID> --run-id <UUID> [--follow]`
-  - 直接在本地校验私有目录权限后流式输出原始 JSONL 到 stdout（无需经过中心或网络，方便开发者结合 `jq` 或离线排查卡死现场）。
+  - 直接在本地校验私有目录权限后按页输出原始 JSONL 到 stdout（无需经过中心或网络，方便开发者结合 `jq` 或离线排查卡死现场）；`--follow` 持续轮询追加内容，直到用户按 Ctrl-C。
 - **网页界面**：
-  - Thread 详情抽屉/菜单提供「查看运行记录」与「下载 `.jsonl`」，按需分页加载并结构化折叠展示系统指令、思考块、工具入参/出参与耗时。
-  - Project 设置/诊断区列出最近的前台与后台记忆运行记录，点击即可在线查看对应 `run_id` 的完整提示词、记忆注入快照与模型响应。
+  - Thread 详情菜单提供「查看运行记录」与「下载 `.jsonl`」，按需分页加载并结构化折叠展示思考块、工具入参/出参与耗时；原生 provider 不暴露的 Thread 系统指令不伪造。
+  - Project 概览的「运行记录」标签列出最近的前台与后台记忆运行记录，点击即可在线查看对应 `run_id` 的完整提示词、记忆注入快照与模型响应。
 
 ## 4. 结构化日志、实时诊断与安全边界
 
@@ -140,10 +140,10 @@ interface TranscriptLine {
 
 | Requirement | Setup and observation | Failure condition | Where | Status |
 |---|---|---|---|---|
-| R-22、R-23 | 执行一轮含思考、命令执行、文件修改与审批的 Thread 回合，检查设备本地 `transcript.jsonl` 并从网页 API 与 CLI 读取 | 缺少步骤或被截断；非所属员工可读；出现连接私钥、`control.token` 或订阅 token | `apps/batond` 集成 + `e2e` | planned |
-| R-23（崩溃现场保留） | 在 `agent-host` 工具运行中途与 `project-runtime` 第二次模型调用中途强制终止子进程 | 已发生的 `turn.started` / `item.started` / 首次 `llm.request` 与 `llm.response` 丢失或导致读取器崩溃 | `apps/batond` + `runtimes/project-agent` 单测 | planned |
-| R-23（Project 前后台运行记录） | 跑一次前台协调（含工具调用与压缩）和一次后台记忆整理，调 `/api/v1/projects/:id/runs` 与 `.../transcript` | 列表缺少后台记忆 Run；`transcript.jsonl` 缺少完整 `system` 指令、注入记忆或模型原始输出 | `runtimes/project-agent` + `e2e` | planned |
-| RL-09 | 检查中心日志、诊断输出、网页/桌面端复制诊断文本及 `transcript.jsonl` 行信封 | 缺少 `version` / `commit` 或相关实体 ID；残留任何外部遥测网络请求 | 单测 + 打包检查 | planned |
+| R-22、R-23 | 检查设备本地 `transcript.jsonl`、网页客户端分页请求与中心归属校验 | 缺少步骤或被截断；非所属员工可读；出现连接私钥、`control.token` 或订阅 token | `apps/batond/src/transcript/transcript.test.ts`、`apps/batond/src/agent-host/driver.test.ts`、`apps/server/src/full-output.integration.test.ts`、`web/src/data/http/transcript.test.ts` | partial：已覆盖追加写入、末尾半行、脱敏、Thread 归属与客户端分页；完整审批回合和浏览器 E2E 未覆盖 |
+| R-23（崩溃现场保留） | `agent-host` 回合尚未结束时读取本地文件；Project Runtime 写入后未关闭即读取 | 已发生的 `turn.started` / `item.started` / `run.started` 丢失或读取器崩溃 | `apps/batond/src/agent-host/driver.test.ts`、`runtimes/project-agent/test/transcript.test.ts` | partial：验证同步落盘；尚未用真实子进程 `SIGKILL` 复现第二次模型调用中断 |
+| R-23（Project 前后台运行记录） | 启动一次 Project 前台运行后调 `/api/v1/projects/:id/runs` 与 `.../transcript` | 列表缺少运行；中心未向节点转发；非所属员工可读 | `apps/server/src/project/projects.integration.test.ts`、`runtimes/project-agent/test/transcript.test.ts` | partial：已覆盖运行摘要、归属与 WSS 转发；完整前台工具/压缩与后台记忆运行的真实流水未覆盖 |
+| RL-09 | 检查 `transcript.jsonl` 行信封、结构化日志与诊断输出 | 缺少 `version` / `commit` 或相关实体 ID；残留任何外部遥测网络请求 | 单测 + 打包检查 | partial：信封字段由写入器单测覆盖；结构化日志与打包检查沿用现有测试 |
 
 ## Open questions
 

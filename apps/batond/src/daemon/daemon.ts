@@ -1,4 +1,5 @@
 import { BUILD, PROTOCOL_VERSION } from '@baton/protocol/release'
+import { readProjectRunTranscriptPage } from '../transcript/reader.ts'
 import { randomUUID } from 'node:crypto'
 import { unlink } from 'node:fs/promises'
 import { userInfo } from 'node:os'
@@ -423,6 +424,26 @@ async function connected(options: {
       switch (body.type) {
         case 'project_runtime.result':
           if (synced) projectRPC.receive(env.correlation_id, body)
+          break
+        case 'project_run_transcript':
+          if (synced)
+            schedule(async () => {
+              const result = await readProjectRunTranscriptPage(
+                options.dataDirectory,
+                body.project_id,
+                body.run_id,
+                body.offset,
+              )
+              await envelope(
+                {
+                  type: 'project_run_transcript_result',
+                  operation_id: body.operation_id,
+                  ok: result.ok,
+                  ...(result.ok ? { transcript: result.page } : { code: result.code }),
+                },
+                env.message_id,
+              )
+            })
           break
         case 'project_memory_start':
         case 'project_memory_stop':

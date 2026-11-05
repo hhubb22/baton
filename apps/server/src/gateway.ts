@@ -35,6 +35,7 @@ const rpcResponses = new Map([
   ['node.subscription_login', 'node.subscription_login_result'],
   ['node.model_connection', 'node.model_connection_result'],
   ['node.subscription_logout', 'node.subscription_logout_result'],
+  ['project_run_transcript', 'project_run_transcript_result'],
 ])
 const defaultRPCTimeouts: Readonly<Record<string, number>> = {
   'files.browse': 12_000,
@@ -45,6 +46,7 @@ const defaultRPCTimeouts: Readonly<Record<string, number>> = {
   'node.subscription_login': 12_000,
   'node.model_connection': 12_000,
   'node.subscription_logout': 12_000,
+  project_run_transcript: 12_000,
 }
 export const checkNodeVersion = (
   daemon: Pick<NodeAuth, 'daemon_version' | 'protocol_version'>,
@@ -457,6 +459,7 @@ export class Gateway {
               'node.model_connection_result',
               'node.subscription_logout_result',
               'project_runtime.request',
+              'project_run_transcript_result',
             ].includes(body.type)
           )
             throw new AppError(400, 'unsupported_message')
@@ -491,7 +494,8 @@ export class Gateway {
             body.type === 'node.browse_roots_get_result' ||
             body.type === 'node.subscription_login_result' ||
             body.type === 'node.model_connection_result' ||
-            body.type === 'node.subscription_logout_result'
+            body.type === 'node.subscription_logout_result' ||
+            body.type === 'project_run_transcript_result'
           ) {
             await this.handlers.validate(current.source)
             const pending = this.rpc.get(envelope.correlation_id ?? '')
@@ -571,7 +575,10 @@ export class Gateway {
       return Promise.reject(new AppError(400, 'invalid_request'))
     const operationId = body.operation_id
     const rpcClass: RPCClass =
-      body.type === 'files.browse' || body.type === 'session.request' || body.type === 'execution.output_request'
+      body.type === 'files.browse' ||
+      body.type === 'session.request' ||
+      body.type === 'execution.output_request' ||
+      body.type === 'project_run_transcript'
         ? 'read'
         : 'management'
     return new Promise((resolve, reject) => {

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { Effect, Schema } from 'effect'
-import { SessionResult, type ThreadOutputQuery } from '@baton/protocol'
+import { SessionResult, TranscriptPage, type ThreadOutputQuery } from '@baton/protocol'
 import * as Threads from './threads/index.ts'
 import type { Gateway } from './gateway.ts'
 import { AppError } from './errors.ts'
@@ -29,6 +29,11 @@ export const readThreadOutput = Effect.fn('Threads.readOutput')(function* (
       Schema.decodeUnknownSync(SessionResult)(
         await options.gateway().request(thread.node_id, employeeId, {
           ...query,
+          ...(query.storage_generation === undefined &&
+          query.action === 'transcript' &&
+          thread.storage_generation !== undefined
+            ? { storage_generation: thread.storage_generation }
+            : {}),
           type: 'session.request',
           operation_id: operationId,
           session_id: threadId,
@@ -48,4 +53,39 @@ export const readThreadOutput = Effect.fn('Threads.readOutput')(function* (
   )
     return yield* Effect.fail(new AppError(503, 'output_identity_mismatch'))
   return result
+})
+
+export const readThreadTranscript = Effect.fn('Threads.readTranscript')(function* (
+  options: { readonly gateway: () => Pick<Gateway, 'request'> },
+  employeeId: string,
+  threadId: string,
+  offset?: number,
+) {
+  const result = yield* readThreadOutput(options, employeeId, threadId, {
+    action: 'transcript',
+    ...(offset === undefined ? {} : { cursor: String(offset) }),
+  }).pipe(
+    Effect.catchIf(
+      (error) => error instanceof AppError && (error.code === 'node_offline' || error.code === 'node_syncing'),
+      () => Effect.fail(new AppError(409, 'device_offline', '设备当前离线，运行记录暂不可取回')),
+    ),
+  )
+  if (!result.ok) {
+    const code = result.code ?? 'transcript_unavailable'
+    return yield* Effect.fail(
+      new AppError(
+        code === 'node_offline' || code === 'node_syncing'
+          ? 409
+          : code === 'transcript_missing'
+            ? 404
+            : code === 'transcript_expired'
+              ? 410
+              : 503,
+        code === 'node_offline' || code === 'node_syncing' ? 'device_offline' : code,
+        code === 'node_offline' || code === 'node_syncing' ? '设备当前离线，运行记录暂不可取回' : undefined,
+      ),
+    )
+  }
+  if (!result.transcript) return yield* Effect.fail(new AppError(503, 'transcript_unavailable'))
+  return Schema.decodeUnknownSync(TranscriptPage)(result.transcript)
 })

@@ -410,8 +410,12 @@ class Manager implements ProjectManager {
         run.control,
         {
           BATON_PROJECT_RUNTIME_TRANSPORT: 'stdio',
+          BATON_PROJECT_DATA_DIR: this.options.dataDir,
           BATON_PROJECT_RUN_ID: run.command.run_id,
           BATON_PROJECT_LEASE_EPOCH: String(run.command.lease_epoch),
+          BATON_PROJECT_RUN_KIND: run.command.type === 'project_memory_start' ? 'memory' : 'foreground',
+          ...(run.command.project_id ? { BATON_PROJECT_ID: run.command.project_id } : {}),
+          ...(run.command.memory_kind ? { BATON_PROJECT_MEMORY_KIND: run.command.memory_kind } : {}),
           ...(this.options.nodeId ? { BATON_TELEMETRY_NODE_ID: this.options.nodeId } : {}),
         },
         (child) => {

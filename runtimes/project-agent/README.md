@@ -50,6 +50,12 @@ assistant 的 `message_end` 监听器先等待 `append_event` 提交，再按消
 
 闲置 180 秒，或运行满 15 分钟并处理完当前轮次后，先检查是否需要压缩，再调用 `finish`。收尾摘要生成失败、没有有效缩减或模型调用预算耗尽时保留原始历史，将 `finish_compaction_failed` 和具体错误码写入 stderr，仍正常 `finish`。下一次请求按窗口占用重新判断是否必须压缩；租约丢失、提交错误等仍立即退出。收尾只释放 Project Agent 租约，已开启的 Thread 继续执行。
 
+## 运行记录
+
+batond 启动 Runtime 时传入 `BATON_PROJECT_DATA_DIR`、`BATON_PROJECT_RUN_ID`、`BATON_PROJECT_LEASE_EPOCH`，以及可选的 `BATON_PROJECT_RUN_KIND`、`BATON_PROJECT_ID`、`BATON_PROJECT_MEMORY_KIND`。Bootstrap 成功后，前台、压缩和后台记忆运行在 `project-runs/<project-id>/<run-id>.jsonl` 实时追加 JSONL；目录和文件权限为 0700 / 0600。记录包含 `run.started`、模型请求和响应（完整系统指令、注入记忆、发送消息、输出块与 Token）、工具调用与结果、Embedding 调用、压缩提交以及 `run.ended` / `run.failed`。写入在事件发生时同步完成，进程被强杀时已发生的步骤仍可读取；写入失败后停写，不影响模型和工具事务。每条记录带 `seq`、时间、版本、提交和 `kind`，写入前按敏感键名、私钥/Bearer/JWT/API key 格式以及实际凭据和环境密钥值脱敏。
+
+运行文件默认按 30 天过期读取，尚未接入后台删除任务。查看入口为 `batond transcript --project-id <UUID> --run-id <UUID> [--follow]`，或在网页 Project 概览的「运行记录」中按页查看和下载。
+
 ## 上下文压缩
 
 每次模型请求前超过窗口的 80%、运行收尾超过 50% 时触发，还会为模型输出预留容量。先把较早、已被后续 assistant 分析的大工具结果替换为带原始序号的读取提示，保护最近三批输入及尚未分析的结果；降到窗口的 40% 以下即可结束，无需调用摘要模型。

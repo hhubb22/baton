@@ -24,6 +24,7 @@ import {
 
 export { runtimeRequest } from './runtime.ts'
 export { projectStatus } from './view.ts'
+export { projectRuns, projectRunTranscript } from './runs.ts'
 export { listProjectRunCandidates, scheduleProjectRun, claimProjectCommands } from './scheduling.ts'
 export { scheduleMemoryJobs } from './memory-jobs.ts'
 import { stopProjectMemory } from './memory-jobs.ts'

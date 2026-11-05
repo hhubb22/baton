@@ -48,7 +48,11 @@ function makeAgent(config: WorkerOpenConfig, options: HostedAgentOptions): Threa
   const statePath = config.adapter_config.state_path
   if (!statePath || !isAbsolute(statePath) || !isAbsolute(config.working_directory))
     throw new AgentError('Agent host requires absolute working_directory and private state_path')
-  const paths: AgentHostPaths = { workingDirectory: config.working_directory, privateDirectory: dirname(statePath) }
+  const paths: AgentHostPaths = {
+    workingDirectory: config.working_directory,
+    privateDirectory: dirname(statePath),
+    ...(options.dataDirectory ? { dataDirectory: options.dataDirectory } : {}),
+  }
   // These allocations only establish local state; host and filesystem work starts inside Effects.
   const scope = Scope.makeUnsafe()
   const queue = Effect.runSync(Queue.bounded<AgentEvent>(options.eventCapacity ?? 256))

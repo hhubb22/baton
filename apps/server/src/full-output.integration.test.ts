@@ -5,7 +5,7 @@ import { expect, it } from 'vite-plus/test'
 import type { RuntimeReport, ThreadReport, FullOutputReference } from '@baton/protocol'
 import { withTestDatabase, seedNode } from './testing/database.ts'
 import * as Threads from './threads/index.ts'
-import { readThreadOutput } from './full-output.ts'
+import { readThreadOutput, readThreadTranscript } from './full-output.ts'
 import type { Gateway } from './gateway.ts'
 
 it('preserves full-output references through center clipping and forwards reads only for the owning employee', () =>
@@ -141,4 +141,31 @@ it('preserves full-output references through center clipping and forwards reads 
       ),
     ).rejects.toMatchObject({ status: 404 })
     expect(reads).toBe(1)
+
+    const transcriptGateway: Pick<Gateway, 'request'> = {
+      request: async (_nodeId, _employeeId, body) => ({
+        type: 'session.result',
+        session_id: body.session_id,
+        operation_id: body.operation_id,
+        ok: true,
+        gap: false,
+        transcript: {
+          offset: 0,
+          next_offset: 8,
+          total_bytes: 8,
+          expires_at: '2099-01-01T00:00:00.000Z',
+          encoding: 'base64',
+          data: Buffer.from('{"seq":1}\n').toString('base64'),
+          done: true,
+          incomplete_tail: false,
+        },
+      }),
+    }
+    const transcript = await run(
+      readThreadTranscript({ gateway: () => transcriptGateway }, node.employeeId, thread.id, 0),
+    )
+    expect(Buffer.from(transcript.data, 'base64').toString()).toBe('{"seq":1}\n')
+    await expect(
+      run(readThreadTranscript({ gateway: () => transcriptGateway }, randomUUID(), thread.id, 0)),
+    ).rejects.toMatchObject({ status: 404 })
   }))

@@ -7,6 +7,7 @@ import { apiPath, timestamp } from './context'
 import { createProjectAPI } from './projects'
 import { createThreadAPI } from './threads'
 import { createExecutionAPI } from './executions'
+import { createTranscriptAPI } from './transcript'
 import { createOutputAPI, type OutputResult } from './output'
 import { createTransport, HttpError } from './transport'
 
@@ -380,6 +381,7 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
       ),
     ...createThreadAPI(ctx, output),
     ...createExecutionAPI(ctx),
+    ...createTranscriptAPI(ctx),
     subscribeOutput: (id, listener) => output.subscribeOutput(id, listener),
     ...createProjectAPI(ctx),
     getSession,

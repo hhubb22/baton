@@ -4,6 +4,7 @@ import { credentials } from './auth.js'
 import { FileCredentials } from './credentials.js'
 import type { MemoryEmbeddingConfig, RPC } from './protocol.js'
 import type { RuntimeTelemetry } from './usage.js'
+import type { ProjectTranscript } from './transcript.js'
 import { embeddingInputAttributes } from './genai.js'
 
 export const embeddingCredentials = () => new FileCredentials(join(credentials().directory, 'embeddings'))
@@ -33,8 +34,11 @@ export async function embed(
   signal?: AbortSignal,
   telemetry?: RuntimeTelemetry,
   attributes: Record<string, unknown> = {},
+  transcript?: ProjectTranscript,
+  purpose = 'query',
 ) {
   const execute = async (annotate: (attributes: Record<string, unknown>) => void) => {
+    const started = Date.now()
     const credential = config.credential_profile
       ? await embeddingCredentials().read(config.credential_profile)
       : undefined
@@ -60,6 +64,14 @@ export async function embed(
         'gen_ai.response.model': result.model,
         'baton.usage.reported': result.usage !== undefined,
         ...(result.usage ? { 'gen_ai.usage.input_tokens': result.usage.prompt_tokens } : {}),
+      })
+      transcript?.write('embedding.call', {
+        model: result.model || config.model,
+        purpose,
+        input_bytes: Buffer.byteLength(text),
+        input: text,
+        duration_ms: Date.now() - started,
+        input_tokens: result.usage?.prompt_tokens ?? null,
       })
       return { vector, usage: result.usage ?? null }
     } catch (error) {
@@ -87,6 +99,7 @@ export async function queryEmbedding(
   signal?: AbortSignal,
   telemetry?: RuntimeTelemetry,
   attributes: Record<string, unknown> = {},
+  transcript?: ProjectTranscript,
 ) {
   const binding = await rpc.call({
     operation: 'embedding_query',
@@ -95,7 +108,15 @@ export async function queryEmbedding(
   })
   if (!binding.memory_embedding) return {}
   try {
-    const result = await embed(binding.memory_embedding, binding.query, signal, telemetry, attributes)
+    const result = await embed(
+      binding.memory_embedding,
+      binding.query,
+      signal,
+      telemetry,
+      attributes,
+      transcript,
+      'memory.recall',
+    )
     console.error(JSON.stringify({ operation: 'embedding_query', usage: result.usage }))
     return {
       query_vector: {

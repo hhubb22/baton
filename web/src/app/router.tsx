@@ -53,7 +53,7 @@ export interface ThreadsSearch {
 export interface ProjectSearch {
   settings?: true
   archive?: true
-  view?: 'memory' | 'executions'
+  view?: 'memory' | 'executions' | 'runs'
   // 右侧打开的 Thread，替换概览栏。
   thread?: string
   execution?: string

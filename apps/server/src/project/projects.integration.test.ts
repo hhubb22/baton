@@ -10,6 +10,7 @@ import { insertProjectInput } from './inputs.ts'
 import { contextualRuntimeRequest } from '../testing/project-context.ts'
 import * as threads from '../threads/index.ts'
 import { activitySnapshot } from '../desktop-notifications.ts'
+import { AppError } from '../errors.ts'
 
 type Run = TestDatabase['run']
 const projectRuntimeReport: P.RuntimeReport = {
@@ -314,6 +315,66 @@ describe('runtime leases and persisted requests', () => {
         expect(boot.project.agent.model).toBe('gpt-5')
         await run(projects.patchProject(a.employee, p.id, { model: 'next-model' }))
         expect(result(P.ProjectBootstrap, await r.rpc('bootstrap')).project.agent.model).toBe('gpt-5')
+      }),
+    30_000,
+  )
+
+  it(
+    'lists project runs and forwards transcript reads to the owning node',
+    async () =>
+      withTestDatabase(async ({ run }) => {
+        const a = await fixture(run),
+          p = await a.create(),
+          r = await a.start(p)
+        const runs = await run(projects.projectRuns(a.employee, p.id))
+        expect(runs.runs).toMatchObject([
+          { run_id: r.identity.run_id, node_id: a.node, kind: 'foreground', state: 'running' },
+        ])
+        const page = {
+          offset: 0,
+          next_offset: 8,
+          total_bytes: 8,
+          expires_at: '2099-01-01T00:00:00.000Z',
+          encoding: 'base64' as const,
+          data: Buffer.from('{"seq":1}\n').toString('base64'),
+          done: true,
+          incomplete_tail: false,
+        }
+        let requests = 0
+        const gateway = {
+          request: async (nodeId: string, employeeId: string, body: P.ProjectRunTranscriptRequest) => {
+            requests++
+            expect(nodeId).toBe(a.node)
+            expect(employeeId).toBe(a.employee)
+            expect(body).toMatchObject({ project_id: p.id, run_id: r.identity.run_id, offset: 0 })
+            return {
+              type: 'project_run_transcript_result',
+              operation_id: body.operation_id,
+              ok: true,
+              transcript: page,
+            }
+          },
+        }
+        expect(await run(projects.projectRunTranscript(gateway, a.employee, p.id, r.identity.run_id, 0))).toEqual(page)
+        await expect(
+          run(projects.projectRunTranscript(gateway, randomUUID(), p.id, r.identity.run_id, 0)),
+        ).rejects.toMatchObject({ status: 404 })
+        await expect(
+          run(
+            projects.projectRunTranscript(
+              {
+                request: async () => {
+                  throw new AppError(503, 'node_offline')
+                },
+              },
+              a.employee,
+              p.id,
+              r.identity.run_id,
+              0,
+            ),
+          ),
+        ).rejects.toMatchObject({ status: 409, code: 'device_offline' })
+        expect(requests).toBe(1)
       }),
     30_000,
   )

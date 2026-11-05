@@ -2,6 +2,7 @@ import { Schema } from 'effect'
 import { RuntimeMode } from '@t3tools/contracts'
 import { TraceContext } from './trace.ts'
 import { FullOutputPage, FullOutputReference } from './full-output.ts'
+import { TranscriptPage } from './transcript.ts'
 import { ThreadQuestion, ThreadAnswerInput, ThreadQuestionAnswer } from './thread-question.ts'
 import { ThinkingSelection } from './device.ts'
 import {
@@ -73,7 +74,7 @@ export const SessionRequest = Schema.Struct({
   type: Schema.Literal('session.request'),
   operation_id: UUID,
   session_id: UUID,
-  action: Schema.Literals(['output', 'full_output']),
+  action: Schema.Literals(['output', 'full_output', 'transcript']),
   output_id: Schema.optionalKey(UUID),
   storage_generation: Schema.optionalKey(StorageGeneration),
   cursor: Schema.optionalKey(Cursor),
@@ -111,6 +112,7 @@ export const SessionResult = Schema.Struct({
   running_steps_truncated: Schema.optionalKey(Schema.Boolean),
   cursor: Schema.optionalKey(Cursor),
   full_output: Schema.optionalKey(FullOutputPage),
+  transcript: Schema.optionalKey(TranscriptPage),
   gap: Schema.Boolean,
 })
 export type SessionResult = typeof SessionResult.Type

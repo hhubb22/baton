@@ -106,6 +106,13 @@ export interface BatonClient {
   // 按中心返回的游标读取过程，设备离线时仍可读取。
   readTrace(messageId: ID, cursor?: string): Promise<Trace>
   readTurnTrace?(threadId: ID, turnSeq: number, cursor?: string): Promise<Trace>
+  readThreadTranscript?(threadId: ID, offset?: number): Promise<import('@baton/protocol').TranscriptPage>
+  listProjectRuns?(projectId: ID, limit?: number): Promise<import('@baton/protocol').ProjectRunSummary[]>
+  readProjectRunTranscript?(
+    projectId: ID,
+    runId: ID,
+    offset?: number,
+  ): Promise<import('@baton/protocol').TranscriptPage>
   // 执行中的一轮的实时输出，这一轮结束后为空。
   readOutput(threadId: ID): Promise<LiveOutput>
   // 推送输出快照；null 表示连接或读取状态变化，需要重读。返回函数取消订阅。

@@ -118,7 +118,7 @@ export const ThreadListQuery = Schema.Struct({
 export const ThreadTimelineQuery = Schema.Struct({ cursor: Schema.optionalKey(boundedText(4096)), limit: pageLimit })
 export const ThreadOutputQuery = Schema.Struct({
   cursor: Schema.optionalKey(Cursor),
-  action: Schema.optionalKey(Schema.Literals(['output', 'full_output'])),
+  action: Schema.optionalKey(Schema.Literals(['output', 'full_output', 'transcript'])),
   output_id: Schema.optionalKey(UUID),
   storage_generation: Schema.optionalKey(StorageGeneration),
 })
@@ -142,6 +142,9 @@ export const ProjectMessagesQuery = Schema.Struct({
 export const ProjectEventsQuery = Schema.Struct({ after_seq: afterSequence, limit: pageLimit })
 const memoryInteger = (minimum: number, maximum: number) =>
   decimal(minimum, maximum).pipe(Schema.decodeTo(NonNegativeInteger, SchemaTransformation.numberFromString))
+export const ThreadTranscriptQuery = Schema.Struct({
+  offset: Schema.optionalKey(memoryInteger(0, Number.MAX_SAFE_INTEGER)),
+})
 export const ExecutionListQuery = Schema.Struct({ project_id: UUID, cursor: Schema.optionalKey(UUID) })
 export const ExecutionOutputQuery = Schema.Struct({
   output_id: UUID,
@@ -171,6 +174,7 @@ export const httpSchemas = {
   ThreadListQuery,
   ThreadTimelineQuery,
   ThreadOutputQuery,
+  ThreadTranscriptQuery,
   ThreadTraceQuery,
   FilesQuery,
   ProjectListQuery,
@@ -184,6 +188,7 @@ export type BrowserThreadChanged = typeof BrowserThreadChanged.Type
 export type ThreadListQuery = typeof ThreadListQuery.Type
 export type ThreadTimelineQuery = typeof ThreadTimelineQuery.Type
 export type ThreadOutputQuery = typeof ThreadOutputQuery.Type
+export type ThreadTranscriptQuery = typeof ThreadTranscriptQuery.Type
 export type ThreadTraceQuery = typeof ThreadTraceQuery.Type
 export type FilesQuery = typeof FilesQuery.Type
 export type ProjectListQuery = typeof ProjectListQuery.Type

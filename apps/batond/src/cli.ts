@@ -64,6 +64,8 @@ serve/run 常驻运行守护进程；控制命令在需要时自动后台启动�
   withdraw --thread-id <UUID> --message-id <ID>
   ack --thread-id <UUID> --event-id <UUID> --worker-seq <序号>
   probe [--agent <cursor|pi|codex|kiro|antigravity|droid>]
+  transcript --thread-id <UUID> [--follow]
+  transcript --project-id <UUID> --run-id <UUID> [--follow]
 
 设备与 Thread 命令支持 --data-dir <私有目录>，默认 ~/.baton/data。
 订阅凭据目录使用 BATON_PROJECT_RUNTIME_DATA_DIR，默认 ~/.baton/data/credentials。
@@ -98,6 +100,11 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
           : await uninstallBatond(values['data-dir']!, { purge: values.purge === true }),
       ),
     )
+    return
+  }
+  if (action === 'transcript') {
+    const { runTranscriptCLI } = await import('./cli/transcript.ts')
+    await runTranscriptCLI(args)
     return
   }
   if (action === 'env') {
@@ -271,7 +278,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
       const { values, positionals } = parseArgs({
         args,
         allowPositionals: true,
-        options: { cwd: { type: 'string' }, state: { type: 'string' } },
+        options: { cwd: { type: 'string' }, state: { type: 'string' }, 'data-dir': { type: 'string' } },
       })
       const agentType = positionals[0]
       if (!agentType || !values.cwd || !values.state)
@@ -281,7 +288,11 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
       for (const name of Object.keys(process.env)) if (name.startsWith('OTEL_')) delete process.env[name]
       await Effect.runPromise(
         Effect.scoped(
-          runAgentHostCommand(agentType, { workingDirectory: values.cwd, privateDirectory: values.state }),
+          runAgentHostCommand(agentType, {
+            workingDirectory: values.cwd,
+            privateDirectory: values.state,
+            ...(values['data-dir'] ? { dataDirectory: values['data-dir'] } : {}),
+          }),
         ).pipe(Effect.provide(telemetryLayer('baton-agent-host', telemetryEnv))),
         { signal: controller.signal },
       )

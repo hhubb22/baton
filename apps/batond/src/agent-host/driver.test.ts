@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { rm } from 'node:fs/promises'
+import { readFile, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Effect, Fiber, Queue, Schema, Stream } from 'effect'
 import { expect, it } from 'vite-plus/test'
@@ -14,9 +14,11 @@ import {
 } from '@t3tools/provider-core/server/ProviderAdapter'
 import { makePrivateTempDirectory } from '../testing/private.ts'
 import { makeProviderHostDriver } from './driver.ts'
+import { AgentHostPathsService } from './paths.ts'
 import { AgentHostProcessGroup, type ExecutionEvent } from './protocol.ts'
 
 const now = '2026-01-01T00:00:00.000Z'
+const fakeApiKey = ['sk', 'abcdefghijklmnopqrstuvwxyz'].join('-')
 const decodeEvent = Schema.decodeUnknownSync(Schema.toCodecJson(ProviderAdapterV2Event))
 
 it.each([false, true])(
@@ -92,6 +94,11 @@ it.each([false, true])(
               terminateChildren: Effect.void,
               waitQuiescent: () => Effect.void,
             }),
+            Effect.provideService(AgentHostPathsService, {
+              workingDirectory: root,
+              privateDirectory: root,
+              dataDirectory: root,
+            }),
           )
           const config: WorkerOpenConfig = {
             thread_id: randomUUID(),
@@ -125,7 +132,7 @@ it.each([false, true])(
           yield* driver.send({
             message: {
               id: 'message',
-              text: 'run',
+              text: `run ${fakeApiKey}`,
               epoch: 0,
               operationId: 'operation',
               mode: 'queue',
@@ -140,6 +147,12 @@ it.each([false, true])(
           expect(input.appThread.modelSelection.options).toEqual(input.modelSelection.options)
           expect(input.runtimePolicy).toEqual({ cwd: root, runtimeMode: 'full-access', interactionMode: 'default' })
           expect(input.appThread.runtimeMode).toBe('full-access')
+          const transcriptFile = join(root, config.storage_generation, 'transcript.jsonl')
+          const transcript = yield* Effect.promise(() => readFile(transcriptFile, 'utf8'))
+          expect(transcript).toContain('"kind":"turn.started"')
+          expect(transcript).not.toContain(fakeApiKey)
+          if (process.platform !== 'win32')
+            expect((yield* Effect.promise(() => stat(transcriptFile))).mode & 0o777).toBe(0o600)
           const item = (
             id: string,
             status: string,

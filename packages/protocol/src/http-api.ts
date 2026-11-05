@@ -11,6 +11,7 @@ import {
 import * as T from './thread.ts'
 import * as E from './execution.ts'
 import { FullOutputPage } from './full-output.ts'
+import { ProjectRunsQuery, ProjectRunTranscriptQuery, ProjectRunsResponse, TranscriptPage } from './transcript.ts'
 import * as P from './project.ts'
 import * as D from './device.ts'
 import * as A from './auth.ts'
@@ -277,6 +278,11 @@ const Threads = HttpApiGroup.make('threads')
       query: Q.ThreadOutputQuery,
       success: T.SessionResult,
     }),
+    Endpoint.get('transcript', '/api/v1/threads/:threadId/transcript', {
+      params: threadParams,
+      query: Q.ThreadTranscriptQuery,
+      success: TranscriptPage,
+    }),
     Endpoint.get('trace', '/api/v1/threads/:threadId/trace', {
       params: threadParams,
       query: Q.ThreadTraceQuery,
@@ -345,6 +351,16 @@ const Projects = HttpApiGroup.make('projects')
       params: projectParams,
       payload: EmptyInput,
       success: C.OKResponse,
+    }),
+    Endpoint.get('runs', '/api/v1/projects/:projectId/runs', {
+      params: projectParams,
+      query: ProjectRunsQuery,
+      success: ProjectRunsResponse,
+    }),
+    Endpoint.get('runTranscript', '/api/v1/projects/:projectId/runs/:runId/transcript', {
+      params: { ...projectParams, runId: UUID },
+      query: ProjectRunTranscriptQuery,
+      success: TranscriptPage,
     }),
     Endpoint.get('memory', '/api/v1/projects/:projectId/memory', {
       params: projectParams,

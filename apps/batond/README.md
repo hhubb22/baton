@@ -97,7 +97,11 @@ pnpm --filter @baton/batond dev message --thread-id <UUID> --text '需要执行�
 pnpm --filter @baton/batond dev reports --thread-id <UUID>
 pnpm --filter @baton/batond dev stop --thread-id <UUID>
 pnpm --filter @baton/batond dev resume --thread-id <UUID>
+pnpm --filter @baton/batond dev transcript --thread-id <UUID> [--follow]
+pnpm --filter @baton/batond dev transcript --project-id <UUID> --run-id <UUID> [--follow]
 ```
+
+运行记录直接读取设备私有文件，不启动 Worker 或经中心转发。Thread 写入 `threads/<thread-id>/<storage-generation>/transcript.jsonl`，Project 前台、压缩和后台记忆运行写入 `project-runs/<project-id>/<run-id>.jsonl`；目录和文件权限为 0700 / 0600。每行是带 `seq`、时间、版本、提交和 `kind` 的 JSON，工具入参、输出、diff、审批问答、模型响应、Token 与耗时在事件发生时同步追加，强杀进程仍保留已发生步骤。读取保留末尾未写完的行并标记 `incomplete_tail`；`--follow` 持续输出新增内容直到 Ctrl-C。写入前按敏感键名、私钥/Bearer/JWT/API key 格式以及实际 `control.token`、订阅凭据和环境密钥值脱敏。原生 provider 不暴露 Thread 系统指令原文，记录中保留 `system_instructions: null` 和说明，不伪造内容。
 
 本地 CLI 的 `open` 支持 `--agent cursor|pi|codex|kiro`，默认 Cursor；`--model` 接受显式模型 ID，未指定时使用该 Agent 上报的默认模型。`--execution-timeout-seconds` 设置每轮执行时限，默认 7200 秒，范围为 1～2147483647 秒。重试同一个 Thread 时沿用保存的 Agent、模型和时限，配置冲突会被拒绝。Pi、Codex、Cursor 的排队消息可指定下一轮模型，省略时沿用最近确认提交的回合模型，首次使用创建配置。
 

@@ -9,6 +9,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query'
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import type { ProjectRunSummary } from '@baton/protocol'
 import { ClientError, type BatonClient, type ChangeEvent } from './client'
 import type {
   AgentKind,
@@ -39,6 +40,7 @@ export const keys = {
   project: (id: ID) => ['projects', 'detail', id] as const,
   projectEntries: (id: ID) => ['projects', 'entries', id] as const,
   projectMemory: (id: ID) => ['projects', 'memory', id] as const,
+  projectRuns: (id: ID) => ['projects', 'runs', id] as const,
   memoryStatus: (id: ID) => ['projects', 'memoryStatus', id] as const,
   memorySources: (projectId: ID, noteId?: ID, version?: number) =>
     ['projects', 'memorySources', projectId, noteId, version] as const,
@@ -275,6 +277,17 @@ export function useProjectMemory(projectId: ID) {
     queryKey: keys.projectMemory(projectId),
     queryFn: () => client.listProjectMemory(projectId),
     refetchOnMount: false,
+    retryOnMount: false,
+  })
+}
+
+export function useProjectRuns(projectId: ID, active: boolean) {
+  const client = useClient()
+  return useQuery({
+    queryKey: keys.projectRuns(projectId),
+    queryFn: () => client.listProjectRuns?.(projectId) ?? Promise.resolve([] as ProjectRunSummary[]),
+    enabled: active,
+    refetchOnMount: 'always',
     retryOnMount: false,
   })
 }

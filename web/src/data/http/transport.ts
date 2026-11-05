@@ -23,6 +23,10 @@ const messages: Record<string, string> = {
   roots_changed: '允许访问的文件夹已更改，请重新加载列表。',
   file_changed: '文件已更改，请重新加载后继续阅读。',
   thinking_unavailable: '模型的思考强度选项已变更，请重新选择。',
+  device_offline: '设备当前离线，运行记录暂不可取回。',
+  transcript_missing: '运行记录不存在或已被清理。',
+  transcript_expired: '运行记录已超过保留期。',
+  run_not_found: '运行记录不存在或已被清理。',
 }
 
 export class HttpError extends ClientError {

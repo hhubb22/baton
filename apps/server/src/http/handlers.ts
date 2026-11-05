@@ -14,7 +14,7 @@ import { AppError } from '../errors.ts'
 import { notifyThreadChanged } from '../notifications.ts'
 import { activitySnapshot, replayNotifications } from '../desktop-notifications.ts'
 import { projectHttpHandlers } from './projects.ts'
-import { readThreadOutput } from '../full-output.ts'
+import { readThreadOutput, readThreadTranscript } from '../full-output.ts'
 import * as DeviceManagement from '../device-management.ts'
 import { cookieToken, httpBusiness, decodeResponse } from './security.ts'
 import { telemetryForwardEnabled } from '../telemetry-forward-client.ts'
@@ -404,6 +404,14 @@ export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
             Effect.gen(function* () {
               const { employee } = yield* CurrentBrowserSession
               return yield* readThreadOutput(options, employee.id, params.threadId, query)
+            }),
+          ),
+        )
+        .handle('transcript', ({ params, query }) =>
+          httpBusiness(
+            Effect.gen(function* () {
+              const { employee } = yield* CurrentBrowserSession
+              return yield* readThreadTranscript(options, employee.id, params.threadId, query.offset)
             }),
           ),
         )

@@ -144,6 +144,7 @@ export const connectAgentHost = (
             ...(process.env.BATON_TELEMETRY_NODE_ID
               ? { BATON_TELEMETRY_NODE_ID: process.env.BATON_TELEMETRY_NODE_ID }
               : {}),
+            ...(options.paths.dataDirectory ? { BATON_AGENT_HOST_DATA_DIR: options.paths.dataDirectory } : {}),
           },
           cwd: options.paths.workingDirectory,
         },

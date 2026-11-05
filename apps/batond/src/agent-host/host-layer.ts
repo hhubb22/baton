@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import type { AgentHostProcessGroup } from './protocol.ts'
 import type { ProcessRegistrar } from './process-registrar.ts'
 
-import type { AgentHostPaths } from './paths.ts'
+import { AgentHostPathsService, type AgentHostPaths } from './paths.ts'
 
 /**
  * 命令直接在 host 中执行。adapter/spawner 的 Scope 释放各自资源，
@@ -104,16 +104,20 @@ export interface AgentHostLayerOptions {
  * Effect services an upstream `ProviderAdapterV2` may require inside the host.
  * Every host owns one Agent session, so layers are built per process.
  */
-export const agentHostLayer = (options: AgentHostLayerOptions) =>
-  Layer.mergeAll(
+export const agentHostLayer = (options: AgentHostLayerOptions) => {
+  const dataDirectory = options.paths.dataDirectory ?? process.env.BATON_AGENT_HOST_DATA_DIR
+  const paths = dataDirectory === undefined ? options.paths : { ...options.paths, dataDirectory }
+  return Layer.mergeAll(
     registeredSpawner(options.registrar, options.spawner),
     hostAgentScope,
-    providerHost(options.paths),
+    providerHost(paths),
+    Layer.succeed(AgentHostPathsService, paths),
     McpProviderSessions.layer,
     IdAllocator.layer,
     fileSystemLayer,
     pathLayer,
     cryptoLayer,
   )
+}
 
 export type AgentHostEnvironment = Layer.Success<ReturnType<typeof agentHostLayer>> | AgentHostProcessGroup

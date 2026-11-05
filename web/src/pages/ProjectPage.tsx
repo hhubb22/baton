@@ -1,9 +1,11 @@
 import * as stylex from '@stylexjs/stylex'
+import type { ProjectRunSummary } from '@baton/protocol'
 import { SyncStatus } from '../app/SyncStatus'
 import { ProjectRecovery } from '../app/ProjectRecovery'
 import { ProjectMemory } from '../app/ProjectMemory'
 import { ExecutionDetail, executionStatus } from '../app/ExecutionDetail'
 import { ArchivedNotice, ProjectSettings } from '../app/ProjectSettings'
+import { TranscriptDialog } from '../app/TranscriptDialog'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import {
@@ -48,6 +50,7 @@ import {
   useProjectExecutions,
   useProjectHistory,
   useProjectMemory,
+  useProjectRuns,
   useRetryProject,
   useProjects,
   useSendProjectMessage,
@@ -802,6 +805,8 @@ function Overview({
   executions,
   executionsError,
   memory,
+  runs,
+  runsError,
   onOpenThread,
   onOpenExecution,
   tab,
@@ -813,13 +818,16 @@ function Overview({
   executions: Execution[]
   executionsError: boolean
   memory: MemoryNote[] | undefined
+  runs: ProjectRunSummary[]
+  runsError: boolean
   onOpenThread: (threadId: string) => void
   onOpenExecution: (id: string) => void
-  tab: 'threads' | 'memory' | 'executions'
-  onTabChange: (tab: 'threads' | 'memory' | 'executions') => void
+  tab: 'threads' | 'memory' | 'executions' | 'runs'
+  onTabChange: (tab: 'threads' | 'memory' | 'executions' | 'runs') => void
 }) {
   const [showAll, setShowAll] = useState(false)
   const [folded, setFolded] = useState<string[]>([])
+  const [run, setRun] = useState<ProjectRunSummary | null>(null)
   const desktop = useDesktopStatus()
   const localNode = desktopCapability('open-local')?.openLocal && desktop.data?.registered ? desktop.data.node_id : null
   const now = useNow(60_000)
@@ -905,6 +913,7 @@ function Overview({
         options={[
           { value: 'threads', label: '对话', count: live.length },
           { value: 'executions', label: '执行', count: executions.length },
+          { value: 'runs', label: '运行记录', count: runs.length },
           { value: 'memory', label: '记忆', count: memory?.length ?? 0 },
         ]}
       />
@@ -969,8 +978,41 @@ function Overview({
           ))}
         </section>
       )}
+      {tab === 'runs' && (
+        <section aria-label="运行记录列表">
+          {runsError && <p role="alert">无法加载运行记录，请稍后重试。</p>}
+          {!runsError && runs.length === 0 && <p {...stylex.props(text.small, styles.faint)}>暂无运行记录</p>}
+          {runs.map((item) => (
+            <button
+              key={item.run_id}
+              type="button"
+              onClick={() => setRun(item)}
+              {...stylex.props(text.small, styles.overviewRow, focusRing.ring)}
+            >
+              <span {...stylex.props(styles.threadTitle, text.truncate)}>
+                {item.kind === 'memory' ? '后台记忆整理' : '主对话运行'}
+              </span>
+              <span>{runStateLabel[item.state] ?? item.state}</span>
+            </button>
+          ))}
+        </section>
+      )}
+      <TranscriptDialog
+        open={run !== null}
+        onClose={() => setRun(null)}
+        source={{ kind: 'run', projectId: project.id, runId: run?.run_id ?? '' }}
+        title={`${run?.kind === 'memory' ? '后台记忆整理' : '主对话运行'} · ${run?.run_id.slice(0, 8) ?? ''}`}
+      />
     </aside>
   )
+}
+
+const runStateLabel: Record<string, string> = {
+  starting: '正在启动',
+  running: '运行中',
+  finished: '已完成',
+  failed: '失败',
+  lost: '已失联',
 }
 
 function DockBanner({
@@ -1084,6 +1126,7 @@ export function ProjectPage() {
   const entries = useProjectEntries(projectId)
   const history = useProjectHistory(projectId)
   const memory = useProjectMemory(projectId)
+  const runs = useProjectRuns(projectId, true)
   const send = useSendProjectMessage()
   const stop = useStopProjectRun()
   const retry = useRetryProject()
@@ -1813,6 +1856,8 @@ export function ProjectPage() {
               executions={executions.data ?? []}
               executionsError={executions.isError && !executions.data}
               memory={memory.data}
+              runs={runs.data ?? []}
+              runsError={runs.isError && !runs.data}
               onOpenThread={onOpenThread}
               onOpenExecution={onOpenExecution}
               tab={search.view ?? 'threads'}

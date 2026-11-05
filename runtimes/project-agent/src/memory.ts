@@ -5,6 +5,7 @@ import { embed, EmbeddingError } from './embeddings.js'
 import { RuntimeError, type RPC } from './protocol.js'
 import { providerUsage, type RuntimeTelemetry } from './usage.js'
 import { modelInputAttributes, modelOutputAttributes, streamUsageAttributes } from './genai.js'
+import type { ProjectTranscript } from './transcript.js'
 
 const Output = Schema.Struct({
   changes: Schema.Array(Schema.Record(Schema.String, Schema.Json)).check(Schema.isMaxLength(16)),
@@ -21,6 +22,7 @@ export async function runMemory(
   parent?: AbortSignal,
   providedModels?: Models,
   telemetry?: RuntimeTelemetry,
+  transcript?: ProjectTranscript,
 ): Promise<void> {
   const boot = await rpc.call({ operation: 'memory_bootstrap' })
   const signal = AbortSignal.any([AbortSignal.timeout(boot.max_duration_ms), ...(parent ? [parent] : [])])
@@ -37,6 +39,18 @@ export async function runMemory(
       { role: 'system' as const, content: instruction, timestamp: 0 },
       { role: 'user' as const, content: JSON.stringify(content), timestamp: 0 },
     ]
+    const call = calls
+    const requestStarted = Date.now()
+    let firstOutputAt: number | undefined
+    transcript?.write('llm.request', {
+      call,
+      purpose: 'memory_extract',
+      provider: model.provider,
+      model: model.id,
+      max_tokens: Math.min(maxOutputTokens, model.maxTokens),
+      system: instruction,
+      messages,
+    })
     const produce = async (annotate: (attributes: Record<string, unknown>) => void) => {
       const started = performance.now()
       let firstOutput = false
@@ -56,6 +70,7 @@ export async function runMemory(
       for await (const event of stream) {
         if (!firstOutput && ['text_delta', 'thinking_delta', 'toolcall_delta'].includes(event.type)) {
           firstOutput = true
+          firstOutputAt = Date.now()
           annotate({ ttft_ms: Math.max(0, performance.now() - started) })
         }
       }
@@ -78,6 +93,16 @@ export async function runMemory(
           produce,
         )
       : await produce(() => {})
+    transcript?.write('llm.response', {
+      call,
+      purpose: 'memory_extract',
+      response_model: response.model,
+      stop_reason: response.stopReason,
+      ttft_ms: firstOutputAt === undefined ? null : firstOutputAt - requestStarted,
+      duration_ms: Date.now() - requestStarted,
+      content: response.content,
+      usage: response.usage,
+    })
     if (response.stopReason === 'error' || response.stopReason === 'aborted')
       throw new RuntimeError('model_request_failed')
     usages.push(response.usage ?? null)
@@ -103,10 +128,18 @@ export async function runMemory(
         if (!entry || !pending.memory_embedding) break
         calls++
         try {
-          const computed = await embed(pending.memory_embedding, entry.text, signal, telemetry, {
-            'gen_ai.agent.name': 'memory',
-            'gen_ai.conversation.id': boot.job_id,
-          })
+          const computed = await embed(
+            pending.memory_embedding,
+            entry.text,
+            signal,
+            telemetry,
+            {
+              'gen_ai.agent.name': 'memory',
+              'gen_ai.conversation.id': boot.job_id,
+            },
+            transcript,
+            'memory_entry',
+          )
           await rpc.call({
             operation: 'commit_embedding',
             payload: {
@@ -197,6 +230,7 @@ export async function runMemory(
       }
     }
     await rpc.call({ operation: 'finish' })
+    transcript?.write('run.ended', { state: 'finished', llm_calls: calls, usage: usages })
   } catch (error) {
     if (parent?.aborted || (error instanceof RuntimeError && ['claim_lost', 'lease_lost'].includes(error.code))) return
     const reason = signal.aborted
@@ -204,7 +238,15 @@ export async function runMemory(
       : error instanceof RuntimeError
         ? error.code
         : undefined
-    if (!reason) throw error
+    if (!reason) {
+      transcript?.write('run.failed', {
+        state: 'failed',
+        error_code: error instanceof Error ? error.name : 'unknown',
+        llm_calls: calls,
+      })
+      throw error
+    }
+    transcript?.write('run.failed', { state: 'failed', error_code: reason, llm_calls: calls })
     if ((reason === 'model_call_budget_exhausted' && progress) || reason === 'job_cursor_conflict')
       await rpc.call({ operation: 'finish' })
     else await rpc.call({ operation: 'report_failure', reason })

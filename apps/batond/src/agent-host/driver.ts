@@ -1,5 +1,5 @@
 import { realpath } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import { DateTime, Deferred, Effect, Queue, Schema, Scope, Semaphore, Stream } from 'effect'
 import type {
   ModelSelection,
@@ -37,6 +37,8 @@ import {
 } from './protocol.ts'
 import { runtimeRequestDecision } from './runtime-request.ts'
 import { modelRejectedBeforeInput } from './model.ts'
+import { AgentHostPathsService } from './paths.ts'
+import { TranscriptWriter } from '../transcript/writer.ts'
 
 export interface ProviderHostDriverOptions {
   /** Shown in host errors. Credentials and SDK payloads stay out of the text. */
@@ -71,6 +73,9 @@ interface ActiveTurn {
   ended: boolean
   readonly items: Map<string, OrchestrationV2TurnItem>
   readonly emittedItems: Set<string>
+  readonly transcriptItems: Set<string>
+  readonly startedAt: number
+  firstOutputAt?: number
   tokenUsage?: typeof Schema.Json.Type
 }
 
@@ -92,6 +97,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
     const processGroup = yield* AgentHostProcessGroup
     const idAllocator = yield* IdAllocator.IdAllocatorV2
     const { label } = options
+    const paths = yield* AgentHostPathsService
     const control = yield* Queue.bounded<ExecutionEvent, AgentHostError>(256)
     const eventLock = yield* Semaphore.make(1)
     const output = makeOutputMailbox()
@@ -104,6 +110,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
     let ordinal = 0
     let closed = false
     let stopped = false
+    let transcript: TranscriptWriter | undefined
     const streams = new Map<string, string>()
     const replied = new Set<string>()
     const answered = new Set<string>()
@@ -112,6 +119,22 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
     const questions = new Map<string, ThreadQuestion>()
     const questionTurns = new Map<string, ActiveTurn>()
     const published = new Set<string>()
+    const record = (kind: string, data: unknown) => transcript?.write(kind, data)
+    const openTranscript = (input: WorkerOpenConfig) =>
+      Effect.tryPromise({
+        try: () =>
+          TranscriptWriter.open({
+            file: join(paths.privateDirectory, input.storage_generation, 'transcript.jsonl'),
+            ...(paths.dataDirectory ? { dataDirectory: paths.dataDirectory } : {}),
+            onError: () =>
+              console.error(JSON.stringify({ operation: 'transcript_write_failed', code: 'write_failed' })),
+          }).then((writer) => {
+            transcript = writer
+          }),
+        catch: () => {
+          console.error(JSON.stringify({ operation: 'transcript_open_failed', code: 'open_failed' }))
+        },
+      }).pipe(Effect.ignore)
     // 底层原因附在消息后面，跨进程传给 Worker 后仍能看出具体失败。
     const error = (message: string, cause?: unknown) =>
       new AgentHostError({
@@ -156,6 +179,12 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
         )
           return
         published.add(id)
+        record('question.asked', {
+          ...identity(active),
+          request_id: id,
+          question,
+          request,
+        })
         yield* emit({ ...identity(active), type: 'question', question })
       })
     const answer = (request: OrchestrationV2RuntimeRequest) =>
@@ -184,6 +213,13 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
         }
         if (!session || decision === undefined || answered.has(request.id)) return
         answered.add(request.id)
+        record('question.answered', {
+          ...(active ? identity(active) : {}),
+          request_id: request.id,
+          decision,
+          automatic: true,
+          request,
+        })
         yield* session
           .respondToRuntimeRequest({
             requestId: request.id,
@@ -246,6 +282,30 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
           case 'turn_item.updated': {
             const item = event.turnItem
             if (!active || active.ended || item.runId !== active.runId) return
+            const terminal = ['completed', 'failed', 'cancelled', 'interrupted'].includes(item.status)
+            const itemEvent = terminal
+              ? 'item.completed'
+              : active.transcriptItems.has(item.id)
+                ? 'item.updated'
+                : 'item.started'
+            active.transcriptItems.add(item.id)
+            const fullItem = Schema.encodeSync(Schema.toCodecJson(TurnItemSchema))(item)
+            record(itemEvent, {
+              ...identity(active),
+              item_id: item.id,
+              attempt_id: active.attemptId,
+              run_ordinal: active.ordinal,
+              item: fullItem,
+            })
+            if (item.type === 'reasoning') {
+              record('reasoning', {
+                ...identity(active),
+                item_id: item.id,
+                streaming: item.streaming,
+                text: item.text,
+                status: item.status,
+              })
+            }
             if (
               item.type !== 'assistant_message' &&
               item.type !== 'user_message' &&
@@ -298,6 +358,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
             // Late events from a previous turn never reach the next turn's identity.
             if (!active || active.ended || message.role !== 'assistant' || message.runId !== active.runId) return
             const turn = active
+            turn.firstOutputAt ??= Date.now()
             if (message.streaming) {
               const previous = streams.get(message.id) ?? ''
               if (message.text === previous) return
@@ -316,6 +377,13 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
             streams.delete(message.id)
             if (message.text.length === 0 || replied.has(message.id)) return
             replied.add(message.id)
+            record('reply', {
+              ...identity(turn),
+              message_id: message.id,
+              text: message.text,
+              attachments: message.attachments,
+              context: message.context,
+            })
             yield* emit({ ...identity(turn), type: 'reply', id: message.id, text: message.text })
             return
           }
@@ -323,6 +391,16 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
             if (!active || active.ended || event.runOrdinal !== active.ordinal) return
             active.ended = true
             yield* flushItems(active)
+            record('turn.ended', {
+              ...identity(active),
+              worker_turn_seq: active.ordinal,
+              status: event.status,
+              outcome: event.status === 'completed' ? 'completed' : event.status === 'failed' ? 'failed' : 'cancelled',
+              token_usage: active.tokenUsage,
+              duration_ms: Date.now() - active.startedAt,
+              ttft_ms: active.firstOutputAt === undefined ? null : active.firstOutputAt - active.startedAt,
+              failure: event.status === 'failed' ? event.failure : null,
+            })
             if (event.status === 'failed') {
               yield* emit({
                 ...identity(active),
@@ -349,9 +427,11 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
     const consumeEvents = (runtime: ProviderAdapter.ProviderAdapterV2SessionRuntime) =>
       runtime.events.pipe(
         Stream.runForEach((event) => eventLock.withPermit(consume(event))),
-        Effect.catchCause(() =>
-          stopped || closed ? Effect.void : emit({ type: 'uncertain', reason: `${label} session event stream failed` }),
-        ),
+        Effect.catchCause((cause) => {
+          if (stopped || closed) return Effect.void
+          record('session.error', { message: `${label} session event stream failed`, cause: String(cause) })
+          return emit({ type: 'uncertain', reason: `${label} session event stream failed` })
+        }),
         Effect.forkIn(scope),
       )
     const authorize = (input: WorkerOpenConfig) =>
@@ -457,6 +537,20 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
             })
             .pipe(Effect.mapError((cause) => fail('ensure thread', cause)))
           const result = yield* attach(input, runtime, thread, authorized.selection)
+          yield* openTranscript(input)
+          record('session.opened', {
+            thread_id: input.thread_id,
+            storage_generation: input.storage_generation,
+            agent_type: input.agent_type,
+            native_session_id: result.nativeSessionId,
+            working_directory: input.working_directory,
+            runtime_mode: input.runtime_mode,
+            model: authorized.selection,
+            runtime_policy: authorized.policy,
+            adapter_config: input.adapter_config,
+            system_instructions: null,
+            system_instructions_note: 'Thread Agent 的系统指令由原生 provider 管理，适配器不暴露原始文本',
+          })
           yield* consumeEvents(runtime)
           return result
         }),
@@ -490,6 +584,20 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
             })
             .pipe(Effect.mapError((cause) => fail('resume thread', cause)))
           const result = yield* attach(input, runtime, thread, authorized.selection)
+          yield* openTranscript(input)
+          record('session.resumed', {
+            thread_id: input.thread_id,
+            storage_generation: input.storage_generation,
+            agent_type: input.agent_type,
+            native_session_id: result.nativeSessionId,
+            working_directory: input.working_directory,
+            runtime_mode: input.runtime_mode,
+            model: authorized.selection,
+            runtime_policy: authorized.policy,
+            adapter_config: input.adapter_config,
+            system_instructions: null,
+            system_instructions_note: 'Thread Agent 的系统指令由原生 provider 管理，适配器不暴露原始文本',
+          })
           yield* consumeEvents(runtime)
           return result
         }),
@@ -513,6 +621,15 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
           if (!question || !isThreadAnswerAllowed(question, input))
             return yield* error(`${label} question decision is not offered`)
           answered.add(input.request_id)
+          record('question.answered', {
+            ...identity(active),
+            request_id: input.request_id,
+            decision: input.decision,
+            answers: input.answers,
+            automatic: false,
+            question,
+            request,
+          })
           yield* session
             .respondToRuntimeRequest({
               requestId: request.id,
@@ -555,6 +672,16 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
             if (!options.steer) return yield* error(`${label} does not support steer`)
             const turn = active
             if (!turn || turn.ended || !turn.providerTurnId) return yield* error(`${label} has no active turn to steer`)
+            record('turn.started', {
+              ...identity(turn),
+              worker_turn_seq: turn.ordinal,
+              client_message_id: message.id,
+              mode: 'steer',
+              text: message.text,
+              message,
+              model_selection: selection,
+              runtime_policy: policy,
+            })
             yield* session
               .steerTurn({
                 threadId,
@@ -590,10 +717,22 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
             ended: false,
             items: new Map(),
             emittedItems: new Set(),
+            transcriptItems: new Set(),
+            startedAt: Date.now(),
           }
           active = turn
           streams.clear()
           replied.clear()
+          record('turn.started', {
+            ...identity(turn),
+            worker_turn_seq: ordinal,
+            client_message_id: message.id,
+            mode: 'queue',
+            text: message.text,
+            message,
+            model_selection: selection,
+            runtime_policy: policy,
+          })
           yield* session
             .startTurn({
               appThread: { ...appThread, modelSelection: selection },
@@ -741,6 +880,7 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
         yield* eventLock.withPermit(Effect.suspend(() => (active && !active.ended ? flushItems(active) : Effect.void)))
         closed = true
         stopped = true
+        record('session.hibernated', { thread_id: config?.thread_id, reason: 'host_closed' })
         yield* Effect.forEach(requests.values(), (request) => answer(request), {
           concurrency: 'unbounded',
           discard: true,
@@ -754,9 +894,10 @@ export const makeProviderHostDriver = (options: ProviderHostDriverOptions) =>
       }),
     }
     yield* Effect.addFinalizer(() =>
-      Effect.sync(() => {
+      Effect.gen(function* () {
         closed = true
         stopped = true
+        if (transcript) yield* Effect.promise(() => transcript!.close().catch(() => undefined))
       }),
     )
     return driver

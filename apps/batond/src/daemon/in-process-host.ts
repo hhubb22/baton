@@ -12,6 +12,7 @@ import {
 } from '../platform/process.ts'
 import { AgentError } from '../worker/agent.ts'
 import { FullOutputStore } from '../worker/full-output.ts'
+import { readThreadTranscriptResult } from '../transcript/thread.ts'
 import { makeWorker, type Worker } from '../worker/index.ts'
 import type { AgentFactory } from '../worker/agent.ts'
 import { currentBatondCommand, type BatondCommand, type DaemonWorkerHost } from './host.ts'
@@ -50,10 +51,17 @@ export class InProcessWorkerHost implements DaemonWorkerHost {
     request: WorkerRequest,
     options: { readonly start?: boolean; readonly timeoutMs?: number } = {},
   ): Promise<WorkerIPCMessage> {
-    if (request.type === 'session_request' && request.session_request.action === 'full_output') {
+    if (
+      request.type === 'session_request' &&
+      (request.session_request.action === 'full_output' || request.session_request.action === 'transcript')
+    ) {
       const body = request.session_request
       if (body.session_id !== threadId) return { type: 'result', ok: false, code: 'invalid_request' }
-      const result = await new FullOutputStore(join(this.dataDirectory, 'threads', threadId)).read(body)
+      const threadDirectory = join(this.dataDirectory, 'threads', threadId)
+      const result =
+        body.action === 'transcript'
+          ? await readThreadTranscriptResult(this.dataDirectory, threadDirectory, body)
+          : await new FullOutputStore(threadDirectory).read(body)
       return { type: 'result', ok: result.ok, session_result: result }
     }
     const running = await this.#worker(threadId)

@@ -57,6 +57,7 @@ import { copySelection, SelectionArea } from './SelectionMenu'
 import { ThreadQuestionForm } from './ThreadQuestionForm'
 import { ThreadQuestionAnswerStatus } from './ThreadQuestionAnswerStatus'
 import { ThreadModelMenu } from './ThreadModelMenu'
+import { TranscriptDialog } from './TranscriptDialog'
 import { modelThinking, ThinkingMenu } from './ThinkingMenu'
 import { useNow } from './useNow'
 import { useWorkspace } from './workspace'
@@ -491,6 +492,7 @@ export function ThreadDetail({
   } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<Confirm>(null)
+  const [transcriptOpen, setTranscriptOpen] = useState(false)
   const [resumeId, setResumeId] = useState<string | null>(null)
   const [previousOutput, setPreviousOutput] = useState<{
     threadId: ID
@@ -916,6 +918,9 @@ export function ThreadDetail({
         停止当前回复
       </MenuOption>
     ),
+    <MenuOption key="transcript" onSelect={() => setTranscriptOpen(true)}>
+      查看运行记录
+    </MenuOption>,
     thread.status !== 'archived' && thread.pending !== 'archive' && (
       <MenuOption key="archive" onSelect={() => setConfirm('archive')}>
         归档对话
@@ -1232,6 +1237,12 @@ export function ThreadDetail({
         deviceName={name}
         waiting={waiting}
         finalFocus={timelineRef}
+      />
+      <TranscriptDialog
+        open={transcriptOpen}
+        onClose={() => setTranscriptOpen(false)}
+        source={{ kind: 'thread', threadId }}
+        title={thread.title}
       />
       <ArchiveDialog
         open={confirm === 'archive'}

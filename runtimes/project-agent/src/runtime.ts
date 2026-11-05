@@ -27,6 +27,7 @@ import {
 } from './compaction.js'
 
 import { queryEmbedding } from './embeddings.js'
+import type { ProjectTranscript } from './transcript.js'
 import { providerUsage, type RuntimeTelemetry } from './usage.js'
 import { modelInputAttributes, modelOutputAttributes, streamUsageAttributes } from './genai.js'
 export { modelMessages } from './context.js'
@@ -67,6 +68,8 @@ export class ProjectRuntime {
   private budget: ModelBudget
   private memoryContext?: MemoryContext
   private modelCalls = 0
+  private llmCalls = 0
+  private tokenUsage = { input: 0, output: 0, cached: 0, cacheCreation: 0, reasoning: 0 }
   constructor(
     private rpc: RPC,
     private models: Models,
@@ -74,11 +77,22 @@ export class ProjectRuntime {
     compaction: Partial<CompactionSettings> = {},
     budget: Partial<ModelBudget> = {},
     private telemetry?: RuntimeTelemetry,
+    private transcript?: ProjectTranscript,
   ) {
     this.compaction = compactionSettings(compaction)
     this.budget = { ...DEFAULT_MODEL_BUDGET, ...budget }
     for (const [name, value] of Object.entries(this.budget))
       if (!Number.isSafeInteger(value) || value < 1) throw new Error(`invalid_model_budget_${name}`)
+  }
+  private record(kind: string, data: unknown) {
+    this.transcript?.write(kind, data)
+  }
+  private recordResponseUsage(usage: unknown) {
+    if (!usage || typeof usage !== 'object') return
+    for (const key of Object.keys(this.tokenUsage) as (keyof typeof this.tokenUsage)[]) {
+      const value = Reflect.get(usage, key)
+      if (typeof value === 'number' && Number.isFinite(value) && value >= 0) this.tokenUsage[key] += value
+    }
   }
   private traced<T>(
     name: string,
@@ -103,10 +117,19 @@ export class ProjectRuntime {
     const relatedTokens = Math.min(settings.related_tokens, Math.max(0, available - coreTokens))
     const inputSeq = this.events.findLast((e) => e.kind === 'input')?.seq ?? this.boot.input_seq
     const embedding = this.boot.project.memory_embedding
-      ? await queryEmbedding(this.rpc, this.seq, inputSeq, undefined, signal, this.telemetry, {
-          'gen_ai.agent.name': 'project',
-          'gen_ai.conversation.id': this.boot.project.conversation.id,
-        })
+      ? await queryEmbedding(
+          this.rpc,
+          this.seq,
+          inputSeq,
+          undefined,
+          signal,
+          this.telemetry,
+          {
+            'gen_ai.agent.name': 'project',
+            'gen_ai.conversation.id': this.boot.project.conversation.id,
+          },
+          this.transcript,
+        )
       : {}
     this.memoryContext = await this.rpc.call({
       operation: 'prepare_context',
@@ -185,6 +208,15 @@ export class ProjectRuntime {
         const message = eventMessage(event) as ToolResultMessage
         this.results.set(message.toolCallId, message)
       }
+    this.record('compaction.committed', {
+      through_seq: payload.through_seq,
+      cleared_tool_result_seqs: payload.cleared_tool_result_seqs,
+      summary: payload.summary,
+      memory_index: payload.memory_index,
+      provider: payload.provider,
+      model: payload.model,
+      usage: payload.usage,
+    })
   }
   private async compact(ratio: number, signal?: AbortSignal, force = false, retentionScale = 1): Promise<boolean> {
     return this.traced('baton.project.compaction', {}, () => this.compactTraced(ratio, signal, force, retentionScale))
@@ -279,6 +311,19 @@ export class ProjectRuntime {
           ),
           { role: 'user', content: COMPACTION_INSTRUCTION, timestamp: 0 } satisfies Message,
         ]
+        const call = ++this.llmCalls
+        const requestStarted = this.timer.now()
+        let firstOutputAt: number | undefined
+        this.record('llm.request', {
+          call,
+          purpose: 'compaction',
+          provider: model.provider,
+          model: model.id,
+          max_tokens: Math.min(this.budget.maxOutputTokens, model.maxTokens, available),
+          system: summaryMessages.find((message) => message.role === 'system')?.content,
+          messages: summaryMessages,
+          through_seq: through,
+        })
         const response = await this.traced(
           `chat ${model.id}`,
           this.chatAttributes(model, summaryMessages),
@@ -299,6 +344,7 @@ export class ProjectRuntime {
             for await (const event of stream) {
               if (!firstOutput && ['text_delta', 'thinking_delta', 'toolcall_delta'].includes(event.type)) {
                 firstOutput = true
+                firstOutputAt = this.timer.now()
                 annotate({ ttft_ms: Math.max(0, this.timer.now() - started) })
               }
             }
@@ -307,6 +353,17 @@ export class ProjectRuntime {
             return response
           },
         )
+        this.recordResponseUsage(response.usage)
+        this.record('llm.response', {
+          call,
+          purpose: 'compaction',
+          response_model: response.model,
+          stop_reason: response.stopReason,
+          ttft_ms: firstOutputAt === undefined ? null : firstOutputAt - requestStarted,
+          duration_ms: this.timer.now() - requestStarted,
+          content: response.content,
+          usage: response.usage,
+        })
         payload = {
           through_seq: through,
           summary: summaryText(response),
@@ -415,8 +472,15 @@ export class ProjectRuntime {
               'gen_ai.agent.name': 'project',
               'gen_ai.conversation.id': this.boot.project.conversation.id,
             },
+            this.transcript,
           )
         : {}
+    const toolStarted = this.timer.now()
+    this.record('tool.call', {
+      tool_call_id: call.id,
+      tool: call.name,
+      arguments: call.arguments,
+    })
     let requestStarted = this.timer.now()
     let response = await this.rpc.call({
       operation: 'call_tool',
@@ -482,6 +546,14 @@ export class ProjectRuntime {
     const message = eventMessage(event) as ToolResultMessage
     if (message.toolCallId !== call.id) throw new RuntimeError('invalid_tool_result')
     this.results.set(call.id, message)
+    this.record('tool.result', {
+      tool_call_id: call.id,
+      tool: call.name,
+      duration_ms: this.timer.now() - toolStarted,
+      content: message.content,
+      details: message.details,
+      is_error: message.isError,
+    })
     return message
   }
   private pendingCalls(): ToolCall[] {
@@ -545,6 +617,19 @@ export class ProjectRuntime {
             options?.signal,
             outputFeedback ? [{ role: 'user', content: outputFeedback, timestamp: 0 }] : [],
           )
+          const call = ++this.llmCalls
+          const requestStarted = this.timer.now()
+          let responseFirstOutputAt: number | undefined
+          this.record('llm.request', {
+            call,
+            purpose: 'chat',
+            provider: requestModel.provider,
+            model: requestModel.id,
+            max_tokens: outputTokens,
+            system: memoryMessages.find((entry) => entry.role === 'system')?.content,
+            messages: memoryMessages,
+            memory_context: this.memoryContext,
+          })
           message = await this.traced(
             `chat ${requestModel.id}`,
             this.chatAttributes(requestModel, memoryMessages),
@@ -587,6 +672,7 @@ export class ProjectRuntime {
               for await (const event of stream) {
                 if (!firstOutput && ['text_delta', 'thinking_delta', 'toolcall_delta'].includes(event.type)) {
                   firstOutput = true
+                  responseFirstOutputAt = this.timer.now()
                   annotate({ ttft_ms: Math.max(0, this.timer.now() - started) })
                 }
                 if (event.type === 'text_delta') {
@@ -603,6 +689,17 @@ export class ProjectRuntime {
               return response
             },
           )
+          this.recordResponseUsage(message.usage)
+          this.record('llm.response', {
+            call,
+            purpose: 'chat',
+            response_model: message.model,
+            stop_reason: message.stopReason,
+            ttft_ms: responseFirstOutputAt === undefined ? null : responseFirstOutputAt - requestStarted,
+            duration_ms: this.timer.now() - requestStarted,
+            content: message.content,
+            usage: message.usage,
+          })
           if (message.stopReason === 'error' && isContextOverflow(message, requestModel.contextWindow)) {
             if (!this.canRecover()) throw new RuntimeError('context_overflow_budget_exhausted')
             const before = estimateMessages(modelMessages(this.boot, this.events))
@@ -815,14 +912,34 @@ export class ProjectRuntime {
   async start(): Promise<void> {
     try {
       await this.run()
+      this.record('run.ended', {
+        state: 'finished',
+        model_calls: this.modelCalls,
+        llm_calls: this.llmCalls,
+        token_usage: this.tokenUsage,
+      })
     } catch (error) {
       if (error instanceof RuntimeError && modelFailureCodes.has(error.code)) {
+        this.record('run.failed', {
+          state: 'failed',
+          error_code: error.code,
+          model_calls: this.modelCalls,
+          llm_calls: this.llmCalls,
+          token_usage: this.tokenUsage,
+        })
         await this.rpc.call({
           operation: 'report_failure',
           reason: error.code,
         })
         return
       }
+      this.record('run.failed', {
+        state: 'failed',
+        error_code: error instanceof Error ? error.name : 'unknown',
+        model_calls: this.modelCalls,
+        llm_calls: this.llmCalls,
+        token_usage: this.tokenUsage,
+      })
       throw error
     }
   }

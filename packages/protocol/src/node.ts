@@ -24,6 +24,7 @@ import {
   SubscriptionLogoutResult,
 } from './device.ts'
 import { ProjectRunCommand, ProjectRuntimeRequest, ProjectRuntimeResult } from './project.ts'
+import { ProjectRunTranscriptRequest, ProjectRunTranscriptResult } from './transcript.ts'
 import {
   ExecutionCommand,
   ExecutionCommandResult,
@@ -138,6 +139,7 @@ export const NodeToControlBody = Schema.Union([
   ModelConnectionResult,
   SubscriptionLogoutResult,
   ProjectRuntimeRequest,
+  ProjectRunTranscriptResult,
 ])
 export type NodeToControlBody = typeof NodeToControlBody.Type
 export const ControlToNodeBody = Schema.Union([
@@ -158,6 +160,7 @@ export const ControlToNodeBody = Schema.Union([
   SubscriptionLogoutRequest,
   ProjectRunCommand,
   ProjectRuntimeResult,
+  ProjectRunTranscriptRequest,
 ])
 export type ControlToNodeBody = typeof ControlToNodeBody.Type
 export const NodeBody = Schema.Union([NodeToControlBody, ControlToNodeBody])
