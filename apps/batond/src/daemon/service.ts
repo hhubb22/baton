@@ -4,21 +4,27 @@ import { homedir, userInfo } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { isSea } from 'node:sea'
 import { randomUUID } from 'node:crypto'
+import { setTimeout as delay } from 'node:timers/promises'
 import { promisify } from 'node:util'
 import { Schema } from 'effect'
 import { PositiveInteger, Timestamp } from '@baton/protocol'
 import { currentBatondCommand, type BatondCommand } from './host.ts'
-import { isMissing, loadIdentity } from './identity.ts'
+import { isMissing } from './identity.ts'
 import { ensurePrivateDirectory, readPrivateFile } from '../platform/private.ts'
-import { readProcessLock } from '../platform/lock.ts'
+import { acquireProcessLock, processLockIsHeld, ProcessLockBusy, readProcessLock } from '../platform/lock.ts'
 import { identityMatches } from '../platform/identity.ts'
 
 const label = 'dev.baton.batond'
 const unit = 'baton-batond.service'
 
+const definitionPath = (platform: NodeJS.Platform, home: string) =>
+  platform === 'darwin'
+    ? join(home, 'Library', 'LaunchAgents', `${label}.plist`)
+    : join(home, '.config', 'systemd', 'user', unit)
+
 export class ServiceError extends Error {
   constructor(
-    readonly code: 'service_unavailable' | 'service_unsupported' | 'service_not_registered',
+    readonly code: 'service_unavailable' | 'service_unsupported',
     message: string,
   ) {
     super(message)
@@ -84,8 +90,8 @@ export function renderLaunchAgent(definition: ServiceDefinition): string {
 ${args}
     </array>
     <key>RunAtLoad</key><true/>
-    <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
-    <key>ThrottleInterval</key><integer>30</integer>
+    <key>KeepAlive</key><true/>
+    <key>ThrottleInterval</key><integer>10</integer>
     <key>StandardOutPath</key><string>${log}</string>
     <key>StandardErrorPath</key><string>${log}</string>
   </dict>
@@ -104,9 +110,8 @@ Description=Baton node
 
 [Service]
 ExecStart=${args}
-Restart=on-failure
+Restart=always
 RestartSec=5
-RestartPreventExitStatus=78
 StandardOutput=append:${log}
 StandardError=append:${log}
 
@@ -117,7 +122,7 @@ WantedBy=default.target
 
 const DaemonStatus = Schema.Struct({
   pid: PositiveInteger,
-  state: Schema.Literals(['connecting', 'online', 'rejected', 'stopping']),
+  state: Schema.Literals(['unbound', 'authorizing', 'connecting', 'syncing', 'online', 'rejected', 'stopping']),
   code: Schema.optionalKey(Schema.String),
   message: Schema.optionalKey(Schema.String),
   updated_at: Timestamp,
@@ -147,6 +152,14 @@ export interface ServiceStatus {
   message?: string
 }
 
+interface ServiceControlClient {
+  request(
+    request: { method: 'shutdown' | 'status' },
+    options: { autostart: false; timeoutMs: number },
+  ): Promise<{ ok: boolean; message?: string }>
+  ensureDaemon(): Promise<void>
+}
+
 interface ServiceOptions {
   platform?: NodeJS.Platform
   homeDirectory?: string
@@ -155,6 +168,52 @@ interface ServiceOptions {
   env?: NodeJS.ProcessEnv
   command?: BatondCommand
   runner?: ServiceRunner
+  controlClient?: (directory: string) => ServiceControlClient
+  shutdownTimeoutMs?: number
+  readyTimeoutMs?: number
+}
+
+async function acquireLaunchLock(directory: string, timeoutMs: number) {
+  const deadline = performance.now() + timeoutMs
+  for (;;) {
+    try {
+      return await acquireProcessLock(join(directory, 'autostart.lock'))
+    } catch (error) {
+      if (!(error instanceof ProcessLockBusy)) throw error
+      if (performance.now() >= deadline)
+        throw new ServiceError('service_unavailable', '等待守护进程启动锁超时，请稍后重试')
+      await delay(25)
+    }
+  }
+}
+
+async function waitForDaemonStop(directory: string, timeoutMs: number): Promise<void> {
+  const deadline = performance.now() + timeoutMs
+  while (await processLockIsHeld(join(directory, 'daemon.lock'))) {
+    if (performance.now() >= deadline)
+      throw new ServiceError('service_unavailable', '等待守护进程停止超时，尚未安装用户服务')
+    await delay(25)
+  }
+}
+
+async function waitForServiceReady(client: ServiceControlClient, timeoutMs: number): Promise<void> {
+  const deadline = performance.now() + timeoutMs
+  let reason = ''
+  for (;;) {
+    try {
+      const response = await client.request(
+        { method: 'status' },
+        { autostart: false, timeoutMs: Math.max(1, Math.min(1000, deadline - performance.now())) },
+      )
+      if (response.ok) return
+      reason = response.message ?? ''
+    } catch (error) {
+      reason = error instanceof Error ? error.message : ''
+    }
+    if (performance.now() >= deadline)
+      throw new ServiceError('service_unavailable', `用户服务未能及时启动，请检查日志${reason ? `：${reason}` : ''}`)
+    await delay(25)
+  }
 }
 
 async function readDefinition(path: string): Promise<string | undefined> {
@@ -164,6 +223,22 @@ async function readDefinition(path: string): Promise<string | undefined> {
     if (!isMissing(error)) throw error
     return undefined
   }
+}
+
+/** Read-only control status check, without requiring a running user service manager. */
+export async function isUserServiceInstalled(
+  dataDirectory?: string,
+  options: Pick<ServiceOptions, 'platform' | 'homeDirectory'> = {},
+): Promise<boolean> {
+  const platform = options.platform ?? process.platform
+  if (platform !== 'darwin' && platform !== 'linux') return false
+  const text = await readDefinition(definitionPath(platform, options.homeDirectory ?? homedir()))
+  if (text === undefined) return false
+  if (dataDirectory === undefined) return true
+  const log = checkedPath(logPath(resolve(dataDirectory)))
+  return platform === 'darwin'
+    ? text.includes(`<key>StandardOutPath</key><string>${xml(log)}</string>`)
+    : text.includes(`\nStandardOutput=append:${log.replaceAll('%', '%%')}\n`)
 }
 
 async function removeDefinition(path: string): Promise<void> {
@@ -200,10 +275,7 @@ export async function manageService(
   const home = options.homeDirectory ?? homedir()
   const domain = `gui/${options.uid ?? process.getuid?.()}`
   const target = `${domain}/${label}`
-  const path =
-    platform === 'darwin'
-      ? join(home, 'Library', 'LaunchAgents', `${label}.plist`)
-      : join(home, '.config', 'systemd', 'user', unit)
+  const path = definitionPath(platform, home)
   const runner = options.runner ?? runCommand
   const run = async (file: string, args: readonly string[]) => {
     try {
@@ -282,19 +354,21 @@ export async function manageService(
   }
   if (action === 'uninstall') {
     if (platform === 'darwin') await bootout()
-    else if (previous !== undefined) await systemctl('disable', '--now', unit)
+    else {
+      const state = await run('systemctl', ['--user', 'show', unit, '-p', 'ActiveState,UnitFileState'])
+      if (
+        previous !== undefined ||
+        (state.code === 0 &&
+          /^(ActiveState=(active|activating)|UnitFileState=enabled(?:-runtime)?)$/m.test(state.stdout))
+      )
+        await systemctl('disable', '--now', unit)
+    }
     await removeDefinition(path)
     if (platform === 'linux') await systemctl('daemon-reload')
     return { installed: false }
   }
 
   const directory = checkedPath(resolve(dataDirectory))
-  try {
-    await loadIdentity(directory)
-  } catch (error) {
-    if (isMissing(error)) throw new ServiceError('service_not_registered', '设备尚未注册，请先运行 batond register')
-    throw error
-  }
   const { initializeEnvironment } = await import('../environment.ts')
   await initializeEnvironment(directory, env)
   const command: BatondCommand =
@@ -310,39 +384,114 @@ export async function manageService(
   const text = platform === 'darwin' ? renderLaunchAgent(definition) : renderSystemdUnit(definition)
   await ensurePrivateDirectory(directory)
   await ensurePrivateDirectory(join(directory, 'logs'))
-  await writeDefinition(path, text)
+  const timeoutMs = options.shutdownTimeoutMs ?? 30_000
+  const release = await acquireLaunchLock(directory, timeoutMs)
   try {
-    if (platform === 'darwin') {
-      await bootout()
-      await check('launchctl', ['bootstrap', domain, path])
-    } else {
-      await systemctl('daemon-reload')
-      await systemctl('enable', '--now', unit)
-      await systemctl('restart', unit)
-    }
-  } catch (error) {
-    // 先恢复磁盘定义，即使命令管理器已不可用也保留原来的启动入口。
-    if (previous === undefined) await removeDefinition(path)
-    else await writeDefinition(path, previous)
+    // Serialize with on-demand starts, then snapshot the actual manager state for rollback.
+    const previous = await readDefinition(path)
+    const state =
+      platform === 'darwin'
+        ? await run('launchctl', ['print', target])
+        : await run('systemctl', ['--user', 'show', unit, '-p', 'ActiveState,UnitFileState,MainPID'])
+    if (platform === 'darwin' && ![0, 3, 113].includes(state.code))
+      throw new ServiceError('service_unavailable', `无法查询用户服务：${state.stderr.trim()}`)
+    const loaded = platform === 'darwin' && state.code === 0
+    const active = platform === 'linux' && state.code === 0 && /^ActiveState=(active|activating)$/m.test(state.stdout)
+    const enabled = state.code === 0 && /^UnitFileState=enabled(?:-runtime)?$/m.test(state.stdout)
+    const managedPid = Number(
+      (platform === 'darwin' ? /^\s*pid = (\d+)\s*$/m : /^MainPID=(\d+)$/m).exec(state.stdout)?.[1],
+    )
+    const client = options.controlClient
+      ? options.controlClient(directory)
+      : new (await import('./control-client.ts')).ControlClient(directory, { command })
+    let stoppedManaged = false
+    let stoppedDetached = false
+    let replaced = false
+    let activationAttempted = false
     try {
-      if (platform === 'darwin') {
+      // Stop the manager first: KeepAlive/Restart must not race the control shutdown.
+      if (loaded) {
         await bootout()
-        if (previous !== undefined) await check('launchctl', ['bootstrap', domain, path])
-      } else {
-        if (previous === undefined) await systemctl('disable', '--now', unit)
-        await systemctl('daemon-reload')
-        if (previous !== undefined) {
-          await systemctl('enable', '--now', unit)
-          await systemctl('restart', unit)
-        }
+        stoppedManaged = true
+      } else if (active) {
+        await systemctl('stop', unit)
+        stoppedManaged = true
       }
-    } catch (rollback) {
-      throw new ServiceError(
-        'service_unavailable',
-        `${error instanceof Error ? error.message : '服务安装失败'}；定义文件已恢复，服务恢复失败：${rollback instanceof Error ? rollback.message : '请检查服务管理器'}`,
-      )
+      if (await processLockIsHeld(join(directory, 'daemon.lock'))) {
+        const lock = await readProcessLock(join(directory, 'daemon.lock'))
+        const detached = !stoppedManaged || lock?.pid !== managedPid
+        if (detached) {
+          try {
+            const response = await client.request({ method: 'shutdown' }, { autostart: false, timeoutMs })
+            if (!response.ok) throw new ServiceError('service_unavailable', response.message ?? '无法停止现有守护进程')
+          } catch (error) {
+            if (await processLockIsHeld(join(directory, 'daemon.lock')))
+              throw new ServiceError(
+                'service_unavailable',
+                `无法停止现有守护进程：${error instanceof Error ? error.message : '控制通道不可用'}`,
+              )
+          }
+        }
+        await waitForDaemonStop(directory, timeoutMs)
+        stoppedDetached = detached
+      }
+      await writeDefinition(path, text)
+      replaced = true
+      if (platform === 'darwin') {
+        activationAttempted = true
+        await check('launchctl', ['bootstrap', domain, path])
+      } else {
+        await systemctl('daemon-reload')
+        activationAttempted = true
+        await systemctl('enable', '--now', unit)
+      }
+      // Managers can return before the process owns daemon.lock. Keep autostarts blocked until authenticated IPC is ready.
+      await waitForServiceReady(client, options.readyTimeoutMs ?? 30_000)
+    } catch (error) {
+      // Restore disk first so even an unavailable manager retains the original entry.
+      if (replaced) {
+        if (previous === undefined) await removeDefinition(path)
+        else await writeDefinition(path, previous)
+      }
+      try {
+        if (platform === 'darwin') {
+          if (activationAttempted) {
+            await bootout()
+            await waitForDaemonStop(directory, timeoutMs)
+          }
+          if (stoppedManaged && previous !== undefined) {
+            await check('launchctl', ['bootstrap', domain, path])
+            if (managedPid > 0) await waitForServiceReady(client, options.readyTimeoutMs ?? 30_000)
+          }
+        } else if (replaced || stoppedManaged) {
+          if (activationAttempted) {
+            await systemctl(enabled ? 'stop' : 'disable', ...(enabled ? [] : ['--now']), unit)
+            await waitForDaemonStop(directory, timeoutMs)
+          }
+          await systemctl('daemon-reload')
+          if (previous !== undefined) {
+            await systemctl(enabled ? 'enable' : 'disable', unit)
+            if (active) {
+              await systemctl('start', unit)
+              await waitForServiceReady(client, options.readyTimeoutMs ?? 30_000)
+            }
+          }
+        }
+        if (stoppedDetached) {
+          // ensureDaemon also takes autostart.lock; release it before restoring the detached process.
+          await release()
+          await client.ensureDaemon()
+        }
+      } catch (rollback) {
+        throw new ServiceError(
+          'service_unavailable',
+          `${error instanceof Error ? error.message : '服务安装失败'}；定义文件已恢复，服务恢复失败：${rollback instanceof Error ? rollback.message : '请检查服务管理器'}`,
+        )
+      }
+      throw error
     }
-    throw error
+  } finally {
+    await release()
   }
   return { installed: true }
 }

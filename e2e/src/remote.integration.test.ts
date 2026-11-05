@@ -316,13 +316,11 @@ test('HTTP → TS center → batond → independent Worker survives reconnects w
     await expect
       .poll(async () => (await alice<P.SessionResult>(`/threads/${threadId}/output`)).body.text)
       .toBe('working:hold\n')
-    // Both owners restart; the independently running Worker and its native input remain unchanged.
-    await stopDaemon()
+    // Center downtime leaves the daemon, Worker and native input running unchanged.
     const workerStatus = await host.request(threadId, { type: 'status', ok: false })
     expect(workerStatus.agent_ready).toBe(true)
     await stopCenter()
     await start()
-    startDaemon()
     await ready()
     expect((await alice<P.SessionResult>(`/threads/${threadId}/output`)).body.text).toBe('working:hold\n')
     expect((await alice(`/threads/${threadId}/stop`, 'POST', {})).status).toBe(202)
@@ -401,12 +399,12 @@ test('HTTP → TS center → batond → independent Worker survives reconnects w
     await stopDaemon()
     for (const threadId of workers) {
       try {
-        const status = await host.request(threadId, { type: 'status', ok: false })
+        const status = await host.request(threadId, { type: 'status', ok: false }, { start: false })
         if (status.pid) process.kill(status.pid, 'SIGTERM')
         await expect
           .poll(async () => {
             try {
-              await host.request(threadId, { type: 'status', ok: false })
+              await host.request(threadId, { type: 'status', ok: false }, { start: false })
               return false
             } catch {
               return true

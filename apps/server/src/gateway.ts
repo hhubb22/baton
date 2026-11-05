@@ -59,7 +59,7 @@ export const checkNodeVersion = (
     daemon_protocol_version: daemon.protocol_version,
     supported_daemon_versions: center.supported_daemon_versions,
     reason,
-    guidance: '业务协议不兼容，请在设备页或使用 batond update 更新设备；更新管理通道仍可使用。',
+    guidance: '业务协议不兼容，请下载与中心匹配的安装包，停止本机守护进程后覆盖安装并重新启动。',
   }
   throw new AppError(
     409,
@@ -290,11 +290,11 @@ export class Gateway {
         } catch (error) {
           if (
             error instanceof AppError &&
-            error.code === 'node_idle_expired' &&
+            error.status === 401 &&
             this.nodes.get(connection.source.node_id) === connection
           ) {
             this.rejectQueuedRPC(connection, error)
-            connection.socket.close(1008, 'node_idle_expired')
+            connection.socket.close(1008, 'credential_revoked')
           }
         }
       }),

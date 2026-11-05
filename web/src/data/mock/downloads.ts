@@ -49,7 +49,6 @@ export function mockDownloads(enabled: boolean, origin: string): DownloadsRespon
     enabled,
     version: 'v0.1.0',
     connect_url: enabled ? `baton://connect?url=${encodeURIComponent(origin)}` : null,
-    ca_sha256: null,
     items: enabled ? items : [],
   }
 }

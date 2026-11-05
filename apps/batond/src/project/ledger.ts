@@ -25,7 +25,10 @@ export const storageBaseline = [
   'CREATE INDEX project_cleanup_due ON project_runtime_runs(cleanup_next_at,run_id) WHERE cleanup_complete=1 AND cleanup_acked=0',
 ] as const
 
-export const makeProjectLedger = Effect.fn('Project.makeProjectLedger')(function* (filename: string) {
+export const makeProjectLedger = Effect.fn('Project.makeProjectLedger')(function* (
+  filename: string,
+  excludedRunIds: ReadonlySet<string> = new Set(),
+) {
   yield* Effect.try({
     try: () => checkStorageFormat(filename, 'project', storageBaseline),
     catch: (error) => error as Error,
@@ -39,8 +42,11 @@ export const makeProjectLedger = Effect.fn('Project.makeProjectLedger')(function
     },
   }).pipe(Effect.provide(Reactivity.layer))
   yield* initializeStorage(sql, 'project', storageBaseline)
+  const excluded = JSON.stringify([...excludedRunIds])
   const get = (id: string) =>
-    sql<RunRow>`SELECT * FROM project_runtime_runs WHERE run_id=${id}`.pipe(Effect.map((r) => r[0]))
+    sql<RunRow>`SELECT * FROM project_runtime_runs WHERE run_id=${id} AND run_id NOT IN (SELECT value FROM json_each(${excluded}))`.pipe(
+      Effect.map((r) => r[0]),
+    )
   const insert = (c: ProjectRunCommand, stopped = false) =>
     sql.withTransaction(
       Effect.gen(function* () {
@@ -59,7 +65,7 @@ export const makeProjectLedger = Effect.fn('Project.makeProjectLedger')(function
     reason=CASE WHEN reason='' THEN 'runtime_exited' ELSE reason END WHERE run_id=${id}`)
   const due = (now: number) =>
     sql<RunRow>`SELECT * FROM project_runtime_runs WHERE cleanup_complete=1 AND cleanup_acked=0
-      AND cleanup_next_at<=${now} ORDER BY cleanup_next_at,run_id LIMIT 1`
+      AND cleanup_next_at<=${now} AND run_id NOT IN (SELECT value FROM json_each(${excluded})) ORDER BY cleanup_next_at,run_id LIMIT 1`
   const claim = Effect.fnUntraced(function* (now: number) {
     if (!(yield* due(now)).length) return
     return yield* sql.withTransaction(
@@ -75,7 +81,7 @@ export const makeProjectLedger = Effect.fn('Project.makeProjectLedger')(function
   })
   const ack = (id: string, epoch: number) =>
     sql.withTransaction(
-      sql`UPDATE project_runtime_runs SET cleanup_acked=1 WHERE run_id=${id} AND lease_epoch=${epoch} AND cleanup_complete=1`,
+      sql`UPDATE project_runtime_runs SET cleanup_acked=1 WHERE run_id=${id} AND lease_epoch=${epoch} AND cleanup_complete=1 AND run_id NOT IN (SELECT value FROM json_each(${excluded}))`,
     )
   const records = {
     add: (record: ProcessRecord) =>
@@ -97,14 +103,18 @@ export const makeProjectLedger = Effect.fn('Project.makeProjectLedger')(function
   }
   return {
     get,
-    pending: () => sql<{ id: string; payload: string }>`SELECT * FROM project_commands ORDER BY rowid`,
+    pending: () =>
+      sql<{
+        id: string
+        payload: string
+      }>`SELECT * FROM project_commands WHERE json_extract(payload,'$.run_id') NOT IN (SELECT value FROM json_each(${excluded})) ORDER BY rowid`,
     enqueue: (id: string, command: ProjectRunCommand) =>
       sql.withTransaction(sql`INSERT OR IGNORE INTO project_commands VALUES(${id},${JSON.stringify(command)})`),
     delivered: (id: string) => sql.withTransaction(sql`DELETE FROM project_commands WHERE id=${id}`),
     occupied: () =>
       sql<{
         count: number
-      }>`SELECT count(*) AS count FROM project_runtime_runs WHERE cleanup_complete=0 AND state!='queued'`.pipe(
+      }>`SELECT count(*) AS count FROM project_runtime_runs WHERE cleanup_complete=0 AND state!='queued' AND run_id NOT IN (SELECT value FROM json_each(${excluded}))`.pipe(
         Effect.map((rows) => rows[0]?.count ?? 0),
       ),
     insert,
@@ -114,7 +124,9 @@ export const makeProjectLedger = Effect.fn('Project.makeProjectLedger')(function
     ack,
     records,
     processes: () =>
-      sql<{ payload: string }>`SELECT payload FROM project_processes`.pipe(
+      sql<{
+        payload: string
+      }>`SELECT payload FROM project_processes WHERE role NOT IN (SELECT value FROM json_each(${excluded}))`.pipe(
         Effect.map((rows) => rows.map((r) => JSON.parse(r.payload) as ProcessRecord)),
       ),
   }

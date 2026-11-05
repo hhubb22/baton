@@ -1,6 +1,7 @@
 import * as stylex from '@stylexjs/stylex'
 import { createRootRoute, createRoute, createRouter, Outlet } from '@tanstack/react-router'
 import { ArchivedProjectsPage } from '../pages/ArchivedProjectsPage'
+import { DeviceLoginPage } from '../pages/DeviceLoginPage'
 import { DevicesPage } from '../pages/DevicesPage'
 import { HomePage } from '../pages/HomePage'
 import { LoginPage } from '../pages/LoginPage'
@@ -101,6 +102,12 @@ const workspaceRoute = createRoute({ getParentRoute: () => rootRoute, id: 'works
 const routeTree = rootRoute.addChildren([
   loginRoute,
   passwordRoute,
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/device-login',
+    component: DeviceLoginPage,
+    validateSearch: (search: Record<string, unknown>): { code?: string } => ({ code: optionalString(search.code) }),
+  }),
   workspaceRoute.addChildren([
     createRoute({ getParentRoute: () => workspaceRoute, path: '/', component: HomePage }),
     createRoute({

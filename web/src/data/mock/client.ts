@@ -1,7 +1,9 @@
+import type { DeviceLoginSession } from '@baton/protocol'
 import type { BatonClient, ChangeEvent } from '../client'
 import { ClientError } from '../client'
 import type { DeviceConnection, DeviceOS, Enrollment, ID, SessionEnd } from '../types'
 import type { ScenarioId } from './scenarios'
+import { HttpError } from '../http/transport'
 import { mockDownloads } from './downloads'
 import { realScheduler, type Scheduler } from './scheduler'
 import { browserLatency, MockStore, type Latency } from './store'
@@ -16,6 +18,7 @@ export interface MockControls {
   // 关闭后所有请求都按连不上 Baton 失败，用来演示网络中断。
   readonly reachable: boolean
   setReachable(reachable: boolean): void
+  setDeviceLoginState(state: 'pending' | 'expired' | 'approved' | 'denied'): void
   // 最近一个有效的设置码；没有时为 null。下面三个操作都作用于它。
   readonly pendingEnrollment: { id: ID } | null
   connectEnrollment(name: string, os: DeviceOS): void
@@ -39,6 +42,21 @@ export function createMockClient(
   const latency = options.latency ?? browserLatency
   const store = new MockStore(scenario, scheduler, latency)
   let reachable = true
+  let deviceLoginState: 'pending' | 'expired' | 'approved' | 'denied' = 'pending'
+  let deviceLoginExpiresAt = scheduler.now() + 600_000
+  const deviceLoginSession = (): DeviceLoginSession => ({
+    session_id: 'device-login-session',
+    user_code: 'ABCD-EFGH',
+    display_name: 'Build server',
+    system: 'linux',
+    expires_at: new Date(deviceLoginExpiresAt).toISOString(),
+  })
+  function pendingDeviceLogin() {
+    if (deviceLoginState === 'expired' || scheduler.now() >= deviceLoginExpiresAt)
+      throw new HttpError(410, { code: 'device_login_expired' })
+    if (deviceLoginState === 'approved' || deviceLoginState === 'denied')
+      throw new HttpError(409, { code: 'device_login_handled' })
+  }
 
   function enrollmentView(record: EnrollmentRecord): Enrollment {
     return {
@@ -82,7 +100,14 @@ export function createMockClient(
       get scenario() {
         return store.scenario
       },
-      reset: (next) => store.reset(next),
+      reset: (next) => {
+        store.reset(next)
+        deviceLoginState = 'pending'
+        deviceLoginExpiresAt = scheduler.now() + 600_000
+      },
+      setDeviceLoginState: (next) => {
+        deviceLoginState = next
+      },
       setDeviceConnection: (deviceId, connection) => store.setDeviceConnection(deviceId, connection),
       endSession: (reason) => store.endSession(reason),
       get reachable() {
@@ -102,6 +127,35 @@ export function createMockClient(
     },
 
     getDownloads: () => read(() => mockDownloads(store.scenario === 'downloads', mockCoordinatorUrl)),
+    getDeviceLoginSession: (userCode) =>
+      guarded(() => {
+        if (
+          userCode.trim().replaceAll('-', '').toUpperCase() !== 'ABCDEFGH' ||
+          deviceLoginState === 'approved' ||
+          deviceLoginState === 'denied'
+        )
+          throw new HttpError(404, { code: 'device_login_not_found' })
+        pendingDeviceLogin()
+        return deviceLoginSession()
+      }),
+    async approveDeviceLoginSession(sessionId, userCode) {
+      await connect(latency.save)
+      signedIn()
+      if (sessionId !== deviceLoginSession().session_id || userCode !== deviceLoginSession().user_code)
+        throw new HttpError(404, { code: 'device_login_not_found' })
+      if (deviceLoginState === 'approved') return
+      pendingDeviceLogin()
+      deviceLoginState = 'approved'
+      store.approveDeviceLogin(deviceLoginSession().display_name, 'Linux')
+    },
+    async denyDeviceLoginSession(sessionId) {
+      await connect(latency.save)
+      signedIn()
+      if (sessionId !== deviceLoginSession().session_id) throw new HttpError(404, { code: 'device_login_not_found' })
+      if (deviceLoginState === 'denied') return
+      pendingDeviceLogin()
+      deviceLoginState = 'denied'
+    },
     getSession: () => read(() => store.snapshot().session),
     async signIn(username, password) {
       await connect(latency.save)

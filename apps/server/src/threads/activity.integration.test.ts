@@ -15,7 +15,7 @@ const credential = (run: Run, id: string) =>
 const reset = async (run: Run, id: string) => {
   await run(
     query(
-      "UPDATE node_credentials SET expires_at=clock_timestamp()+interval '1 day',last_business_at=clock_timestamp()-interval '29 days' WHERE id=$1",
+      "UPDATE node_credentials SET expires_at=NULL,last_business_at=clock_timestamp()-interval '29 days' WHERE id=$1",
       id,
     ),
   )
@@ -69,7 +69,7 @@ async function fixture(run: Run) {
   return { ...node, input, thread, command: command!, receipt, report }
 }
 
-it('renews only the first successful receipt and new valid reports on the source device', () =>
+it('records business activity only for the first successful receipt and new valid reports on the source device', () =>
   withTestDatabase(async ({ run }) => {
     const f = await fixture(run)
     const other = await seedNode(run, { employeeId: f.employeeId })
@@ -94,20 +94,15 @@ it('renews only the first successful receipt and new valid reports on the source
     expect(await credential(run, other.credentialId)).toEqual(otherBefore)
   }))
 
-it('does not renew rejected commands or dispatch or accept work with an expired credential', () =>
+it('does not record rejected commands or dispatch or accept work with a revoked credential', () =>
   withTestDatabase(async ({ run }) => {
     const f = await fixture(run)
     const before = await reset(run, f.credentialId)
     await run(threads.processReceipt(f.source, f.command.message_id, { ...f.receipt, ok: false, code: 'unsupported' }))
     expect(await credential(run, f.credentialId)).toEqual(before)
     const g = await fixture(run)
-    await run(
-      query(
-        "UPDATE node_credentials SET created_at=clock_timestamp()-interval '31 days',last_business_at=clock_timestamp()-interval '31 days',expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",
-        g.credentialId,
-      ),
-    )
-    const expired = await credential(run, g.credentialId)
+    await run(query('UPDATE node_credentials SET revoked_at=clock_timestamp() WHERE id=$1', g.credentialId))
+    const revoked = await credential(run, g.credentialId)
     const attempts = await run(query('SELECT attempts FROM thread_outbox WHERE thread_id=$1', g.thread.id))
     await run(
       query(
@@ -118,12 +113,12 @@ it('does not renew rejected commands or dispatch or accept work with an expired 
     expect(await run(threads.claimCommands())).toEqual([])
     expect(await run(query('SELECT attempts FROM thread_outbox WHERE thread_id=$1', g.thread.id))).toEqual(attempts)
     await expect(run(threads.processReceipt(g.source, g.command.message_id, g.receipt))).rejects.toMatchObject({
-      code: 'node_idle_expired',
+      code: 'node_source_rejected',
     })
     await expect(run(threads.processReport(g.source, g.report('thread.opened')))).rejects.toMatchObject({
-      code: 'node_idle_expired',
+      code: 'node_source_rejected',
     })
-    expect(await credential(run, g.credentialId)).toEqual(expired)
+    expect(await credential(run, g.credentialId)).toEqual(revoked)
   }))
 
 it('requires a fresh connection-bound Worker status challenge for a long turn', () =>

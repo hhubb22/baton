@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import type WebSocket from 'ws'
 import type { Envelope, Frame, ThreadReport, RuntimeAgent, WorkerRequest, WorkerIPCMessage } from '@baton/protocol'
 import { IPCError } from './ipc.ts'
+import { ControlClient } from './control-client.ts'
 import { webSocketText } from './transport.ts'
 import type { DaemonWorkerHost } from './host.ts'
 import { setupDaemon } from '../testing/daemon.ts'
@@ -20,7 +21,6 @@ import { acquireProcessLock } from '../platform/lock.ts'
 import { DeploymentInvalid } from './deployment.ts'
 import { NeedsReauthentication } from './daemon.ts'
 import { startTelemetryRelay } from './telemetry-relay.ts'
-import { requestUpgrade } from './upgrade.ts'
 
 vi.mock('../project/index.ts', () => ({
   makeProjectManager: () => {
@@ -919,7 +919,7 @@ it.each(['unavailable', undefined, 'incarnation_conflict'])(
   },
 )
 
-it('retains upgrade management, local commands and unsent reports after protocol rejection', async () => {
+it('retains local control and durable reports after terminal protocol rejection', async () => {
   const { path, wss, start } = await setup()
   const threadId = randomUUID(),
     commandId = randomUUID(),
@@ -1005,8 +1005,14 @@ it('retains upgrade management, local commands and unsent reports after protocol
     expect(frame).toMatchObject({ kind: 'auth', daemon_version: 'development', protocol_version: 1 })
   expect(snapshot()).toEqual(before)
   expect(daemon.failure()).toBeUndefined()
-  expect(await requestUpgrade(path, 'upgrade_status')).toMatchObject({ state: null })
-  await daemon.stop()
+  const controlClient = new ControlClient(path)
+  expect(await controlClient.request({ method: 'status' }, { autostart: false })).toMatchObject({
+    state: 'rejected',
+    rejection: { code: 'node_version_incompatible' },
+  })
+  expect(connections).toBe(1)
+  expect(await controlClient.shutdown()).toEqual({ ok: true })
+  await daemon.running
 })
 
 it.each(['invalid_node_credential', 'node_source_rejected', 'credential_revoked'])(
@@ -1022,20 +1028,29 @@ it.each(['invalid_node_credential', 'node_source_rejected', 'credential_revoked'
       })
     })
     const daemon = start()
-    await daemon.running
-    expect(daemon.failure()).toBeDefined()
-    expect(String(daemon.failure())).toContain('需要重新认证')
+    const controlClient = new ControlClient(path)
+    await vi.waitFor(
+      async () =>
+        expect(await controlClient.request({ method: 'status' }, { autostart: false })).toMatchObject({
+          state: 'rejected',
+          rejection: { code },
+        }),
+      { timeout: 5000 },
+    )
+    expect(daemon.failure()).toBeUndefined()
     expect(connections).toBe(1)
     const status = await readFile(join(path, 'daemon-status.json'), 'utf8')
-    expect(JSON.parse(status)).toMatchObject({ pid: process.pid, state: 'rejected', code: 'needs_reauth' })
+    expect(JSON.parse(status)).toMatchObject({ pid: process.pid, state: 'rejected', code })
     expect(status).not.toContain(id.credential.token)
+    expect(await controlClient.shutdown()).toEqual({ ok: true })
+    await daemon.running
   },
 )
 
 it.each(['invalid_node_credential', 'node_source_rejected', 'credential_revoked'])(
   'stops reconnecting for terminal error %s',
   async (code) => {
-    const { wss, start } = await setup()
+    const { path, wss, start } = await setup()
     let connections = 0
     wss.on('connection', (socket) => {
       connections++
@@ -1045,10 +1060,19 @@ it.each(['invalid_node_credential', 'node_source_rejected', 'credential_revoked'
       })
     })
     const daemon = start()
-    await daemon.running
-    expect(daemon.failure()).toBeDefined()
-    expect(String(daemon.failure())).toContain('需要重新认证')
+    const controlClient = new ControlClient(path)
+    await vi.waitFor(
+      async () =>
+        expect(await controlClient.request({ method: 'status' }, { autostart: false })).toMatchObject({
+          state: 'rejected',
+          rejection: { code },
+        }),
+      { timeout: 5000 },
+    )
+    expect(daemon.failure()).toBeUndefined()
     expect(connections).toBe(1)
+    expect(await controlClient.shutdown()).toEqual({ ok: true })
+    await daemon.running
   },
 )
 
@@ -1068,7 +1092,7 @@ it('reports connecting, online, reconnecting and stopping while retaining the da
   await vi.waitFor(() => expect(sockets).toHaveLength(1))
   expect(await status()).toMatchObject({ pid: process.pid, state: 'connecting' })
   sockets[0]!.send(JSON.stringify({ kind: 'auth_result', ok: true }))
-  await vi.waitFor(async () => expect((await status()).state).toBe('online'))
+  await vi.waitFor(async () => expect((await status()).state).toBe('syncing'))
   expect(Number.isNaN(Date.parse((await status()).updated_at))).toBe(false)
   const second = start()
   await second.running
@@ -1078,7 +1102,7 @@ it('reports connecting, online, reconnecting and stopping while retaining the da
     reportBatondError(second.failure(), 'run')
     expect(JSON.parse(String(output.mock.calls[0]?.[0]))).toMatchObject({ code: 'daemon_running' })
     expect(process.exitCode).toBe(1)
-    expect((await status()).state).toBe('online')
+    expect((await status()).state).toBe('syncing')
   } finally {
     output.mockRestore()
     process.exitCode = previousExit
@@ -1101,7 +1125,7 @@ it('maps daemon lock contention and deployment/authentication failures to public
   try {
     for (const [error, code, exit] of [
       [daemon.failure(), 'daemon_running', 1],
-      [new NeedsReauthentication(), 'needs_reauth', 78],
+      [new NeedsReauthentication(), 'credential_revoked', 1],
       [new DeploymentInvalid(), 'deployment_invalid', 1],
     ] as const) {
       reportBatondError(error, 'run')

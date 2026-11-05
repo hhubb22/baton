@@ -87,14 +87,14 @@ describe('authenticated device management confirmation', () => {
     ).toEqual({ connection })
   })
   it.each(['files', 'roots-read', 'roots-set', 'login', 'exec'] as const)(
-    'renews the original credential only after a confirmed %s response',
+    'records business only after a confirmed %s response',
     async (kind) => {
       const { identity, source } = await node()
       const sqlRun = <A, E>(query: (sql: SqlClient.SqlClient) => Effect.Effect<A, E>) =>
         run(Effect.flatMap(SqlClient.SqlClient, query))
       await sqlRun(
         (sql) =>
-          sql`UPDATE node_credentials SET last_business_at=clock_timestamp()-interval '1 day',expires_at=clock_timestamp()+interval '1 day' WHERE id=${source.credential_id}`,
+          sql`UPDATE node_credentials SET last_business_at=clock_timestamp()-interval '1 day' WHERE id=${source.credential_id}`,
       )
       const transport = gateway(async (body) => ({
         type:
@@ -135,13 +135,13 @@ describe('authenticated device management confirmation', () => {
         (sql) =>
           sql<{
             renewed: boolean
-          }>`SELECT last_business_at>clock_timestamp()-interval '1 minute' AND expires_at>clock_timestamp()+interval '29 days' AS renewed FROM node_credentials WHERE id=${source.credential_id}`,
+          }>`SELECT last_business_at>clock_timestamp()-interval '1 minute' AND expires_at IS NULL AS renewed FROM node_credentials WHERE id=${source.credential_id}`,
       )
       expect(state.renewed).toBe(true)
     },
   )
 
-  it('does not renew failed or malformed responses, expired replies, or replies from a replaced connection', async () => {
+  it('rejects failed or malformed responses, revoked replies, and replies from a replaced connection', async () => {
     const { identity, source } = await node()
     const sqlRun = <A, E>(query: (sql: SqlClient.SqlClient) => Effect.Effect<A, E>) =>
       run(Effect.flatMap(SqlClient.SqlClient, query))
@@ -187,10 +187,9 @@ describe('authenticated device management confirmation', () => {
         sql<{ value: string }>`SELECT expires_at::text AS value FROM node_credentials WHERE id=${source.credential_id}`,
     )
     expect(after.value).toBe(before.value)
-    const expired = gateway(async (body) => {
+    const revoked = gateway(async (body) => {
       await sqlRun(
-        (sql) =>
-          sql`UPDATE node_credentials SET expires_at=clock_timestamp()-interval '1 second' WHERE id=${source.credential_id}`,
+        (sql) => sql`UPDATE node_credentials SET revoked_at=clock_timestamp() WHERE id=${source.credential_id}`,
       )
       return {
         type: 'node.project_exec_result',
@@ -199,16 +198,16 @@ describe('authenticated device management confirmation', () => {
         exec: { enabled: true, shell: '/bin/sh' },
       }
     })
-    await expect(run(Devices.setProjectExec(alice.id, identity.node_id, true, expired))).rejects.toMatchObject({
-      code: 'node_idle_expired',
+    await expect(run(Devices.setProjectExec(alice.id, identity.node_id, true, revoked))).rejects.toMatchObject({
+      code: 'forbidden',
     })
     const [state] = await sqlRun(
       (sql) =>
         sql<{
-          expired: boolean
-        }>`SELECT expires_at<=clock_timestamp() AS expired FROM node_credentials WHERE id=${source.credential_id}`,
+          revoked: boolean
+        }>`SELECT revoked_at IS NOT NULL AS revoked FROM node_credentials WHERE id=${source.credential_id}`,
     )
-    expect(state.expired).toBe(true)
+    expect(state.revoked).toBe(true)
   })
   it('rejects employee isolation violations and offline nodes before dispatch', async () => {
     const { identity, source } = await node()

@@ -1298,13 +1298,13 @@ it('skips locked outbox and Thread rows without starving another device', () =>
     }
   }))
 
-it('rechecks credential expiry after waiting for the Thread lock and commits no partial report', () =>
+it('commits a report with long-lived credentials after waiting for the Thread lock', () =>
   withTestDatabase(async ({ run }) => {
     const f = await fixture(run)
     const t = await open(run, f)
     await run(
       query(
-        "UPDATE node_credentials SET expires_at=clock_timestamp()+interval '500 milliseconds' WHERE id=$1",
+        "UPDATE node_credentials SET created_at=clock_timestamp()-interval '366 days',last_business_at=clock_timestamp()-interval '366 days',expires_at=NULL WHERE id=$1",
         f.credential,
       ),
     )
@@ -1349,49 +1349,52 @@ it('rechecks credential expiry after waiting for the Thread lock and commits no 
         await new Promise((resolve) => setTimeout(resolve, 5))
       }
       expect(waiting).toBe(true)
-      await run(
-        query(
-          'SELECT pg_sleep(GREATEST(0,extract(epoch FROM expires_at-clock_timestamp()))+0.02) FROM node_credentials WHERE id=$1',
-          f.credential,
-        ),
-      )
+      expect(
+        (
+          await run(
+            query<{ last_worker_seq: string }>(
+              'SELECT last_worker_seq::text AS last_worker_seq FROM threads WHERE id=$1',
+              t.id,
+            ),
+          )
+        )[0]?.last_worker_seq,
+      ).toBe('2')
     } finally {
       await release()
     }
-    expect((await saving).error).toMatchObject({ status: 401 })
+    expect((await saving).error).toBeUndefined()
     const view = await run(threads.view({ employeeId: f.employee }, t.id))
-    expect(view.status).toBe('idle')
-    expect(view.last_worker_seq).toBe(2)
+    expect(view.status).toBe('stopped')
+    expect(view.last_worker_seq).toBe(3)
     expect(
       (await run(query<{ n: string }>("SELECT count(*)::text AS n FROM thread_events WHERE kind='thread.stopped'")))[0]!
         .n,
-    ).toBe('0')
+    ).toBe('1')
   }))
 
-it('rejects revoked or expired source before committing business reports', () =>
+it.each(['credential', 'node'] as const)('rejects a revoked %s before committing business reports', (kind) =>
   withTestDatabase(async ({ run }) => {
     const f = await fixture(run)
     const t = await open(run, f)
     await run(
       query(
-        "UPDATE node_credentials SET expires_at=clock_timestamp()-interval '1 second',created_at=clock_timestamp()-interval '1 day' WHERE id=$1",
-        f.credential,
+        kind === 'credential'
+          ? 'UPDATE node_credentials SET revoked_at=clock_timestamp() WHERE id=$1'
+          : 'UPDATE nodes SET revoked_at=clock_timestamp() WHERE id=$1',
+        kind === 'credential' ? f.credential : f.node,
       ),
     )
     await expect(run(threads.processReport(f.source, report(t.id, 3, 'thread.stopped')))).rejects.toMatchObject({
       status: 401,
+      code: 'node_source_rejected',
     })
     expect((await run(threads.view({ employeeId: f.employee }, t.id))).last_worker_seq).toBe(2)
-    await run(
-      query(
-        "UPDATE node_credentials SET expires_at=clock_timestamp()+interval '1 day',revoked_at=clock_timestamp() WHERE id=$1",
-        f.credential,
-      ),
-    )
-    await expect(run(threads.processReport(f.source, report(t.id, 3, 'thread.stopped')))).rejects.toMatchObject({
-      status: 401,
-    })
-  }))
+    expect(
+      (await run(query<{ n: string }>("SELECT count(*)::text AS n FROM thread_events WHERE kind='thread.stopped'")))[0]!
+        .n,
+    ).toBe('0')
+  }),
+)
 
 it('paginates conversations', () =>
   withTestDatabase(async ({ run }) => {

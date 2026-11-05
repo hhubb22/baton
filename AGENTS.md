@@ -7,7 +7,7 @@ Baton 是跨设备 AI Agent 协同系统，由 TypeScript 中心服务（`apps/s
 | 目录 / 模块 | 职责 |
 |---|---|
 | `apps/server` | 员工认证、设备、Thread、Project、事项和记忆，PostgreSQL 事务、持久命令与报告、Gateway（`/v1/node` 与 `/api/v1/events`）和网页静态服务；见 `apps/server/README.md` |
-| `apps/batond` | 注册和 WSS、设备 SQLite 账本、认证 IPC、Worker 管理、Agent 探测、文件浏览、Project Runtime 宿主和订阅登录；见 `apps/batond/README.md` |
+| `apps/batond` | 设备码登录与 WSS、本地控制通道与按需拉起、设备 SQLite 账本、Worker 管理、Agent 探测、文件浏览、Project Runtime 宿主和订阅登录；见 `apps/batond/README.md` |
 | `apps/desktop` | Electron 桌面客户端、接入链接与中心证书校验、受限网页桥接、batond 监管、托盘与登录启动；见 `apps/desktop/README.md` |
 | `apps/batond/src/worker` | Thread 消息队列、命令回执、intent、Turn、回复、outbox 与恢复 |
 | `apps/batond/src/agent-host`、`src/agents` | t3code provider 宿主、事件映射与受限 shell；六个 Agent 在程序或 SDK 已安装且认证未明确缺失时开放新建与恢复，版本和系统不设白名单 |

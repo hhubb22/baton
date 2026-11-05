@@ -8,7 +8,7 @@ import { contextualRuntimeRequest } from '../testing/project-context.ts'
 import * as projects from './projects.ts'
 import { scheduleMemoryJobs } from './memory-jobs.ts'
 
-it('renews new foreground claims, first successful tools and live leases, excluding duplicates, failures and memory work', () =>
+it('records new foreground claims, first successful tools and live activity, excluding duplicates, failures and memory work', () =>
   withTestDatabase(async ({ run }) => {
     const node = await seedNode(run, {
       report: {
@@ -51,7 +51,7 @@ it('renews new foreground claims, first successful tools and live leases, exclud
         Effect.flatMap(
           SqlClient.SqlClient,
           (sql) =>
-            sql`UPDATE node_credentials SET expires_at=clock_timestamp()+interval '1 day',last_business_at=clock_timestamp()-interval '29 days' WHERE id=${node.credentialId}`,
+            sql`UPDATE node_credentials SET expires_at=NULL,last_business_at=clock_timestamp()-interval '29 days' WHERE id=${node.credentialId}`,
         ),
       )
       return state()

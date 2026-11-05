@@ -34,10 +34,6 @@ export interface NodeClaims {
   readonly credential_version?: number
 }
 
-export const NODE_IDLE_TTL_SECONDS = 30 * 24 * 60 * 60
-const idleExpired = () =>
-  new AppError(401, 'node_idle_expired', '设备已闲置 30 天，请为原设备领取凭据并执行 batond reauth')
-
 export interface RegisterInput {
   readonly enrollment_token: string
   readonly display_name: string
@@ -56,7 +52,7 @@ export interface NodeIdentity extends SyncInput {
     readonly id: string
     readonly version: number
     readonly token: string
-    readonly expires_at: string
+    readonly expires_at: string | null
   }
   readonly signing_public_key: string
 }
@@ -357,7 +353,7 @@ export const reauthenticateNode = (
           yield* sql`UPDATE node_credentials SET revoked_at=clock_timestamp() WHERE id=${current.id}::uuid`
           yield* sql`UPDATE nodes SET credential_version=credential_version+1 WHERE id=${nodeId}::uuid`
           yield* sql`INSERT INTO node_credentials(id,node_id,employee_id,version,created_at,last_business_at,expires_at)
-          SELECT e.issued_credential_id,n.id,n.employee_id,n.credential_version,e.used_at,e.used_at,e.used_at+${NODE_IDLE_TTL_SECONDS}*interval '1 second' FROM nodes n JOIN node_enrollments e ON e.id=${enrollment.id}::uuid WHERE n.id=${nodeId}::uuid`
+          SELECT e.issued_credential_id,n.id,n.employee_id,n.credential_version,e.used_at,e.used_at,NULL FROM nodes n JOIN node_enrollments e ON e.id=${enrollment.id}::uuid WHERE n.id=${nodeId}::uuid`
           yield* sql`UPDATE node_presence SET online=false,synced=false WHERE node_id=${nodeId}::uuid`
         }
         const [credential] = yield* sql<{
@@ -386,7 +382,7 @@ export const reauthenticateNode = (
             id: credential.id,
             version: credential.version,
             token,
-            expires_at: new Date(credential.created_at.getTime() + NODE_IDLE_TTL_SECONDS * 1000).toISOString(),
+            expires_at: null,
           },
           signing_public_key: signer.signingPublicKey,
         }
@@ -464,12 +460,8 @@ export const registerNode = (input: RegisterInput, signer: CredentialSigner): Da
         VALUES (${nodeId}::uuid, ${employeeId}::uuid, ${input.display_name}, ${input.system},
           ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(input.capabilities ?? [])}::jsonb)), nextval('node_registration_seq'), now(), 1)
         RETURNING registration_seq::float8, registered_at`
-        const credentials = yield* sql<{
-          expires_at: Date
-        }>`INSERT INTO node_credentials (id, node_id, employee_id, version, created_at, expires_at)
-        VALUES (${credentialId}::uuid, ${nodeId}::uuid, ${employeeId}::uuid, 1, now(),
-          clock_timestamp()+${NODE_IDLE_TTL_SECONDS}*interval '1 second') RETURNING expires_at`
-        const expiresAt = credentials[0].expires_at.toISOString()
+        yield* sql`INSERT INTO node_credentials (id, node_id, employee_id, version, created_at, expires_at)
+        VALUES (${credentialId}::uuid, ${nodeId}::uuid, ${employeeId}::uuid, 1, now(), NULL)`
         const token = yield* Effect.try({
           try: () =>
             signer.sign({
@@ -492,7 +484,7 @@ export const registerNode = (input: RegisterInput, signer: CredentialSigner): Da
           role: 'pc' as const,
           registration_seq: nodes[0].registration_seq,
           registered_at: nodes[0].registered_at.toISOString(),
-          credential: { id: credentialId, version: 1, token, expires_at: expiresAt },
+          credential: { id: credentialId, version: 1, token, expires_at: null },
           signing_public_key: signer.signingPublicKey,
         }
       }),
@@ -504,12 +496,15 @@ export const authenticateNode = (token: string, signer: CredentialSigner): Datab
     const sql = yield* SqlClient.SqlClient
     const claims = yield* Effect.try({ try: () => signer.verify(token), catch: dbError })
     const rows = yield* sql<{
-      expired: boolean
-    }>`SELECT c.expires_at<=clock_timestamp() AS expired FROM nodes n JOIN node_credentials c ON c.node_id=n.id AND c.employee_id=n.employee_id
+      revoked: boolean
+    }>`SELECT n.revoked_at IS NOT NULL OR c.revoked_at IS NOT NULL OR c.version<>n.credential_version OR c.version<>${claims.credential_version ?? 1} AS revoked FROM nodes n JOIN node_credentials c ON c.node_id=n.id AND c.employee_id=n.employee_id
     WHERE n.id=${claims.node_id}::uuid AND n.employee_id=${claims.employee_id}::uuid AND c.id=${claims.credential_id}::uuid
-      AND c.version=n.credential_version AND n.revoked_at IS NULL AND c.revoked_at IS NULL`
+    `
     if (!rows[0]) return yield* Effect.fail(new AppError(401, 'invalid_node_credential', '设备连接凭据无效'))
-    if (rows[0].expired) return yield* Effect.fail(idleExpired())
+    if (rows[0].revoked)
+      return yield* Effect.fail(
+        new AppError(401, 'credential_revoked', '设备连接凭据已吊销，请先解除本机绑定后重新登录'),
+      )
     return claims
   }).pipe(Effect.mapError(dbError))
 
@@ -537,27 +532,22 @@ export const lockNodeSource = (source: NodeSource, requireSynced = true): Databa
 export const revalidateNodeSource = (source: NodeSource, requireSynced = true): DatabaseEffect<void> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const rows = yield* sql<{
-      expired: boolean
-    }>`SELECT c.expires_at<=clock_timestamp() AS expired FROM nodes n JOIN node_credentials c ON c.node_id=n.id AND c.employee_id=n.employee_id
+    const rows =
+      yield* sql`SELECT c.id FROM nodes n JOIN node_credentials c ON c.node_id=n.id AND c.employee_id=n.employee_id
     JOIN node_presence p ON p.node_id=n.id AND p.employee_id=n.employee_id
     WHERE n.id=${source.node_id}::uuid AND n.employee_id=${source.employee_id}::uuid AND n.revoked_at IS NULL
       AND c.id=${source.credential_id}::uuid AND c.version=n.credential_version AND c.revoked_at IS NULL
       AND p.conn_id=${source.conn_id} AND p.incarnation=${source.incarnation} AND p.online AND (NOT ${requireSynced} OR p.synced)`
     if (!rows[0]) return yield* Effect.fail(rejectedSource())
-    if (rows[0].expired) return yield* Effect.fail(idleExpired())
   }).pipe(Effect.mapError(dbError))
 
-/** 首次有效业务与续期由调用方在同一事务保存，来源已持有 Node、Credential 写锁。 */
+/** 有效业务由调用方在同一事务保存，来源已持有 Node、Credential 写锁。 */
 export const recordNodeBusiness = (source: NodeSource): DatabaseEffect<void> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     yield* revalidateNodeSource(source)
-    const rows = yield* sql`UPDATE node_credentials SET
-      last_business_at=GREATEST(last_business_at,clock_timestamp()),
-      expires_at=GREATEST(expires_at,clock_timestamp()+${NODE_IDLE_TTL_SECONDS}*interval '1 second')
-      WHERE id=${source.credential_id}::uuid AND expires_at>clock_timestamp() RETURNING id`
-    if (!rows.length) return yield* Effect.fail(idleExpired())
+    yield* sql`UPDATE node_credentials SET last_business_at=GREATEST(last_business_at,clock_timestamp())
+      WHERE id=${source.credential_id}::uuid`
   }).pipe(Effect.mapError(dbError))
 
 export const claimConnection = (source: NodeSource): DatabaseEffect<void> =>
@@ -753,8 +743,7 @@ type NodeRow = {
   registration_seq: number
   registered_at: Date
   revoked: boolean
-  expired: boolean
-  idle_expires_at: Date
+  credential_revoked: boolean
   online: boolean
   synced: boolean
   last_contact_at: Date | null
@@ -776,8 +765,7 @@ const nodeRows = (employeeId: string, nodeId?: string): DatabaseEffect<readonly 
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     return yield* sql<NodeRow>`SELECT n.id::text, n.display_name, n.system_name AS system, n.capabilities,
-    n.registration_seq::float8, n.registered_at, n.revoked_at IS NOT NULL AS revoked,
-    c.expires_at<=clock_timestamp() AS expired,c.expires_at AS idle_expires_at,
+    n.registration_seq::float8, n.registered_at, n.revoked_at IS NOT NULL AS revoked,c.revoked_at IS NOT NULL AS credential_revoked,
     (SELECT jsonb_build_object('operation_id',u.operation_id,'source_version',u.source_version,'target_version',u.target_version,'phase',u.phase) FROM node_upgrades u WHERE u.node_id=n.id ORDER BY u.id DESC LIMIT 1) AS upgrade_state,
     (SELECT jsonb_build_object('operation_id',u.operation_id,'attempt',u.attempt,'phase',u.phase,'reason',u.reason,'created_at',u.created_at,'management_last_seen',u.management_last_seen) FROM node_update_requests u WHERE u.node_id=n.id ORDER BY u.created_at DESC LIMIT 1) AS update_request,
     (SELECT last_seen FROM node_update_management m WHERE m.node_id=n.id) AS update_management_last_seen,
@@ -822,7 +810,7 @@ const nodeFrom = (row: NodeRow): Record<string, unknown> => ({
     row.online &&
     row.synced &&
     !row.revoked &&
-    !row.expired &&
+    !row.credential_revoked &&
     (!row.upgrade_state || ['completed', 'cancelled'].includes(row.upgrade_state.phase)),
   upgrade_state: row.upgrade_state,
   ...(row.update_management_last_seen
@@ -832,8 +820,8 @@ const nodeFrom = (row: NodeRow): Record<string, unknown> => ({
   update_request: row.update_request
     ? Object.fromEntries(Object.entries(row.update_request).filter(([, value]) => value !== null))
     : null,
-  credential_state: row.revoked ? 'revoked' : row.expired ? 'idle_expired' : 'active',
-  idle_expires_at: timestamp(row.idle_expires_at),
+  credential_state: row.revoked || row.credential_revoked ? 'revoked' : 'active',
+  idle_expires_at: null,
   last_contact_at: timestamp(row.last_contact_at),
   status_updated_at: timestamp(row.status_updated_at),
   runtime_report: row.runtime_report,

@@ -1,5 +1,5 @@
 import type { DownloadsResponse } from '@baton/protocol/http-api'
-import type { ActivitySnapshot, BrowserEvent } from '@baton/protocol'
+import type { ActivitySnapshot, BrowserEvent, DeviceLoginSession } from '@baton/protocol'
 import { ClientError, type BatonClient, type ChangeEvent, type NotificationReplay, type Topic } from '../client'
 import type { AgentKind, Device, Enrollment, Operation, OperationPhase, Session } from '../types'
 import type { HttpContext } from './context'
@@ -58,7 +58,6 @@ interface NodeDTO {
   synced: boolean
   revocation_status: string
   credential_state?: Device['credentialState']
-  idle_expires_at?: string
   last_contact_at?: string
   registered_at?: string
   batond_version?: string
@@ -144,7 +143,6 @@ export function mapDevice(node: NodeDTO): Device {
         }
       : null,
     credentialState: node.credential_state,
-    idleExpiresAt: node.idle_expires_at === undefined ? undefined : timestamp(node.idle_expires_at),
     lastSeenAt: timestamp(node.last_contact_at ?? node.registered_at),
     registeredAt: timestamp(node.registered_at),
     agents: (report?.agents ?? [])
@@ -428,6 +426,17 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
   return {
     mode: 'http',
     getDownloads: () => request<DownloadsResponse>('/downloads'),
+    getDeviceLoginSession: (userCode) =>
+      request<DeviceLoginSession>(`/device-auth/sessions/by-code/${apiPath(userCode)}`),
+    async approveDeviceLoginSession(sessionId, userCode) {
+      await request(`/device-auth/sessions/${apiPath(sessionId)}/approve`, {
+        method: 'POST',
+        body: JSON.stringify({ user_code: userCode }),
+      })
+      emit('devices', 'session')
+    },
+    denyDeviceLoginSession: (sessionId) =>
+      request<void>(`/device-auth/sessions/${apiPath(sessionId)}/deny`, { method: 'POST' }),
     getActivity: () => request<ActivitySnapshot>('/activity'),
     replayNotifications: (after) =>
       request<NotificationReplay>(

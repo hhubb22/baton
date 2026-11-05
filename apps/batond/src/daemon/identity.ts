@@ -7,6 +7,7 @@ import { Schema } from 'effect'
 import { NodeIdentity, ReauthNodeInput, RegisterNodeInput } from '@baton/protocol'
 import { ensurePrivateDirectory, readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
 import { acquireProcessLock } from '../platform/lock.ts'
+import { retireBinding } from './binding-fence.ts'
 
 export const isMissing = (error: unknown): boolean =>
   error instanceof Error && 'code' in error && error.code === 'ENOENT'
@@ -72,6 +73,40 @@ function decodeIdentity(value: unknown): NodeIdentity {
     return id
   } catch {
     throw new Error('节点身份无效')
+  }
+}
+
+/** Device login has no application CA; replace only an unbound identity under its private lock. */
+export async function saveDeviceIdentity(dataDirectory: string, value: unknown, base: string): Promise<NodeIdentity> {
+  await ensurePrivateDirectory(dataDirectory)
+  const release = await acquireProcessLock(join(dataDirectory, 'identity.lock'))
+  try {
+    try {
+      await loadIdentity(dataDirectory)
+      throw new Error('logout_required：请先执行 batond logout 清除已有绑定')
+    } catch (error) {
+      if (!isMissing(error)) throw error
+    }
+    const identity = { ...decodeIdentity(value), coordinator_url: coordinatorURL(base) }
+    await retireBinding(dataDirectory)
+    await unlink(join(dataDirectory, 'coordinator-ca.pem')).catch((error: unknown) => {
+      if (!isMissing(error)) throw error
+    })
+    await writePrivateFileAtomic(join(dataDirectory, 'identity.json'), JSON.stringify(identity))
+    return identity
+  } finally {
+    await release()
+  }
+}
+
+export async function clearIdentity(dataDirectory: string): Promise<void> {
+  const release = await acquireProcessLock(join(dataDirectory, 'identity.lock'))
+  try {
+    await unlink(join(dataDirectory, 'identity.json')).catch((error: unknown) => {
+      if (!isMissing(error)) throw error
+    })
+  } finally {
+    await release()
   }
 }
 
@@ -228,6 +263,7 @@ export async function registerNode(options: RegisterNodeOptions): Promise<NodeId
       throw new Error('无法向 Coordinator 注册节点')
     }
     const id = { ...decodeIdentity(response), coordinator_url: base }
+    await retireBinding(options.dataDirectory)
     await saveCoordinatorCA(options.dataDirectory, ca)
     await writePrivateFileAtomic(join(options.dataDirectory, 'identity.json'), JSON.stringify(id))
     return id

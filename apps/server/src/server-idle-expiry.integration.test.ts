@@ -24,7 +24,7 @@ const report: RuntimeReport = {
   },
 }
 
-it('the server maintenance loop closes idle credentials and revokes foreground leases without heartbeats', async () => {
+it('the server maintenance loop closes revoked credentials and revokes foreground leases without heartbeats', async () => {
   await withTestDatabase(async ({ run }) => {
     const node = await seedNode(run, { online: false, synced: false, report })
     await run(
@@ -95,15 +95,15 @@ it('the server maintenance loop closes idle credentials and revokes foreground l
       await run(
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          yield* sql`UPDATE node_credentials SET expires_at=clock_timestamp()-interval '1 second' WHERE id=${node.credentialId}`
+          yield* sql`UPDATE node_credentials SET revoked_at=clock_timestamp() WHERE id=${node.credentialId}`
         }),
       )
       const [code, reason] = await closed
       expect(code).toBe(1008)
-      expect(String(reason)).toBe('node_idle_expired')
+      expect(String(reason)).toBe('credential_revoked')
       await expect
         .poll(async () => (await run(projects.projectStatus(node.employeeId, project.id))).run?.end_reason)
-        .toBe('node_idle_expired')
+        .toBe('credential_revoked')
       expect(await run(projects.claimProjectCommands('project_run_start'))).toEqual([])
       expect(await run(projects.claimProjectCommands('project_run_stop'))).toEqual([])
       await run(projects.scheduleProjectRun(project.agent.id))
@@ -122,7 +122,7 @@ it('the server maintenance loop closes idle credentials and revokes foreground l
   })
 })
 
-it('memory placement and dispatch exclude expired credentials and maintenance releases their claims', async () => {
+it('memory placement and dispatch exclude revoked credentials and maintenance releases their claims', async () => {
   await withTestDatabase(async ({ run }) => {
     const node = await seedNode(run, { report })
     await run(
@@ -147,10 +147,7 @@ it('memory placement and dispatch exclude expired credentials and maintenance re
       (sql) =>
         sql`INSERT INTO project_memory_jobs(id,employee_id,project_id,conversation_id,kind,input_seq,through_seq) VALUES(${jobId},${node.employeeId},${project.id},${project.conversation.id},'consolidation',1,2)`,
     )
-    await sqlRun(
-      (sql) =>
-        sql`UPDATE node_credentials SET expires_at=clock_timestamp()-interval '1 second' WHERE id=${node.credentialId}`,
-    )
+    await sqlRun((sql) => sql`UPDATE node_credentials SET revoked_at=clock_timestamp() WHERE id=${node.credentialId}`)
     await run(projects.scheduleMemoryJobs())
     const state = () =>
       sqlRun(
@@ -162,24 +159,18 @@ it('memory placement and dispatch exclude expired credentials and maintenance re
           }>`SELECT state,attempt_id,waiting_reason FROM project_memory_jobs WHERE id=${jobId}`,
       )
     expect((await state())[0]).toMatchObject({ state: 'pending', attempt_id: null })
-    await sqlRun(
-      (sql) =>
-        sql`UPDATE node_credentials SET expires_at=clock_timestamp()+interval '1 day' WHERE id=${node.credentialId}`,
-    )
+    await sqlRun((sql) => sql`UPDATE node_credentials SET revoked_at=NULL WHERE id=${node.credentialId}`)
     await run(projects.scheduleMemoryJobs())
     const [claimed] = await state()
     expect(claimed.state).toBe('claimed')
     expect(await run(projects.claimProjectCommands('project_memory_start'))).toHaveLength(1)
-    await sqlRun(
-      (sql) =>
-        sql`UPDATE node_credentials SET expires_at=clock_timestamp()-interval '1 second' WHERE id=${node.credentialId}`,
-    )
+    await sqlRun((sql) => sql`UPDATE node_credentials SET revoked_at=clock_timestamp() WHERE id=${node.credentialId}`)
     expect(await run(projects.claimProjectCommands('project_memory_start'))).toEqual([])
     await run(expireProjectNodeLeases())
     expect((await state())[0]).toMatchObject({
       state: 'pending',
       attempt_id: null,
-      waiting_reason: 'node_idle_expired',
+      waiting_reason: 'credential_revoked',
     })
     expect(await run(projects.claimProjectCommands('project_memory_stop'))).toEqual([])
   })

@@ -6,6 +6,8 @@
   "exports": {
     "./daemon/daemon": "./src/daemon/daemon.ts",
     "./daemon/cli": "./src/daemon/cli.ts",
+    "./daemon/control": "./src/daemon/control.ts",
+    "./daemon/control-client": "./src/daemon/control-client.ts",
     "./daemon/identity": "./src/daemon/identity.ts",
     "./daemon/update-version": "./src/daemon/update-version.ts",
     "./daemon/transport": "./src/daemon/transport.ts",

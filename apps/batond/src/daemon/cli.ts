@@ -10,7 +10,7 @@ import { loadDeployment } from './deployment.ts'
 import { startTelemetryRelay } from './telemetry-relay.ts'
 
 export async function runDaemonCLI(
-  action: 'up' | 'register' | 'reauth' | 'run' | 'identity',
+  action: 'up' | 'register' | 'reauth' | 'run' | 'serve' | 'identity',
   args: string[],
   dependencies: { installationDirectory?: string; stdin?: Readable } = {},
 ): Promise<void> {
@@ -27,7 +27,7 @@ export async function runDaemonCLI(
           'ca-file': { type: 'string' },
           'control-timeout-seconds': { type: 'string' },
           workspace: { type: 'string' },
-          ...(action === 'run' ? { 'exit-with-stdin': { type: 'boolean' as const } } : {}),
+          ...(['run', 'serve'].includes(action) ? { 'exit-with-stdin': { type: 'boolean' as const } } : {}),
         },
       })
     } catch {
@@ -92,14 +92,14 @@ export async function runDaemonCLI(
       return
     }
     await initializeBrowseRoots(dataDirectory, values.workspace)
-    let identity
+    let identity: Awaited<ReturnType<typeof loadIdentity>> | undefined
     try {
       identity = await loadIdentity(dataDirectory)
     } catch (error) {
-      if (!isMissing(error) || action === 'run') throw error
+      if (!isMissing(error)) throw error
     }
     if (identity && action === 'register') throw new Error('节点身份已存在，请直接运行 up 或 run')
-    if (!identity) {
+    if (!identity && action !== 'run' && action !== 'serve') {
       const deployment = await loadDeployment(dependencies.installationDirectory)
       const coordinator = values.coordinator ?? deployment?.coordinator_url
       if (!coordinator) throw new Error('首次注册需要 --coordinator https://中心地址')
@@ -141,7 +141,7 @@ export async function runDaemonCLI(
           const local = Option.getOrUndefined(relay)
           return yield* runDaemon({
             dataDirectory,
-            identity,
+            ...(identity ? { identity } : {}),
             ...(local ? { telemetryRelay: local } : {}),
             controlTimeoutSeconds,
             ...(values.relay ? { relayURL: values.relay } : {}),
@@ -151,7 +151,7 @@ export async function runDaemonCLI(
               telemetryLayer('batond', {
                 ...process.env,
                 ...telemetryEnvironment(local),
-                BATON_TELEMETRY_NODE_ID: identity.node_id,
+                BATON_TELEMETRY_NODE_ID: identity?.node_id,
               }),
             ),
           )

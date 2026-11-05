@@ -39,7 +39,6 @@ export const DownloadsResponse = Schema.Struct({
   enabled: Schema.Boolean,
   version: Schema.String,
   connect_url: Schema.NullOr(Schema.String),
-  ca_sha256: Schema.NullOr(Schema.String),
   items: Schema.Array(DownloadItem),
 })
 export type DownloadsResponse = typeof DownloadsResponse.Type
@@ -65,7 +64,7 @@ const failure = <const Status extends number>(status: Status) =>
     ),
     HttpApiSchema.status(status),
   )
-export const HttpErrorStatus = Schema.Literals([400, 401, 403, 404, 409, 413, 415, 422, 429, 500, 501, 503])
+export const HttpErrorStatus = Schema.Literals([400, 401, 403, 404, 409, 410, 413, 415, 422, 429, 500, 501, 503])
 export const HttpErrors = HttpErrorStatus.literals.map(failure)
 export type HttpFailure = (typeof HttpErrors)[number]['Type']
 
@@ -108,6 +107,14 @@ const Public = HttpApiGroup.make('public')
   .add(
     Endpoint.get('release', '/api/v1/release', { success: ReleaseMetadata }),
     Endpoint.get('downloads', '/api/v1/downloads', { success: DownloadsResponse }),
+    Endpoint.post('createDeviceLoginSession', '/api/v1/device-auth/sessions', {
+      payload: D.DeviceLoginCreateInput,
+      success: D.DeviceLoginCreateResponse.pipe(HttpApiSchema.status(201)),
+    }),
+    Endpoint.post('deviceLoginToken', '/api/v1/device-auth/token', {
+      payload: D.DeviceLoginTokenInput,
+      success: D.DeviceLoginTokenResponse,
+    }),
     Endpoint.post('login', '/api/v1/login', {
       payload: A.LoginInput,
       success: HttpApiSchema.WithHeaders(SessionResponse, cookie),
@@ -120,6 +127,24 @@ const Public = HttpApiGroup.make('public')
     }),
   )
   .middleware(PublicRequest)
+
+const DeviceAuth = HttpApiGroup.make('deviceAuth')
+  .add(
+    Endpoint.get('sessionByCode', '/api/v1/device-auth/sessions/by-code/:userCode', {
+      params: { userCode: C.boundedText(32) },
+      success: D.DeviceLoginSession,
+    }),
+    Endpoint.post('approveSession', '/api/v1/device-auth/sessions/:sessionId/approve', {
+      params: { sessionId: UUID },
+      payload: D.DeviceLoginApprovalInput,
+      success: HttpApiSchema.NoContent,
+    }),
+    Endpoint.post('denySession', '/api/v1/device-auth/sessions/:sessionId/deny', {
+      params: { sessionId: UUID },
+      success: HttpApiSchema.NoContent,
+    }),
+  )
+  .middleware(BrowserRequest)
 
 const Account = HttpApiGroup.make('account')
   .add(
@@ -395,7 +420,7 @@ const System = HttpApiGroup.make('system')
   .middleware(BrowserRequest)
 
 export const BatonHttpApi = HttpApi.make('baton')
-  .add(Public, Account, Nodes, Threads, Executions, Projects, System)
+  .add(Public, DeviceAuth, Account, Nodes, Threads, Executions, Projects, System)
   .annotate(HttpApi.PayloadParseOptions, { onExcessProperty: 'error' })
   .annotate(HttpApi.QueryParseOptions, { onExcessProperty: 'error' })
   .annotateMerge(

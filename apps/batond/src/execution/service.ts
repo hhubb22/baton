@@ -27,6 +27,7 @@ const terminal = (state: ExecutionState) =>
 
 export async function inspectExecutions(
   dataDirectory: string,
+  excludedIds: ReadonlySet<string> = new Set(),
 ): Promise<readonly { id: string; state: ExecutionState }[]> {
   const paths = executionPaths(dataDirectory, '00000000-0000-4000-8000-000000000000')
   const entries = await readdir(`${paths.root}/executions`).catch((error: unknown) => {
@@ -35,7 +36,7 @@ export async function inspectExecutions(
   })
   const result: { id: string; state: ExecutionState }[] = []
   for (const id of entries) {
-    if (!Schema.is(UUID)(id)) continue
+    if (!Schema.is(UUID)(id) || excludedIds.has(id)) continue
     try {
       const filename = executionPaths(dataDirectory, id).ledger
       await access(filename)
@@ -48,7 +49,11 @@ export async function inspectExecutions(
   return result
 }
 
-export function makeExecutionService(options: { dataDirectory: string; command?: BatondCommand }) {
+export function makeExecutionService(options: {
+  dataDirectory: string
+  command?: BatondCommand
+  excludedIds?: ReadonlySet<string>
+}) {
   const command = options.command ?? currentBatondCommand()
   const request = async (id: string, input: ExecutionRequest) => {
     const paths = executionPaths(options.dataDirectory, id)
@@ -108,7 +113,15 @@ export function makeExecutionService(options: { dataDirectory: string; command?:
   }
   return {
     async command(input: ExecutionCommand) {
-      const existing = (await inspectExecutions(options.dataDirectory)).find(
+      if (options.excludedIds?.has(input.execution_id))
+        return {
+          type: 'execution.command_result' as const,
+          execution_id: input.execution_id,
+          storage_generation: input.storage_generation,
+          ok: false,
+          code: 'binding_mismatch',
+        }
+      const existing = (await inspectExecutions(options.dataDirectory, options.excludedIds)).find(
         (entry) => entry.id === input.execution_id,
       )?.state
       if (existing && terminal(existing)) {
@@ -141,7 +154,7 @@ export function makeExecutionService(options: { dataDirectory: string; command?:
       return response.result
     },
     async recover() {
-      for (const { id, state } of await inspectExecutions(options.dataDirectory)) {
+      for (const { id, state } of await inspectExecutions(options.dataDirectory, options.excludedIds)) {
         if (!terminal(state) || state.process) {
           await ensure(id)
           if (terminal(state) && state.process) await request(id, { type: 'execution.recover' })
@@ -150,7 +163,7 @@ export function makeExecutionService(options: { dataDirectory: string; command?:
     },
     async collectReports(): Promise<ExecutionReport[]> {
       const reports: ExecutionReport[] = []
-      for (const { id, state } of await inspectExecutions(options.dataDirectory)) {
+      for (const { id, state } of await inspectExecutions(options.dataDirectory, options.excludedIds)) {
         if (!terminal(state) || state.process) {
           await ensure(id)
           if (terminal(state) && state.process) await request(id, { type: 'execution.recover' })
@@ -161,7 +174,8 @@ export function makeExecutionService(options: { dataDirectory: string; command?:
       return reports
     },
     async ack(report: ExecutionReportResult) {
-      const state = (await inspectExecutions(options.dataDirectory)).find(
+      if (options.excludedIds?.has(report.execution_id)) return
+      const state = (await inspectExecutions(options.dataDirectory, options.excludedIds)).find(
         (entry) => entry.id === report.execution_id,
       )?.state
       if (
@@ -176,6 +190,14 @@ export function makeExecutionService(options: { dataDirectory: string; command?:
       await request(report.execution_id, report)
     },
     async output(input: ExecutionOutputRequest): Promise<ExecutionOutputResult> {
+      if (options.excludedIds?.has(input.execution_id))
+        return {
+          type: 'execution.output_result',
+          operation_id: input.operation_id,
+          execution_id: input.execution_id,
+          ok: false,
+          code: 'binding_mismatch',
+        }
       const paths = executionPaths(options.dataDirectory, input.execution_id)
       const page = await new FullOutputStore(paths.directory).read({
         type: 'session.request',

@@ -109,6 +109,46 @@ it('reads notification baselines and decimal cursors without losing precision', 
   ])
 })
 
+describe('HTTP device login', () => {
+  it('looks up public device details and approves with the short code and CSRF', async () => {
+    const session = {
+      session_id: 'session/one',
+      user_code: 'ABCD-EFGH',
+      display_name: 'Build server',
+      system: 'linux',
+      expires_at: '2026-11-04T12:00:00Z',
+    }
+    const fetch = fetcher()
+      .mockResolvedValueOnce(response(session))
+      .mockResolvedValueOnce(response({ employee, csrf_token: 'device-login-csrf' }))
+      .mockResolvedValueOnce(response(null, 204))
+    const client = createHttpClient({ fetch, WebSocket: null })
+    expect(await client.getDeviceLoginSession(' abcd-efgh ')).toEqual(session)
+    await client.approveDeviceLoginSession(session.session_id, session.user_code)
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      '/api/v1/device-auth/sessions/by-code/%20abcd-efgh%20',
+      '/api/v1/me',
+      '/api/v1/device-auth/sessions/session%2Fone/approve',
+    ])
+    const init = fetch.mock.calls[2][1]!
+    expect(init).toMatchObject({ method: 'POST', credentials: 'same-origin', body: '{"user_code":"ABCD-EFGH"}' })
+    expect(new Headers(init.headers).get('X-CSRF-Token')).toBe('device-login-csrf')
+    expect(JSON.stringify(fetch.mock.calls)).not.toContain('device_code')
+  })
+
+  it('denies the selected session with CSRF and no secret body', async () => {
+    const fetch = fetcher()
+      .mockResolvedValueOnce(response({ employee, csrf_token: 'device-login-csrf' }))
+      .mockResolvedValueOnce(response(null, 204))
+    await createHttpClient({ fetch, WebSocket: null }).denyDeviceLoginSession('session/one')
+    const [url, init] = fetch.mock.calls[1]
+    expect(url).toBe('/api/v1/device-auth/sessions/session%2Fone/deny')
+    expect(init).toMatchObject({ method: 'POST', credentials: 'same-origin' })
+    expect(init?.body).toBeUndefined()
+    expect(new Headers(init?.headers).get('X-CSRF-Token')).toBe('device-login-csrf')
+  })
+})
+
 describe('HTTP account and devices', () => {
   it('maps update availability and the management channel independently of business connection', () => {
     const device = mapDevice({
@@ -182,7 +222,6 @@ describe('HTTP account and devices', () => {
   })
 
   it.each(['active', 'idle_expired', 'revoked'] as const)('maps device credentials in state %s', (state) => {
-    const expiresAt = '2026-07-01T12:00:00Z'
     const device = mapDevice({
       id: 'desk',
       display_name: 'Desk',
@@ -191,11 +230,9 @@ describe('HTTP account and devices', () => {
       synced: true,
       revocation_status: 'none',
       credential_state: state,
-      idle_expires_at: expiresAt,
     })
     expect(device).toMatchObject({
       credentialState: state,
-      idleExpiresAt: Date.parse(expiresAt),
       connection: state === 'active' ? 'online' : 'offline',
     })
     if (state === 'idle_expired')

@@ -21,10 +21,13 @@ import {
   type ThreadReport,
 } from '@baton/protocol'
 import { hasCode } from '../platform/errors.ts'
-import { acquireProcessLock } from '../platform/lock.ts'
 import { ensurePrivateDirectory, openPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
 import { LocalWorkerHost, type DaemonWorkerHost, type BatondCommand } from './host.ts'
-import { isMissing, loadIdentity, loadCoordinatorCA, relayURL as normalizeRelay, coordinatorURL } from './identity.ts'
+import { isMissing, loadIdentity, relayURL as normalizeRelay, coordinatorURL } from './identity.ts'
+import { runControlDaemon } from './control-daemon.ts'
+import { loadBindingFence } from './binding-fence.ts'
+import type { ConnectionState } from './control.ts'
+import type { DeviceLoginTransport } from './device-login.ts'
 import { initializeBrowseRoots, loadBrowseRoots } from '../devices/roots.ts'
 import { makeDeviceService, boundRuntimeReport, type DeviceService } from '../devices/index.ts'
 import { makeProjectManager, type ProjectManager, type ProjectManagerOptions } from '../project/index.ts'
@@ -64,13 +67,21 @@ import { readOwnProcessIdentity } from '../platform/identity.ts'
 export { DaemonStorageFailure } from './storage.ts'
 
 export class NeedsReauthentication extends Error {
-  readonly code = 'needs_reauth'
-  constructor() {
-    super('节点凭据已被拒绝，需要重新认证')
+  constructor(
+    readonly code = 'credential_revoked',
+    message = '节点凭据已被拒绝，请先执行 batond logout 后重新登录',
+  ) {
+    super(message)
   }
 }
 export interface RunDaemonOptions {
   readonly dataDirectory: string
+  readonly deviceLoginTransport?: DeviceLoginTransport
+  readonly boundRuntime?: (
+    identity: NodeIdentity,
+    onState: (state: ConnectionState) => Promise<void>,
+  ) => Effect.Effect<void, Error, Scope.Scope>
+  readonly onState?: (state: ConnectionState) => Promise<void>
   readonly telemetryRelay?: TelemetryRelay
   readonly identity?: NodeIdentity
   readonly relayURL?: string
@@ -142,6 +153,7 @@ async function connected(options: {
   identity: NodeIdentity
   tracer: Tracer.Tracer
   connectivity: (online: boolean) => void
+  onState?: (state: ConnectionState) => Promise<void>
   telemetryRelay?: TelemetryRelay
   incarnation: string
   heartbeatMs: number
@@ -356,7 +368,7 @@ async function connected(options: {
               code: frame.code,
               version_incompatibility: frame.version_incompatibility,
             })
-          if (terminal(frame.code)) throw new NeedsReauthentication()
+          if (terminal(frame.code)) throw new NeedsReauthentication(frame.code, frame.message)
           if (frame.code === 'incarnation_conflict') throw new Error('节点身份正由另一个进程使用')
           throw new Error('节点认证暂不可用')
         }
@@ -365,12 +377,14 @@ async function connected(options: {
         })
         authenticated = true
         authenticatedAt = performance.now()
-        await writeDaemonStatus(options.dataDirectory, 'online')
+        await writeDaemonStatus(options.dataDirectory, 'syncing')
+        await options.onState?.('syncing')
         await sync()
         await send({ kind: 'heartbeat' })
         continue
       }
-      if (frame.kind === 'error' && terminal(frame.code)) throw new NeedsReauthentication()
+      if (frame.kind === 'error' && (terminal(frame.code) || frame.code === 'node_version_incompatible'))
+        throw new NeedsReauthentication(frame.code, frame.message)
       if (authenticated && frame.kind === 'heartbeat') {
         await send({ kind: 'heartbeat' })
         continue
@@ -400,10 +414,12 @@ async function connected(options: {
               }
             }
             synced = true
+            await options.onState?.('online')
             options.connectivity(true)
             projects?.setTransport(projectRPC.request)
             options.refreshDevices()
-          } else if (terminal(body.code)) throw new NeedsReauthentication()
+          } else if (terminal(body.code) || body.code === 'node_version_incompatible')
+            throw new NeedsReauthentication(body.code)
         }
         continue
       }
@@ -531,6 +547,12 @@ async function connected(options: {
             schedule(async () => {
               let result
               try {
+                const saved = ledger ? await ledgerPromise(ledger.worker(body.session_id)) : undefined
+                if (
+                  !saved ||
+                  (body.storage_generation !== undefined && body.storage_generation !== saved.config.storage_generation)
+                )
+                  throw new Error('binding_mismatch')
                 const reply = await options.host.request(
                   body.session_id,
                   { type: 'session_request', ok: false, session_request: body },
@@ -570,11 +592,7 @@ async function connected(options: {
   }
 }
 
-async function writeDaemonStatus(
-  directory: string,
-  state: 'connecting' | 'online' | 'rejected' | 'stopping',
-  error?: unknown,
-) {
+async function writeDaemonStatus(directory: string, state: ConnectionState | 'stopping', error?: unknown) {
   const identity = await readOwnProcessIdentity()
   await writePrivateFileAtomic(
     join(directory, 'environment-process.json'),
@@ -602,8 +620,8 @@ async function writeDaemonStatus(
   )
 }
 
-/** Scope 管理连接、后台任务、节点数据库与进程锁；Worker 独立存活。 */
-export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error, Scope.Scope> => {
+/** Bound execution runtime, nested beneath the persistent local control supervisor. */
+const runBoundDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error, Scope.Scope> => {
   let agentProbe: Promise<ReturnType<typeof import('../agents/probe-cache.ts').makeAgentProbe>> | undefined
   const program = Effect.gen(function* () {
     const services = yield* DaemonServices
@@ -620,24 +638,14 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
     yield* attempt(async () => {
       await ensurePrivateDirectory(options.dataDirectory)
     })
-    yield* Effect.acquireRelease(
-      attempt(() => acquireProcessLock(join(options.dataDirectory, 'daemon.lock'))),
-      (release) => Effect.orDie(attempt(release)),
-    )
-    yield* Effect.addFinalizer((exit) =>
-      Effect.orDie(
-        attempt(() => {
-          const rejected = Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)
-          return writeDaemonStatus(
-            options.dataDirectory,
-            rejected ? 'rejected' : 'stopping',
-            rejected ? Cause.squash(exit.cause) : undefined,
-          )
-        }),
-      ),
-    )
     yield* attempt(() => writeDaemonStatus(options.dataDirectory, 'connecting'))
     const identity = options.identity ?? (yield* attempt(() => loadIdentity(options.dataDirectory)))
+    const bindingFence = yield* attempt(() => loadBindingFence(options.dataDirectory))
+    if (bindingFence.node_ids.includes(identity.node_id))
+      return yield* Effect.fail(new Error('binding_retired：请先完成 batond logout 再重新登录'))
+    const excludedThreads = new Set(bindingFence.thread_ids)
+    const excludedExecutions = new Set(bindingFence.execution_ids)
+    const excludedProjectRuns = new Set(bindingFence.project_run_ids)
     const tracer = yield* Tracer.Tracer
     const telemetry = yield* Effect.context<never>()
     const clock = yield* Clock.Clock
@@ -670,7 +678,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
       address = coordinatorURL(identity.coordinator_url).replace('https:', 'wss:') + '/v1/node'
     }
     const url = yield* Effect.try({ try: () => normalizeRelay(address!), catch: () => new Error('Relay 地址无效') })
-    const ca = yield* attempt(() => loadCoordinatorCA(options.dataDirectory, options.caFile))
+    const ca: string | undefined = undefined
     let serial: Promise<unknown> = Promise.resolve()
     const paths = upgradePaths(options.dataDirectory)
     const shutdown = yield* Deferred.make<void>()
@@ -831,7 +839,10 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
       Effect.gen(function* () {
         let retry = 0
         while (true) {
-          yield* attempt(() => writeDaemonStatus(options.dataDirectory, 'connecting'))
+          yield* attempt(async () => {
+            await writeDaemonStatus(options.dataDirectory, 'connecting')
+            await options.onState?.('connecting')
+          })
           const started = performance.now()
           const outcome = yield* controlAttempt(async (signal) => {
             let connection: DaemonConnection | undefined
@@ -844,6 +855,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
                 identity,
                 tracer,
                 connectivity,
+                ...(options.onState ? { onState: options.onState } : {}),
                 ...(options.telemetryRelay ? { telemetryRelay: options.telemetryRelay } : {}),
                 incarnation,
                 heartbeatMs,
@@ -858,16 +870,15 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
           }).pipe(Effect.result)
           if (
             outcome._tag === 'Failure' &&
-            (outcome.failure instanceof NeedsReauthentication || outcome.failure instanceof DaemonStorageFailure)
+            (outcome.failure instanceof NeedsReauthentication ||
+              outcome.failure instanceof DaemonStorageFailure ||
+              hasCode(outcome.failure, 'node_version_incompatible'))
           )
             return yield* Effect.fail(outcome.failure)
-          if (outcome._tag === 'Failure' && hasCode(outcome.failure, 'node_version_incompatible')) {
-            yield* attempt(() => writePrivateFileAtomic(join(options.dataDirectory, 'version-incompatible.json'), '{}'))
-            yield* attempt(() => writeDaemonStatus(options.dataDirectory, 'rejected', outcome.failure))
-            yield* Effect.sleep(reconnectDelay(retry++, options.random))
-            continue
-          }
-          yield* attempt(() => writeDaemonStatus(options.dataDirectory, 'connecting'))
+          yield* attempt(async () => {
+            await writeDaemonStatus(options.dataDirectory, 'connecting')
+            await options.onState?.('connecting')
+          })
           if (performance.now() - started >= heartbeatMs) retry = 0
           yield* Effect.sleep(reconnectDelay(retry++, options.random))
         }
@@ -895,9 +906,11 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
                 })
               const ledger =
                 state?.phase === 'syncing'
-                  ? yield* makeNodeLedger(join(options.dataDirectory, 'node.db')).pipe(
-                      Effect.mapError((cause) => new DaemonStorageFailure(cause)),
-                    )
+                  ? yield* makeNodeLedger(
+                      join(options.dataDirectory, 'node.db'),
+                      identity.node_id,
+                      excludedThreads,
+                    ).pipe(Effect.mapError((cause) => new DaemonStorageFailure(cause)))
                   : undefined
               if (ledger)
                 yield* controlAttempt(async () => {
@@ -921,8 +934,11 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
                     ? {
                         ledger,
                         executions: {
-                          ...makeExecutionService({ dataDirectory: options.dataDirectory }),
-                          ...syncingExecutionReports(options.dataDirectory),
+                          ...makeExecutionService({
+                            dataDirectory: options.dataDirectory,
+                            excludedIds: excludedExecutions,
+                          }),
+                          ...syncingExecutionReports(options.dataDirectory, excludedExecutions),
                         },
                       }
                     : {}),
@@ -960,15 +976,18 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
                 await writePrivateFileAtomic(path, '')
               }
             })
-            const ledger = yield* makeNodeLedger(join(options.dataDirectory, 'node.db')).pipe(
-              Effect.mapError((cause) => new DaemonStorageFailure(cause)),
-            )
+            const ledger = yield* makeNodeLedger(
+              join(options.dataDirectory, 'node.db'),
+              identity.node_id,
+              excludedThreads,
+            ).pipe(Effect.mapError((cause) => new DaemonStorageFailure(cause)))
             let devicesDirty = true
             const projects = yield* Effect.uninterruptible(
               makeProjectManager({
                 ...options.project,
                 dataDir: options.dataDirectory,
                 nodeId: identity.node_id,
+                excludedRunIds: excludedProjectRuns,
                 ...(options.telemetryRelay ? { telemetry: options.telemetryRelay } : {}),
                 onReportChanged: () => {
                   devicesDirty = true
@@ -998,6 +1017,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
             const threads = makeThreadService({
               dataDirectory: options.dataDirectory,
               identity,
+              excludedThreadIds: excludedThreads,
               ledger,
               host: services.host,
               capability: () => agents,
@@ -1012,6 +1032,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
             })
             const executions = makeExecutionService({
               dataDirectory: options.dataDirectory,
+              excludedIds: excludedExecutions,
               ...(options.executionCommand ? { command: options.executionCommand } : {}),
             })
             yield* controlAttempt(() => executions.recover())
@@ -1170,3 +1191,7 @@ export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error,
     }),
   )
 }
+
+/** One persistent daemon owns binding, local control and the bound execution runtime. */
+export const runDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error, Scope.Scope> =>
+  runControlDaemon(options, (identity, onState) => runBoundDaemon({ ...options, identity, onState }))

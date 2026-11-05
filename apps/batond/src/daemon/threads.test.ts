@@ -114,10 +114,25 @@ it('queries authenticated Worker status for every new activity challenge without
   await withService(({ command, host, path }) =>
     Effect.gen(function* () {
       const ledger = yield* makeNodeLedger(join(path, 'node.db'))
+      const nodeId = randomUUID()
+      yield* ledger.saveWorker({
+        threadId: command.thread_id,
+        config: {
+          thread_id: command.thread_id,
+          node_id: nodeId,
+          storage_generation: 'generation',
+          agent_type: 'cursor',
+          runtime_mode: 'full-access',
+          working_directory: path,
+          execution_timeout_seconds: 7200,
+          adapter_config: {},
+        },
+        ready: true,
+      })
       let checks = 0
       const service = makeThreadService({
         dataDirectory: path,
-        identity: { node_id: randomUUID() } as NodeIdentity,
+        identity: { node_id: nodeId } as NodeIdentity,
         ledger,
         capability: () => capability,
         host: {

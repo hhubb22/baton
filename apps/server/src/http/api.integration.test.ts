@@ -191,7 +191,6 @@ it('serves anonymous download listings and only verified files for the matching 
     enabled: true,
     version: 'development',
     connect_url: 'baton://connect?url=https%3A%2F%2Fbaton.local',
-    ca_sha256: null,
   })
   for (const item of result.items) {
     const response = await anonymous(`/downloads/${item.file}`)
@@ -436,20 +435,14 @@ it('reauthenticates the original device through enrollment and public proof with
   )
   const registered = await request('/api/v1/nodes/register', 'POST', {
     enrollment_token: enrollment.enrollment_token,
-    display_name: 'Expired workstation',
+    display_name: 'Workstation',
     system: 'linux',
     capabilities: [],
   })
   expect(registered.status).toBe(200)
   const identity = Schema.decodeUnknownSync(P.NodeIdentity)(await registered.json())
-  await database.run(
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      yield* sql`UPDATE node_credentials SET created_at=clock_timestamp()-interval '31 days',last_business_at=clock_timestamp()-interval '31 days',expires_at=clock_timestamp()-interval '1 day' WHERE id=${identity.credential.id}`
-    }),
-  )
   const path = `/api/v1/nodes/${identity.node_id}`
-  expect(await (await request(path)).json()).toMatchObject({ credential_state: 'idle_expired', executable: false })
+  expect(await (await request(path)).json()).toMatchObject({ credential_state: 'active', executable: false })
   expect((await request(`${path}/reauth-enrollments`, 'POST', {}, { 'x-csrf-token': 'wrong' })).status).toBe(403)
   const issued = await request(`${path}/reauth-enrollments`, 'POST', {})
   expect(issued.status).toBe(201)

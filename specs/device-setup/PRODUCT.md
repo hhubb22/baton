@@ -1,8 +1,10 @@
 # 设备接入行为规格
 
-Status: draft
+Status: partially implemented
 Owner: Asa
 Basis: 设备连接与本机控制面简化对齐；[Baton R-01～R-04](../baton/PRODUCT.md)；[发布行为规格](../release/PRODUCT.md)。
+
+设备码认证、长效可吊销凭据、CLI 本地控制通道与按需拉起、网页确认页和用户服务接管已实现。桌面客户端仍使用现有接入桥接与进程监管，尚未迁移至本地控制通道；Thread 和 Execution 继续使用独立 Worker。原生 launchd、systemd 用户会话、Windows 命名管道及桌面接入需在目标系统验证。
 
 ## Summary
 

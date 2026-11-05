@@ -30,19 +30,17 @@ import { defaultDataDirectory } from './platform/layout.ts'
 const usage = `Baton 节点
 
   --version
-  up [--coordinator <https://中心>] [--workspace <绝对目录>]
-  register [--coordinator <https://中心>] [--enrollment-file <私有文件>]
+  login [--coordinator <https://中心>] [--display-name <设备名>]
+  login --cancel
+  logout
+  status
+  serve | run
   identity
   desktop-directory --thread-id <UUID> --data-dir <已有数据目录>
-  reauth [--enrollment-file <私有文件>] [--ca-file <CA证书>]
-  run [--relay <wss://中心/v1/node>]
 
-注册与重新认证凭据来自 BATON_ENROLLMENT_TOKEN 或 --enrollment-file。
-reauth 使用已有身份和保存的中心地址；中断后再次运行沿用原操作，成功后用 up/run 连接。
-up 复用已有身份，首次运行登记主目录；--workspace 可额外登记目录。
-首次注册可使用 SEA 安装目录中的 deployment.json；显式 --coordinator / --ca-file 优先。
-注册与重新认证成功后保存 CA，后续连接默认使用保存的 CA。identity 仅输出注册状态与公开身份。
-up/run 支持 --control-timeout-seconds <秒>，认证与同步各默认等待 370 秒，范围 1～3600。
+login 展示验证网址与短验证码，并等待浏览器确认后上线。
+Ctrl-C 仅退出终端等待；login --cancel 取消后台登录。
+serve/run 常驻运行守护进程；控制命令在需要时自动后台启动。
 
 设备管理：
 
@@ -159,7 +157,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
     await runEnvironmentCLI(args)
     return
   }
-  if ((action === 'run' || action === 'up') && process.env.BATON_ENV_REEXEC !== '1') {
+  if ((action === 'run' || action === 'serve' || action === 'up') && process.env.BATON_ENV_REEXEC !== '1') {
     const index = argv.findIndex((arg) => arg === '--data-dir' || arg.startsWith('--data-dir='))
     const directory =
       index < 0
@@ -235,7 +233,14 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
     console.log(JSON.stringify(await desktopDirectory(args)))
     return
   }
-  if (action === 'up' || action === 'register' || action === 'reauth' || action === 'run' || action === 'identity') {
+  if (
+    action === 'up' ||
+    action === 'register' ||
+    action === 'reauth' ||
+    action === 'run' ||
+    action === 'serve' ||
+    action === 'identity'
+  ) {
     const { runDaemonCLI } = await import('./daemon/cli.ts')
     await runDaemonCLI(action, args)
     return
@@ -385,10 +390,32 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
     await runDeviceCLI(action, args, defaultDataDirectory())
     return
   }
+  const loginPositionals =
+    action === 'login'
+      ? parseArgs({
+          args,
+          allowPositionals: true,
+          options: {
+            coordinator: { type: 'string' },
+            'display-name': { type: 'string' },
+            'data-dir': { type: 'string' },
+            cancel: { type: 'boolean' },
+          },
+        }).positionals
+      : []
+  if (
+    action === 'logout' ||
+    (action === 'status' && !args.some((value) => value === '--thread-id' || value.startsWith('--thread-id='))) ||
+    (action === 'login' && loginPositionals.length === 0)
+  ) {
+    const { runControlCLI } = await import('./daemon/control-cli.ts')
+    await runControlCLI(action, args)
+    return
+  }
   if (action === 'login' || action === 'subscriptions') {
     const { positionals } = parseArgs({ args, allowPositionals: true, options: {} })
     if ((action === 'login' && positionals.length !== 1) || (action === 'subscriptions' && positionals.length !== 0))
-      throw new Error('用法：login <openai-codex|xai> 或 subscriptions')
+      throw new Error('用法：login [--coordinator <https://中心>] 或 login <openai-codex|xai> 或 subscriptions')
     const { runProjectCLI } = await import('./project/index.ts')
     await runProjectCLI(action, positionals[0])
     return
@@ -497,7 +524,9 @@ export function reportBatondError(error: unknown, action = process.argv[2]): voi
       : undefined
   const daemonRunning = error instanceof ProcessLockBusy && basename(error.path) === 'daemon.lock'
   const knownCode =
-    error instanceof Error && 'code' in error && ['needs_reauth', 'deployment_invalid'].includes(String(error.code))
+    error instanceof Error &&
+    'code' in error &&
+    ['needs_reauth', 'credential_revoked', 'deployment_invalid'].includes(String(error.code))
       ? String(error.code)
       : undefined
   const code = incompatible

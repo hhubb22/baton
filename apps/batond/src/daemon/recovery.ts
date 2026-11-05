@@ -12,6 +12,7 @@ export function makeWorkerRecovery(options: {
   readonly dataDirectory: string
   readonly ledger: NodeLedger
   readonly host: DaemonWorkerHost
+  readonly nodeId?: string
   readonly inspect?: (saved: DiscoveredWorker) => Promise<WorkerLedgerInspection>
 }) {
   const { ledger, host, dataDirectory } = options
@@ -23,7 +24,7 @@ export function makeWorkerRecovery(options: {
   async function ensureOne(threadId: string, signal?: AbortSignal): Promise<WorkerRecoveryResult> {
     if (signal?.aborted || (await upgradePaused(dataDirectory))) return 'retry'
     let saved = await io(ledger.worker(threadId))
-    if (!saved) return 'retry'
+    if (!saved || (options.nodeId && saved.config.node_id !== options.nodeId)) return 'retry'
     if (saved.history_unavailable) return 'lost'
     const status = async (): Promise<'ready' | 'retry' | 'runtime_mode_conflict'> => {
       try {
@@ -107,7 +108,8 @@ export function makeWorkerRecovery(options: {
     async recoverAll(signal?: AbortSignal): Promise<void> {
       for (const saved of await io(ledger.workers())) {
         if (signal?.aborted) return
-        if (!saved.history_unavailable) await ensure(saved.threadId, signal)
+        if ((!options.nodeId || saved.config.node_id === options.nodeId) && !saved.history_unavailable)
+          await ensure(saved.threadId, signal)
       }
     },
   }

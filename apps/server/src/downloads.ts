@@ -1,4 +1,4 @@
-import { createHash, X509Certificate } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { lstat, readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -9,20 +9,16 @@ import type { DownloadItem, DownloadsResponse } from '@baton/protocol/http-api'
 
 export interface DownloadsOptions {
   readonly directory: string
-  readonly caFile?: string
 }
 
 export function downloadsConfiguration(env: Readonly<Record<string, string | undefined>> = process.env) {
-  return env.BATON_DOWNLOADS_DIR
-    ? { directory: env.BATON_DOWNLOADS_DIR, ...(env.BATON_PUBLIC_CA_FILE ? { caFile: env.BATON_PUBLIC_CA_FILE } : {}) }
-    : undefined
+  return env.BATON_DOWNLOADS_DIR ? { directory: env.BATON_DOWNLOADS_DIR } : undefined
 }
 
 export const disabledDownloads = (): DownloadsResponse => ({
   enabled: false,
   version: releaseMetadata().version,
   connect_url: null,
-  ca_sha256: null,
   items: [],
 })
 
@@ -35,8 +31,6 @@ export async function createDownloads(
   log: (entry: { event: string; file?: string; reason: string }) => void = (entry) =>
     console.warn(JSON.stringify(entry)),
 ) {
-  const ca = options.caFile ? new X509Certificate(await readFile(options.caFile)) : undefined
-  if (ca && !ca.ca) throw new Error('BATON_PUBLIC_CA_FILE 需要 CA 证书')
   const origins = allowedOrigins.filter((origin) => Schema.is(DeploymentConfig)({ format: 1, coordinator_url: origin }))
   const rejected = new Map<string, string>()
   const cache = new Map<string, { identity: string; sha256: string }>()
@@ -59,7 +53,7 @@ export async function createDownloads(
       if (
         version !== release.version ||
         (cli
-          ? !(target === 'win-x64' ? extension === 'zip' : target !== 'win32-x64' && extension === 'tar.gz')
+          ? !(['darwin-arm64', 'linux-x64', 'linux-arm64'].includes(target!) && extension === 'tar.gz')
           : !((target === 'darwin-arm64' && extension === 'dmg') || (target === 'win32-x64' && extension === 'exe')))
       )
         continue
@@ -107,10 +101,7 @@ export async function createDownloads(
       return {
         enabled: true,
         version: release.version,
-        connect_url: origin
-          ? `baton://connect?url=${encodeURIComponent(origin)}${ca ? `&ca=${ca.raw.toString('base64url')}` : ''}`
-          : null,
-        ca_sha256: ca ? createHash('sha256').update(ca.raw).digest('hex') : null,
+        connect_url: origin ? `baton://connect?url=${encodeURIComponent(origin)}` : null,
         items: [...assets.values()].map((asset) => asset.item),
       }
     },

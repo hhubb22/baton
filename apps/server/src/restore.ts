@@ -1,7 +1,6 @@
 import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { dbError } from './database.ts'
-import { AppError } from './errors.ts'
 import { loadSigningKey } from './nodes.ts'
 
 /** 停服恢复后撤销旧授权并保留不确定执行，调用前须完成数据库格式校验。 */
@@ -14,14 +13,7 @@ export const finalizeRestore = Effect.fn('finalizeRestore')(function* (signingKe
       Effect.gen(function* () {
         yield* sql`SELECT pg_advisory_xact_lock(4815162342)`
         yield* sql`UPDATE login_sessions SET revoked_at=clock_timestamp() WHERE revoked_at IS NULL`
-        // 保留吊销事实和原签发时间；过期凭据仍可证明原设备身份，不能授权业务。
-        yield* sql`UPDATE node_credentials SET expires_at=created_at+interval '1 microsecond' WHERE revoked_at IS NULL`
-        const future =
-          yield* sql`SELECT id FROM node_credentials WHERE revoked_at IS NULL AND expires_at>clock_timestamp() LIMIT 1`
-        if (future.length)
-          return yield* Effect.fail(
-            new AppError(409, 'conflict', '设备凭据签发时间晚于中心时间，请核对时钟后重试恢复后处理'),
-          )
+        yield* sql`UPDATE device_login_sessions SET status='expired' WHERE status IN ('pending','approved','consumed')`
         yield* sql`UPDATE node_enrollments SET used_at=clock_timestamp() WHERE used_at IS NULL`
         yield* sql`UPDATE node_presence SET online=false,synced=false,status_updated_at=clock_timestamp() WHERE online OR synced`
 

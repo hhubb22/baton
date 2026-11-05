@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
+import { lstat } from 'node:fs/promises'
+import { readLedger } from '../worker/ledger.ts'
+import { isMissing } from './identity.ts'
 import { Schema, type Tracer } from 'effect'
 import { tracePromise } from '@baton/telemetry'
 import {
@@ -64,6 +67,7 @@ const decodeRequest = (value: unknown): WorkerRequest => {
 export function makeThreadService(options: {
   dataDirectory: string
   identity: NodeIdentity
+  excludedThreadIds?: ReadonlySet<string>
   ledger: NodeLedger
   host: DaemonWorkerHost
   tracer?: Tracer.Tracer
@@ -74,7 +78,12 @@ export function makeThreadService(options: {
   now?: () => number
 }) {
   const { ledger, host } = options
-  const recovery = makeWorkerRecovery({ dataDirectory: options.dataDirectory, ledger, host })
+  const recovery = makeWorkerRecovery({
+    dataDirectory: options.dataDirectory,
+    ledger,
+    host,
+    nodeId: options.identity.node_id,
+  })
   const inFlight = new Map<string, { hash: string; result: Promise<ThreadCommandResult> }>()
   const polls = new Map<string, { at: number; delay: number }>()
   const now = options.now ?? (() => performance.now())
@@ -106,6 +115,7 @@ export function makeThreadService(options: {
     const req = saved.request
     const config = req.open_config ?? (await io(ledger.worker(req.thread_id!)))?.config
     if (!config) throw new CommandDeliveryUncertain()
+    if (config.node_id !== options.identity.node_id) throw new AdmissionRejected('binding_mismatch')
     if (!['thread_stop', 'thread_withdraw', 'thread_settings'].includes(req.type))
       await authorizeDirectory(options.dataDirectory, config.working_directory)
     if (performance.now() >= deadline) throw new CommandDeliveryUncertain()
@@ -196,12 +206,15 @@ export function makeThreadService(options: {
     return result
   }
   async function execute(id: string, cmd: ThreadCommand): Promise<ThreadCommandResult> {
+    if (options.excludedThreadIds?.has(cmd.thread_id)) throw new AdmissionRejected('binding_mismatch')
     if ((await readUpgradeState(options.dataDirectory))?.phase === 'ready')
       return { type: 'thread.command_result', thread_id: cmd.thread_id, ok: false, code: 'node_upgrading' }
     // All stages share the command's outer budget; Worker launch owns at most 3 seconds.
     const deadline = performance.now() + 4500
     if (cmd.action === 'check_activity') {
       if (!cmd.activity_check_seq || !cmd.storage_generation) throw new AdmissionRejected('invalid_request')
+      const saved = await io(ledger.worker(cmd.thread_id))
+      if (!saved || saved.config.node_id !== options.identity.node_id) throw new AdmissionRejected('binding_mismatch')
       const reply = await host.request(
         cmd.thread_id,
         { type: 'status', ok: false, activity_check_seq: cmd.activity_check_seq },
@@ -266,6 +279,27 @@ export function makeThreadService(options: {
         }
         const generation = cmd.storage_generation ?? randomUUID()
         const paths = workerPaths(options.dataDirectory, cmd.thread_id)
+        let physicalExists = true
+        try {
+          await lstat(paths.threadDirectory)
+        } catch (error) {
+          if (isMissing(error)) physicalExists = false
+          else throw error
+        }
+        if (physicalExists) {
+          try {
+            const physical = readLedger(paths.ledger).initial.config
+            if (
+              !physical ||
+              physical.node_id !== options.identity.node_id ||
+              physical.thread_id !== cmd.thread_id ||
+              physical.storage_generation !== generation
+            )
+              throw new AdmissionRejected('binding_mismatch')
+          } catch {
+            throw new AdmissionRejected('binding_mismatch')
+          }
+        }
         const model = cmd.model ?? capability.default_model
         request = {
           type: 'thread_open',
@@ -377,6 +411,8 @@ export function makeThreadService(options: {
       await recovery.recoverAll(signal)
       recoverAt = now() + 30_000
       for (const saved of await io(ledger.pendingCommands())) {
+        const worker = await io(ledger.worker(saved.request.thread_id!))
+        if (!worker || worker.config.node_id !== options.identity.node_id) continue
         if (signal?.aborted) return
         try {
           await deliver(saved, performance.now() + 4500, true)
@@ -392,6 +428,7 @@ export function makeThreadService(options: {
       }
       let nextAt = Math.min(recoverAt, now() + 5000)
       for (const saved of await io(ledger.workers())) {
+        if (saved.config.node_id !== options.identity.node_id) continue
         if (signal?.aborted) return pollMs
         if (saved.history_unavailable) continue
         let poll = polls.get(saved.threadId)

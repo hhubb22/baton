@@ -17,6 +17,7 @@ export interface ProjectClock {
 export interface ProjectManagerOptions {
   dataDir: string
   nodeId?: string
+  excludedRunIds?: ReadonlySet<string>
   telemetry?: LocalTelemetry
   runtimeCommand?: ProcessCommand
   watchdogCommand?: ProcessCommand

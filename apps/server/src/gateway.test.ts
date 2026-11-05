@@ -432,12 +432,12 @@ test('routes model connection save, read and delete acknowledgements over the no
   }
 })
 
-test('validates RPCs before sending, including queued requests crossing the idle deadline', async () => {
+test('validates RPCs before sending, including credentials revoked while a request is queued', async () => {
   let validations = 0
   const f = await fixture(
     {
       validate: async () => {
-        if (++validations === 3) throw new AppError(401, 'node_idle_expired')
+        if (++validations === 3) throw new AppError(401, 'credential_revoked')
       },
     },
     undefined,
@@ -447,8 +447,8 @@ test('validates RPCs before sending, including queued requests crossing the idle
   const first = f.gateway.request(f.nodeId, f.employeeId, { type: 'files.browse', operation_id: randomUUID() })
   await expect.poll(() => rpcFrames(frames).length).toBe(1)
   const queued = f.gateway.request(f.nodeId, f.employeeId, { type: 'files.browse', operation_id: randomUUID() })
-  const rejected = expect(queued).rejects.toMatchObject({ code: 'node_idle_expired' })
-  // The first send and response are valid; the next queue validation observes expiry.
+  const rejected = expect(queued).rejects.toMatchObject({ code: 'credential_revoked' })
+  // The first send and response are valid; the next queue validation observes revocation.
   ws.send(
     JSON.stringify(
       envelope(
@@ -498,22 +498,22 @@ test('reserves RPC capacity during asynchronous validation and never sends from 
   expect(rpcFrames(replacement.frames)).toHaveLength(0)
 })
 
-test('database idle expiry closes a quiet connection and rejects durable sends without a heartbeat', async () => {
-  let expired = false
+test('credential revocation closes a quiet connection and rejects durable sends without a heartbeat', async () => {
+  let revoked = false
   const f = await fixture({
     validate: async () => {
-      if (expired) throw new AppError(401, 'node_idle_expired')
+      if (revoked) throw new AppError(401, 'credential_revoked')
     },
   })
   const { ws, frames } = await f.connect()
-  expired = true
+  revoked = true
   expect(await f.gateway.sendValidated(f.nodeId, f.employeeId, randomUUID(), { type: 'project_run_start' })).toBe(false)
   expect(frames).toHaveLength(2)
   const closed = once(ws, 'close')
   await f.gateway.closeExpiredConnections()
   const [code, reason] = await closed
   expect(code).toBe(1008)
-  expect(String(reason)).toBe('node_idle_expired')
+  expect(String(reason)).toBe('credential_revoked')
 })
 
 test('reading at capacity leaves management slots available and queues reads in order', async () => {

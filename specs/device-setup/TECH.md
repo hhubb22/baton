@@ -1,8 +1,10 @@
 # 设备接入技术设计
 
-Status: draft
+Status: partially implemented
 Owner: Asa
 Basis: [设备接入行为规格](PRODUCT.md) DS-01～DS-17；调查提交 `9c003f8`。
+
+设备码认证、长效可吊销凭据、CLI 本地控制通道与按需拉起、网页确认页和用户服务接管已实现。桌面客户端仍使用现有接入桥接与进程监管，尚未迁移至本地控制通道；Thread 和 Execution 继续使用独立 Worker。原生 launchd、systemd 用户会话、Windows 命名管道及桌面接入需在目标系统验证。
 
 ## 全景与架构
 

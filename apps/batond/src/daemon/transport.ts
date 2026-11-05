@@ -1,6 +1,7 @@
 import WebSocket, { type RawData } from 'ws'
 import { Agent as HttpAgent } from 'node:http'
 import { Agent as HttpsAgent } from 'node:https'
+import { getCACertificates } from 'node:tls'
 import { Schema } from 'effect'
 import { NodeFrame, MaxMessageBytes, type Frame } from '@baton/protocol'
 
@@ -17,14 +18,14 @@ export interface DaemonTransport {
   (url: string, options: { readonly signal: AbortSignal; readonly ca?: string }): Promise<DaemonConnection>
 }
 
-/** TLS verification stays enabled; a caller may supply additional trust roots. */
+/** Coordinator connections default to system trust; injected transports may supply fixture roots. */
 export const connectWebSocket: DaemonTransport = (url, options) =>
   new Promise((resolve, reject) => {
     const proxyEnv = process.env.NODE_USE_ENV_PROXY === '0' ? {} : process.env
     const agent = url.startsWith('wss:') ? new HttpsAgent({ proxyEnv }) : new HttpAgent({ proxyEnv })
     const socket = new WebSocket(url, {
       agent,
-      ca: options.ca,
+      ca: options.ca ?? getCACertificates('system'),
       minVersion: 'TLSv1.2',
       maxPayload: MaxMessageBytes,
       handshakeTimeout: 10_000,

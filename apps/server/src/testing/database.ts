@@ -152,7 +152,7 @@ export async function seedNode(run: TestDatabase['run'], overrides: SeedNodeOver
       const sql = yield* SqlClient.SqlClient
       yield* sql`INSERT INTO employees(id,username,display_name,auth_source,external_subject,must_change_password,created_at,updated_at) VALUES(${employeeId},${'u' + employeeId.replaceAll('-', '')},'Employee','test',${employeeId},false,now(),now()) ON CONFLICT (id) DO NOTHING`
       yield* sql`INSERT INTO nodes(id,employee_id,display_name,system_name,capabilities,registration_seq,registered_at,credential_version) VALUES(${nodeId},${employeeId},'Device','linux',ARRAY[]::text[],nextval('node_registration_seq'),now(),1)`
-      yield* sql`INSERT INTO node_credentials(id,node_id,employee_id,version,created_at,expires_at) VALUES(${credentialId},${nodeId},${employeeId},1,now(),now()+interval '1 day')`
+      yield* sql`INSERT INTO node_credentials(id,node_id,employee_id,version,created_at,expires_at) VALUES(${credentialId},${nodeId},${employeeId},1,now(),NULL)`
       yield* sql`INSERT INTO node_presence(node_id,employee_id,online,synced,incarnation,conn_id,status_updated_at) VALUES(${nodeId},${employeeId},${overrides.online ?? true},${overrides.synced ?? true},${source.incarnation},${source.conn_id},now())`
       if (overrides.report)
         yield* sql`INSERT INTO node_runtime_reports(node_id,employee_id,report_version,reported_at,report) VALUES(${nodeId},${employeeId},1,now(),${JSON.stringify(overrides.report)}::jsonb)`

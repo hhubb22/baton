@@ -228,7 +228,7 @@ function DeviceDetails({
   onAgents: () => void
   onAssistant: () => void
   onDefault: () => void
-  onReconnect: () => void
+  onReconnect?: () => void
   onDisconnect: () => void
 }) {
   const client = useClient()
@@ -263,10 +263,10 @@ function DeviceDetails({
       )}
       {updateState === 'accepted' && !device.updateRequest && <span role="status">等待设备更新</span>}
       {updateState === 'failed' && <span role="alert">无法更新，请重试。</span>}
-      {device.credentialState === 'idle_expired' && (
+      {onReconnect && device.credentialState === 'idle_expired' && (
         <span {...stylex.props(text.small, styles.attention)}>需要登录</span>
       )}
-      {device.connection === 'offline' && device.credentialState !== 'idle_expired' && (
+      {device.connection === 'offline' && (!onReconnect || device.credentialState !== 'idle_expired') && (
         <span {...stylex.props(text.small, text.muted)}>新对话将等待设备就绪。</span>
       )}
       <div {...stylex.props(styles.actions)}>
@@ -299,7 +299,7 @@ function DeviceDetails({
                 : '更新设备'}
           </Button>
         )}
-        {device.credentialState === 'idle_expired' && (
+        {onReconnect && device.credentialState === 'idle_expired' && (
           <Button small onClick={onReconnect}>
             重新连接设备
           </Button>
@@ -486,7 +486,7 @@ export function DevicesPage() {
                   onAgents={() => setAgentsDeviceId(device.id)}
                   onAssistant={() => setAssistantDeviceId(device.id)}
                   onDefault={() => chooseDefault(device)}
-                  onReconnect={() => setEnrolling(device)}
+                  onReconnect={inDesktop ? () => setEnrolling(device) : undefined}
                   onDisconnect={() => startDisconnect(device)}
                 />
               )}

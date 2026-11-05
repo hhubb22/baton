@@ -1223,6 +1223,30 @@ export class MockStore {
     this.emit('session', 'devices', 'threads', 'messages', 'projects', 'files', 'operations')
   }
 
+  // 浏览器批准登录时设备尚未连接；设备列表与默认设备立即反映新的绑定。
+  approveDeviceLogin(name: string, os: DeviceOS) {
+    const device: Device = {
+      id: this.nextId('dev'),
+      name,
+      os,
+      system: newDeviceDefaults[os].system,
+      batondVersion: '未报告',
+      connection: 'offline',
+      credentialState: 'active',
+      lastSeenAt: this.scheduler.now(),
+      registeredAt: this.scheduler.now(),
+      agents: [],
+      subscriptions: [],
+      hasRuntime: false,
+      folders: [],
+      repos: [],
+      commandAccess: { enabled: false, user: '设备用户', shell: '未报告' },
+    }
+    this.world.devices.push(device)
+    if (!this.world.session.defaultDeviceId) this.world.session.defaultDeviceId = device.id
+    this.emit('session', 'devices')
+  }
+
   createEnrollment(nodeId?: ID): EnrollmentRecord {
     if (nodeId !== undefined && this.device(nodeId).credentialState === 'revoked')
       throw new ClientError('conflict', '设备已断开')

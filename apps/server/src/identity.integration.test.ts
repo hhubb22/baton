@@ -85,6 +85,7 @@ describe('identity storage on local PostgreSQL', () => {
       '0017_outbox_created_at.sql',
       '0018_executions.sql',
       '0019_node_updates.sql',
+      '0020_device_login.sql',
     ])
     const names = await run(query<{ current: string }>('SELECT current_schema() AS current'))
     expect(names[0].current).toBe(schema)
@@ -175,6 +176,8 @@ describe('identity storage on local PostgreSQL', () => {
       await writeFile(join(directory, '0018_executions.sql'), executions)
       const nodeUpdates = await readFile(new URL('../../../migrations/0019_node_updates.sql', import.meta.url), 'utf8')
       await writeFile(join(directory, '0019_node_updates.sql'), nodeUpdates)
+      const deviceLogin = await readFile(new URL('../../../migrations/0020_device_login.sql', import.meta.url), 'utf8')
+      await writeFile(join(directory, '0020_device_login.sql'), deviceLogin)
       const checksums = await run(
         query<{ version: string; checksum: string }>(
           'SELECT version, checksum FROM schema_migrations ORDER BY version',
@@ -209,10 +212,10 @@ describe('identity storage on local PostgreSQL', () => {
         ]),
       )
       await writeFile(
-        join(directory, '0019_ordered.sql'),
+        join(directory, '0021_ordered.sql'),
         "CREATE TABLE migration_order (position integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY, step text NOT NULL); INSERT INTO migration_order(step) VALUES ('first');",
       )
-      await writeFile(join(directory, '0020_ordered.sql'), "INSERT INTO migration_order(step) VALUES ('second');")
+      await writeFile(join(directory, '0022_ordered.sql'), "INSERT INTO migration_order(step) VALUES ('second');")
       await run(migrateDatabase(directory))
       const versions = await run(
         query<{ version: string; applied_at: string }>(
@@ -221,8 +224,8 @@ describe('identity storage on local PostgreSQL', () => {
       )
       expect(versions.map((row) => row.version)).toEqual([
         ...rows.map((row) => row.version),
-        '0019_ordered.sql',
-        '0020_ordered.sql',
+        '0021_ordered.sql',
+        '0022_ordered.sql',
       ])
       await Promise.all([run(migrateDatabase(directory)), run(migrateDatabase(directory))])
       expect(await run(query('SELECT step FROM migration_order ORDER BY position'))).toEqual([
@@ -232,7 +235,7 @@ describe('identity storage on local PostgreSQL', () => {
       expect(await run(query('SELECT version, applied_at::text FROM schema_migrations ORDER BY version'))).toEqual(
         versions,
       )
-      await writeFile(join(directory, '0021_rollback.sql'), 'CREATE TABLE migration_rollback (id int); SELECT 1/0;')
+      await writeFile(join(directory, '0023_rollback.sql'), 'CREATE TABLE migration_rollback (id int); SELECT 1/0;')
       await expect(run(migrateDatabase(directory))).rejects.toMatchObject({ code: 'unavailable' })
       const rolledBack = await run(
         query<{ exists: boolean }>(
@@ -243,7 +246,7 @@ describe('identity storage on local PostgreSQL', () => {
       )
       expect(rolledBack[0].exists).toBe(false)
       expect(
-        await run(query('SELECT version FROM schema_migrations WHERE version=$1', ['0021_rollback.sql'])),
+        await run(query('SELECT version FROM schema_migrations WHERE version=$1', ['0023_rollback.sql'])),
       ).toHaveLength(0)
     } finally {
       await rm(directory, { recursive: true, force: true })
@@ -394,7 +397,7 @@ describe('identity storage on local PostgreSQL', () => {
     await run(Nodes.setDefaultDevice(alice.id, identity.node_id))
     expect((await run(Nodes.revokeNode(alice.id, identity.node_id))).status).toBe('pending')
     await expect(run(Nodes.authenticateNode(identity.credential.token, signer))).rejects.toMatchObject({
-      code: 'invalid_node_credential',
+      code: 'credential_revoked',
     })
     await expect(run(Nodes.touchNode(replacement))).rejects.toMatchObject({ code: 'node_source_rejected' })
     await expect(run(Nodes.markRevocationApplied(alice.id, identity.node_id))).rejects.toMatchObject({
@@ -409,59 +412,6 @@ describe('identity storage on local PostgreSQL', () => {
     expect(((await run(Nodes.listNodes(alice.id))).default_device as { node_id: string }).node_id).toBe(
       identity.node_id,
     )
-  })
-
-  it('revalidates credential expiry after waiting for a business lock', async () => {
-    const identity = await register(alice),
-      current = source(identity)
-    await run(Nodes.claimConnection(current))
-    await run(Nodes.syncNode(current, syncInput))
-    await run(
-      query("UPDATE node_credentials SET expires_at=clock_timestamp()+interval '0.3 seconds' WHERE id=$1::uuid", [
-        identity.credential.id,
-      ]),
-    )
-    await run(query('CREATE TABLE expiry_business (id integer PRIMARY KEY, changed boolean NOT NULL)'))
-    await run(query('INSERT INTO expiry_business VALUES (1,false)'))
-    let release!: () => void, locked!: () => void
-    const gate = new Promise<void>((resolve) => {
-        release = resolve
-      }),
-      acquired = new Promise<void>((resolve) => {
-        locked = resolve
-      })
-    const blocker = run(
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        yield* sql.withTransaction(
-          Effect.gen(function* () {
-            yield* sql`SELECT id FROM expiry_business WHERE id=1 FOR UPDATE`
-            locked()
-            yield* Effect.promise(() => gate)
-          }),
-        )
-      }),
-    )
-    await acquired
-    const waiting = run(
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        yield* sql.withTransaction(
-          Effect.gen(function* () {
-            yield* Nodes.lockNodeSource(current)
-            yield* sql`SELECT id FROM expiry_business WHERE id=1 FOR UPDATE`
-            yield* Nodes.revalidateNodeSource(current)
-            yield* sql`UPDATE expiry_business SET changed=true WHERE id=1`
-          }),
-        )
-      }),
-    )
-    // 让真实 PostgreSQL 的锁等待跨过凭据期限。
-    await new Promise((resolve) => setTimeout(resolve, 400))
-    release()
-    await blocker
-    await expect(waiting).rejects.toMatchObject({ code: 'node_idle_expired' })
-    expect((await run(query<{ changed: boolean }>('SELECT changed FROM expiry_business')))[0].changed).toBe(false)
   })
 
   it('resetting Coordinator presence requires a fresh connection and synchronization', async () => {

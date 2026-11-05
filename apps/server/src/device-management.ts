@@ -40,9 +40,8 @@ const decode = <A>(schema: Schema.Decoder<A>, input: unknown) =>
   })
 const authorize = Effect.fn('DeviceManagement.authorize')(function* (employeeId: string, nodeId: string) {
   const node = yield* decode(NodeStatus, yield* Nodes.getNode(employeeId, nodeId))
-  if (node.revocation_status !== 'none') return yield* Effect.fail(new AppError(403, 'forbidden', '不能操作该设备'))
-  if (node.credential_state === 'idle_expired')
-    return yield* Effect.fail(new AppError(401, 'node_idle_expired', '设备需要重新认证'))
+  if (node.revocation_status !== 'none' || node.credential_state === 'revoked')
+    return yield* Effect.fail(new AppError(403, 'forbidden', '不能操作该设备'))
   if (!node.online) return yield* Effect.fail(new AppError(503, 'node_offline'))
   if (!node.synced) return yield* Effect.fail(new AppError(503, 'node_syncing'))
   return node

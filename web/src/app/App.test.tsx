@@ -1032,126 +1032,23 @@ describe('devices', () => {
     if (phase === 'failed') expect(screen.getByText('0.9.2 · 更新失败')).toBeInTheDocument()
   })
 
-  it.each([
-    ['dev-windows', 'Windows Desktop', '$env:BATON_ENROLLMENT_TOKEN = Read-Host -MaskInput'],
-    ['dev-ubuntu', 'Ubuntu Dev', 'read -rs BATON_ENROLLMENT_TOKEN && export BATON_ENROLLMENT_TOKEN'],
-  ])('reconnects the original device %s with a new setup code', async (id, name, tokenInput) => {
+  it('opens device setup without issuing an enrollment secret', async () => {
     const user = userEvent.setup()
-    const { client, scheduler } = renderApp('/devices', 'normal', (client) => {
-      const read = client.listDevices.bind(client)
-      client.listDevices = async () =>
-        (await read()).map((device) =>
-          device.id === id && !device.credentialState
-            ? { ...device, connection: 'offline', credentialState: 'idle_expired' }
-            : device,
-        )
-    })
+    const { client } = renderApp('/devices', 'empty')
     const create = vi.spyOn(client, 'createEnrollment')
-    await screen.findByRole('button', { name: new RegExp(`^${name}`) })
-    expect(within(deviceRow(name)).getByText('需要登录')).toBeInTheDocument()
-    const before = (await client.listDevices()).find((device) => device.id === id)!
-    const defaultId = (await client.getSession()).defaultDeviceId
-    const threadIds = (await client.listThreads()).map((thread) => thread.id)
-
-    await user.click(deviceRow(name))
-    expect(screen.getAllByText('需要登录').length).toBeGreaterThan(0)
-    await user.click(screen.getByRole('button', { name: '重新连接设备' }))
-    const dialog = await screen.findByRole('dialog', { name: '重新连接设备' })
-    await within(dialog).findByText('等待设备连接…')
-    expect(within(dialog).getByText(name)).toBeInTheDocument()
-    expect(within(dialog).queryByLabelText('设备名称')).not.toBeInTheDocument()
-    expect(within(dialog).queryByRole('radiogroup', { name: '操作系统' })).not.toBeInTheDocument()
-    const command = within(dialog).getByLabelText('在终端运行')
-    expect(command.textContent).toBe(`${tokenInput}\nbatond reauth && batond up`)
-    expect(command.textContent).not.toContain(within(dialog).getByLabelText('设置码').textContent!)
-    const firstCode = within(dialog).getByLabelText('设置码').textContent
-
-    act(() => client.controls.expireEnrollment())
-    await within(dialog).findByRole('button', { name: '获取新设置码' })
-    client.controls.setReachable(false)
-    await user.click(within(dialog).getByRole('button', { name: '获取新设置码' }))
-    expect(await within(dialog).findByText('无法连接 Baton')).toBeInTheDocument()
-    client.controls.setReachable(true)
-    await user.click(within(dialog).getByRole('button', { name: '获取新设置码' }))
-    await within(dialog).findByText('等待设备连接…')
-    expect(within(dialog).getByLabelText('设置码').textContent).not.toBe(firstCode)
-    expect(create.mock.calls.map(([nodeId]) => nodeId)).toEqual([id, id, id])
-
-    act(() => client.controls.connectEnrollment('Another name', 'macOS'))
-    expect(await within(dialog).findByText('已连接')).toBeInTheDocument()
-    expect(within(dialog).getByText(name)).toBeInTheDocument()
-    act(() => scheduler.advance(browserLatency.device))
-    await user.click(within(dialog).getByRole('button', { name: '完成' }))
-    await waitFor(() => expect(screen.queryByText('需要登录')).not.toBeInTheDocument())
-    const devices = await client.listDevices()
-    expect(devices).toHaveLength(3)
-    expect(devices.find((device) => device.id === id)).toMatchObject({
-      ...before,
-      connection: 'online',
-      credentialState: 'active',
-      lastSeenAt: expect.any(Number),
-    })
-    expect((await client.getSession()).defaultDeviceId).toBe(defaultId)
-    expect((await client.listThreads()).map((thread) => thread.id)).toEqual(threadIds)
-    expect(screen.queryByRole('button', { name: '重新连接设备' })).not.toBeInTheDocument()
-  })
-
-  it('connects a device with a setup code and updates the counts', async () => {
-    const user = userEvent.setup()
-    const { client, scheduler } = renderApp('/devices', 'empty')
     await user.click(await screen.findByRole('button', { name: '连接设备' }))
     const dialog = await screen.findByRole('dialog', { name: '连接设备' })
-    expect(await within(dialog).findByText('等待设备连接…')).toBeInTheDocument()
-
-    await user.type(within(dialog).getByLabelText('设备名称'), 'Build Server')
+    await within(dialog).findByLabelText('在终端运行')
     await user.click(within(dialog).getByRole('radio', { name: 'Linux' }))
-    const command = within(dialog).getByLabelText('在终端运行')
-    expect(command).toHaveTextContent('read -rs BATON_ENROLLMENT_TOKEN && export BATON_ENROLLMENT_TOKEN')
-    expect(command).toHaveTextContent('batond up --coordinator')
-    expect(command).toHaveTextContent('--display-name "Build Server" --system linux')
-    expect(command.textContent).not.toMatch(/[A-Za-z0-9]{8}-[A-Za-z0-9]{4}-/)
-
-    await user.click(within(dialog).getByRole('button', { name: '复制命令' }))
-    expect(within(dialog).queryByText(/Clipboard blocked/)).not.toBeInTheDocument()
-
-    act(() => client.controls.connectEnrollment('Build Server', 'Linux'))
-    expect(await within(dialog).findByText('已连接')).toBeInTheDocument()
-    expect(within(dialog).getByText('Linux · 正在检查可用性…')).toBeInTheDocument()
-    act(() => scheduler.advance(browserLatency.device))
-    await waitFor(() => expect(within(dialog).queryByText(/Checking availability/)).not.toBeInTheDocument())
-    expect(within(dialog).queryByText(/No agents available/)).not.toBeInTheDocument()
-
-    await user.click(within(dialog).getByRole('button', { name: '完成' }))
-    expect(screen.getByRole('heading', { name: '1 台设备，1 台在线' })).toHaveFocus()
-    expect(within(deviceRow('Build Server')).getByText('默认')).toBeInTheDocument()
-  })
-
-  it('gets a new code after the old one expires and keeps the form', async () => {
-    const user = userEvent.setup()
-    const { client } = renderApp('/devices')
-    await user.click(await screen.findByRole('button', { name: '连接设备' }))
-    const dialog = await screen.findByRole('dialog', { name: '连接设备' })
-    await within(dialog).findByText('等待设备连接…')
-    await user.type(within(dialog).getByLabelText('设备名称'), 'Lab PC')
-    await user.click(within(dialog).getByRole('radio', { name: 'Windows' }))
-
-    act(() => client.controls.expireEnrollment())
-    expect((await within(dialog).findAllByText('设置码已过期')).length).toBeGreaterThan(0)
-
-    client.controls.setReachable(false)
-    await user.click(within(dialog).getByRole('button', { name: '获取新设置码' }))
-    expect(await within(dialog).findByText('无法连接 Baton')).toBeInTheDocument()
-
-    client.controls.setReachable(true)
-    await user.click(within(dialog).getByRole('button', { name: '获取新设置码' }))
-    expect(await within(dialog).findByText('等待设备连接…')).toBeInTheDocument()
-    expect(within(dialog).getByLabelText('设备名称')).toHaveValue('Lab PC')
     expect(within(dialog).getByLabelText('在终端运行')).toHaveTextContent(
-      '$env:BATON_ENROLLMENT_TOKEN = Read-Host -MaskInput',
+      `./batond login --coordinator '${window.location.origin}'`,
     )
-
-    act(() => client.controls.useEnrollmentElsewhere())
-    expect((await within(dialog).findAllByText('设置码已使用')).length).toBeGreaterThan(0)
+    expect(within(dialog).getByLabelText('在终端运行')).toHaveTextContent('./batond service install')
+    expect(within(dialog).queryByLabelText('设置码')).not.toBeInTheDocument()
+    expect(create).not.toHaveBeenCalled()
+    await user.click(within(dialog).getByRole('button', { name: '关闭' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: '你的设备' })).toHaveFocus()
   })
 
   it('removes used folders from the selection dialog and keeps a folder when removal fails', async () => {

@@ -12,7 +12,7 @@
 
 `node server.cjs --version` 无需数据库配置即可输出构建版本、提交、平台、协议与格式版本；默认身份为 `development`。公开只读的 `GET /api/v1/release` 返回相同发布元数据，无需登录，不访问或续期设备凭据；已登录诊断的 `release` 字段与其一致。节点身份验证后、登记业务连接和同步前核对协议版本，产品版本不同可以共存；协议不兼容返回 `node_version_incompatible` 并关闭业务连接，不改写业务、outbox 或设备凭据。
 
-设备更新管理独立于业务协议：`GET /api/v1/node-update/pending` 和 `POST /api/v1/node-update/request|report|availability` 使用现有设备 Bearer 凭据，逐次验证归属、吊销和闲置期限。管理请求不登记业务 Presence，也不开放任务派发。网页通过受会话和 CSRF 保护的 `POST /api/v1/nodes/:nodeId/update` 为自己的设备保存更新请求；设备离线时请求继续保留。未上报 `update_protocol: 1` 且从未连接更新管理通道的旧设备返回 `update_bootstrap_required`，需要在本机先安装支持更新的版本。
+设备更新管理独立于业务协议：`GET /api/v1/node-update/pending` 和 `POST /api/v1/node-update/request|report|availability` 使用现有设备 Bearer 凭据，逐次验证归属和吊销状态。管理请求不登记业务 Presence，也不开放任务派发。网页通过受会话和 CSRF 保护的 `POST /api/v1/nodes/:nodeId/update` 为自己的设备保存更新请求；设备离线时请求继续保留。未上报 `update_protocol: 1` 且从未连接更新管理通道的旧设备返回 `update_bootstrap_required`，需要在本机先安装支持更新的版本。
 
 同一设备的活动更新请求只有一个；失败后显式重试沿用 `operation_id` 并增加 `attempt`，旧轮次的报告不改变新轮次状态。`NodeStatus.update_request` 提供阶段和安全错误码；`update_management_last_seen` 与 `update_availability` 提供最近管理联系、可用版本和检查时间，业务在线状态仍由原 Presence 决定。更新管理不接收下载地址、程序路径或任意命令。
 
@@ -58,6 +58,8 @@
 RPC 发送后的期限可设为 100 ms 至 120 秒。队列满或排队超时返回 `node_busy`，过期请求不会发送；已发送请求超时返回 `node_timeout`，中心不自动重发管理操作。断线、连接替换和中心关闭会清除等待队列，旧回复仍须匹配连接、请求和操作身份才能被接受。
 
 ## 设备接入与远程 Thread
+
+设备码登录由 `/api/v1/device-auth/sessions` 与 `/token` 提供匿名申请和轮询；申请按 IP 限制每分钟 20 次。员工经会话、Origin 和 CSRF 校验确认或拒绝设备，中心在单事务中创建节点和长效可吊销凭据，并初始化默认设备。设备码仅返回申请方，中心只保存摘要，不进入员工查询或日志。相同设备码在会话期限内重复换取返回原身份，避免响应丢失重复绑定。设备连接凭据无闲置过期或探活续期。
 
 账号、证书与注册步骤见 [根文档](../../README.md#中心服务与员工账号)。
 

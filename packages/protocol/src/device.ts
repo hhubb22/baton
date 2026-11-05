@@ -194,7 +194,7 @@ export const NodeCredential = Schema.Struct({
   id: Text,
   version: NonNegativeInteger,
   token: Text,
-  expires_at: Timestamp,
+  expires_at: Schema.NullOr(Timestamp),
 })
 export type NodeCredential = typeof NodeCredential.Type
 
@@ -212,6 +212,50 @@ export const NodeIdentity = Schema.Struct({
   signing_public_key: Schema.optionalKey(Text),
 })
 export type NodeIdentity = typeof NodeIdentity.Type
+
+const DeviceLoginUserCode = boundedText(32)
+export const DeviceLoginCreateInput = Schema.Struct({
+  display_name: summary(1024).check(Schema.isBetweenCodePoints(1, 80), Schema.isTrimmed()),
+  system: Schema.Literals(['macos', 'linux', 'windows']),
+})
+export type DeviceLoginCreateInput = typeof DeviceLoginCreateInput.Type
+
+export const DeviceLoginSession = Schema.Struct({
+  session_id: UUID,
+  user_code: DeviceLoginUserCode,
+  ...DeviceLoginCreateInput.fields,
+  expires_at: Timestamp,
+})
+export type DeviceLoginSession = typeof DeviceLoginSession.Type
+
+export const DeviceLoginCreateResponse = Schema.Struct({
+  session_id: UUID,
+  device_code: Text,
+  user_code: DeviceLoginUserCode,
+  verification_uri: Text,
+  verification_uri_complete: Text,
+  expires_at: Timestamp,
+  expires_in_seconds: Schema.Literal(600),
+  interval_seconds: Schema.Literal(2),
+})
+export type DeviceLoginCreateResponse = typeof DeviceLoginCreateResponse.Type
+
+export const DeviceLoginApprovalInput = Schema.Struct({ user_code: DeviceLoginUserCode })
+export type DeviceLoginApprovalInput = typeof DeviceLoginApprovalInput.Type
+
+export const DeviceLoginTokenInput = Schema.Struct({
+  session_id: UUID,
+  device_code: boundedText(128),
+})
+export type DeviceLoginTokenInput = typeof DeviceLoginTokenInput.Type
+
+export const DeviceLoginTokenResponse = Schema.Union([
+  Schema.Struct({ status: Schema.Literal('pending'), interval_seconds: Schema.Literal(2) }),
+  Schema.Struct({ status: Schema.Literal('approved'), identity: NodeIdentity }),
+  Schema.Struct({ status: Schema.Literal('denied') }),
+  Schema.Struct({ status: Schema.Literal('expired') }),
+])
+export type DeviceLoginTokenResponse = typeof DeviceLoginTokenResponse.Type
 
 export const NodeRevocation = Schema.Struct({
   status: Text,
@@ -461,7 +505,7 @@ export const NodeStatus = Schema.Struct({
   synced: Schema.Boolean,
   executable: Schema.Boolean,
   credential_state: Schema.optionalKey(Schema.Literals(['active', 'idle_expired', 'revoked'])),
-  idle_expires_at: Schema.optionalKey(Timestamp),
+  idle_expires_at: Schema.optionalKey(Schema.NullOr(Timestamp)),
   revocation_status: Text,
   revocation: Schema.optionalKey(Schema.NullOr(NodeRevocation)),
 })

@@ -189,7 +189,7 @@ export const claimCommands = () =>
     FROM execution_outbox o JOIN executions e ON e.id=o.execution_id JOIN nodes n ON n.id=e.node_id
     JOIN node_presence p ON p.node_id=n.id JOIN node_credentials c ON c.node_id=n.id AND c.version=n.credential_version
     WHERE o.acked_at IS NULL AND o.next_attempt_at<=clock_timestamp() AND p.online AND p.synced
-      AND n.revoked_at IS NULL AND c.revoked_at IS NULL AND c.expires_at>clock_timestamp()
+      AND n.revoked_at IS NULL AND c.revoked_at IS NULL
       AND e.status IN ('pending','running')
       AND (o.action='stop' OR e.stop_requested_at IS NULL)
       AND (o.action='stop' OR COALESCE((SELECT u.phase IN ('completed','cancelled') FROM node_upgrades u WHERE u.node_id=n.id ORDER BY u.id DESC LIMIT 1),true))

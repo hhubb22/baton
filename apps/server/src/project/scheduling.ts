@@ -9,7 +9,7 @@ import { releaseMemoryAttempt, yieldMemoryToForeground } from './memory-jobs.ts'
 import { activeInputSQL, projectError, projectTransaction, recoveryWorkSQL, releaseProjectRun } from './store.ts'
 
 const activeCredential = (sql: SqlClient.SqlClient) =>
-  sql`EXISTS(SELECT 1 FROM node_credentials nc WHERE nc.node_id=n.id AND nc.employee_id=n.employee_id AND nc.version=n.credential_version AND nc.revoked_at IS NULL AND nc.expires_at>clock_timestamp())`
+  sql`EXISTS(SELECT 1 FROM node_credentials nc WHERE nc.node_id=n.id AND nc.employee_id=n.employee_id AND nc.version=n.credential_version AND nc.revoked_at IS NULL)`
 
 export const expireProjectNodeLeases = Effect.fn('expireProjectNodeLeases')(function* () {
   yield* projectTransaction(
@@ -17,7 +17,7 @@ export const expireProjectNodeLeases = Effect.fn('expireProjectNodeLeases')(func
       const sql = yield* SqlClient.SqlClient
       const agents = yield* sql<{ id: string }>`SELECT a.id FROM project_agents a WHERE EXISTS(
       SELECT 1 FROM agent_runs r JOIN nodes n ON n.id=r.node_id JOIN node_credentials nc ON nc.node_id=n.id AND nc.version=n.credential_version
-      WHERE r.agent_id=a.id AND nc.revoked_at IS NULL AND nc.expires_at<=clock_timestamp()
+      WHERE r.agent_id=a.id AND (nc.revoked_at IS NOT NULL OR n.revoked_at IS NOT NULL)
       AND (a.lease_run_id=r.id OR EXISTS(SELECT 1 FROM project_memory_jobs j WHERE j.attempt_id=r.id)))
       ORDER BY a.id LIMIT 32 FOR NO KEY UPDATE OF a SKIP LOCKED`
       for (const agent of agents) {
@@ -29,11 +29,11 @@ export const expireProjectNodeLeases = Effect.fn('expireProjectNodeLeases')(func
         WHERE a.id=${agent.id} AND (a.lease_run_id=r.id OR EXISTS(SELECT 1 FROM project_memory_jobs j WHERE j.attempt_id=r.id)) ORDER BY r.id`
         for (const run of runs) {
           yield* sql`SELECT id FROM nodes WHERE id=${run.node_id} FOR UPDATE`
-          const expired =
-            yield* sql`SELECT nc.id FROM node_credentials nc JOIN nodes n ON n.id=nc.node_id WHERE n.id=${run.node_id} AND nc.version=n.credential_version AND nc.revoked_at IS NULL AND nc.expires_at<=clock_timestamp() FOR UPDATE OF nc`
-          if (!expired.length) continue
-          if (run.memory_job_id) yield* releaseMemoryAttempt(run.memory_job_id, 'node_idle_expired')
-          else yield* releaseProjectRun(agent.id, 'lost', 'node_idle_expired')
+          const revoked =
+            yield* sql`SELECT nc.id FROM node_credentials nc JOIN nodes n ON n.id=nc.node_id WHERE n.id=${run.node_id} AND nc.version=n.credential_version AND (nc.revoked_at IS NOT NULL OR n.revoked_at IS NOT NULL) FOR UPDATE OF nc`
+          if (!revoked.length) continue
+          if (run.memory_job_id) yield* releaseMemoryAttempt(run.memory_job_id, 'credential_revoked')
+          else yield* releaseProjectRun(agent.id, 'lost', 'credential_revoked')
         }
       }
     }),
@@ -91,7 +91,7 @@ export const scheduleProjectRun = Effect.fn('scheduleProjectRun')(function* (age
           run?.revoked
             ? 'node_revoked'
             : run?.expired
-              ? 'node_idle_expired'
+              ? 'credential_revoked'
               : a.status === 'active'
                 ? 'lease_expired'
                 : `project_${a.status}`,

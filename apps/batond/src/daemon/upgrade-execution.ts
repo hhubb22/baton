@@ -5,15 +5,15 @@ import { executionPaths } from '../execution/paths.ts'
 import { openExecutionLedger } from '../execution/ledger.ts'
 
 /** Only used after the upgrade barrier has confirmed that execution Workers are stopped. */
-export function syncingExecutionReports(dataDirectory: string) {
+export function syncingExecutionReports(dataDirectory: string, excludedIds?: ReadonlySet<string>) {
   return {
     async collectReports() {
-      return (await inspectExecutions(dataDirectory)).flatMap(({ state }) =>
+      return (await inspectExecutions(dataDirectory, excludedIds)).flatMap(({ state }) =>
         state.reports.filter((entry) => !entry.acked).map((entry) => entry.report),
       )
     },
     async ack(result: ExecutionReportResult) {
-      if (!result.ok) return
+      if (!result.ok || excludedIds?.has(result.execution_id)) return
       const path = executionPaths(dataDirectory, result.execution_id).ledger
       await Effect.runPromise(
         Effect.scoped(

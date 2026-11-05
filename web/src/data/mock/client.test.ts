@@ -48,10 +48,57 @@ describe('mock downloads', () => {
         Object.assign(downloads, { items: [] })
         expect((await client.getDownloads()).items).toHaveLength(5)
       } else {
-        expect(downloads).toMatchObject({ items: [], connect_url: null, ca_sha256: null })
+        expect(downloads).toMatchObject({ items: [], connect_url: null })
       }
     },
   )
+})
+
+describe('mock device login', () => {
+  it('creates one offline device on approval and updates the default without exposing a secret', async () => {
+    const { client } = setup('empty')
+    const session = await client.getDeviceLoginSession('abcd-efgh')
+    expect(session).not.toHaveProperty('device_code')
+    expect(await client.listDevices()).toEqual([])
+    await client.approveDeviceLoginSession(session.session_id, session.user_code)
+    await client.approveDeviceLoginSession(session.session_id, session.user_code)
+    const devices = await client.listDevices()
+    expect(devices).toHaveLength(1)
+    expect(devices[0]).toMatchObject({
+      name: session.display_name,
+      os: 'Linux',
+      connection: 'offline',
+      credentialState: 'active',
+    })
+    expect((await client.getSession()).defaultDeviceId).toBe(devices[0]!.id)
+    await expect(client.getDeviceLoginSession(session.user_code)).rejects.toMatchObject({ status: 404 })
+    client.controls.reset()
+    expect(await client.listDevices()).toEqual([])
+    expect(await client.getDeviceLoginSession(session.user_code)).toEqual(session)
+  })
+
+  it('denies a request without creating a device and rejects later approval', async () => {
+    const { client } = setup('empty')
+    const session = await client.getDeviceLoginSession('ABCD-EFGH')
+    await client.denyDeviceLoginSession(session.session_id)
+    await client.denyDeviceLoginSession(session.session_id)
+    await expect(client.approveDeviceLoginSession(session.session_id, session.user_code)).rejects.toMatchObject({
+      status: 409,
+    })
+    expect(await client.listDevices()).toEqual([])
+  })
+
+  it('requires an employee login and refuses expired codes', async () => {
+    const { client, scheduler } = setup('signedOut')
+    await expect(client.getDeviceLoginSession('ABCD-EFGH')).rejects.toMatchObject({ code: 'unauthorized' })
+    await client.signIn('kaken', 'sample-password')
+    const session = await client.getDeviceLoginSession('ABCD-EFGH')
+    scheduler.advance(600_000)
+    await expect(client.getDeviceLoginSession('ABCD-EFGH')).rejects.toMatchObject({ status: 410 })
+    await expect(client.approveDeviceLoginSession(session.session_id, session.user_code)).rejects.toMatchObject({
+      status: 410,
+    })
+  })
 })
 
 describe('mock scenarios', () => {

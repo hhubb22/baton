@@ -72,7 +72,7 @@ export const claimCommands = (): DB<ClaimedCommand[]> =>
       const rows = yield* sql.unsafe<{ command: Outbox; thread: Thread }>(`WITH candidates AS MATERIALIZED (
     SELECT p.node_id FROM node_presence p JOIN nodes n ON n.id=p.node_id AND n.employee_id=p.employee_id
     JOIN node_credentials c ON c.node_id=n.id AND c.employee_id=n.employee_id AND c.version=n.credential_version
-      AND c.revoked_at IS NULL AND c.expires_at>clock_timestamp()
+      AND c.revoked_at IS NULL
     CROSS JOIN LATERAL (SELECT o.id,o.next_attempt_at FROM thread_outbox o WHERE o.node_id=p.node_id AND ${due} ORDER BY o.next_attempt_at,o.id LIMIT 1) first_due
     WHERE p.online AND p.synced AND n.revoked_at IS NULL ORDER BY first_due.next_attempt_at,first_due.id
   ) SELECT command.* FROM candidates p CROSS JOIN LATERAL (
@@ -158,7 +158,7 @@ export const claimCommands = (): DB<ClaimedCommand[]> =>
         FROM threads t JOIN thread_turns v ON v.thread_id=t.id AND v.ended_at IS NULL
         JOIN nodes n ON n.id=t.node_id AND n.employee_id=t.employee_id AND n.revoked_at IS NULL
         JOIN node_credentials c ON c.node_id=n.id AND c.employee_id=n.employee_id AND c.version=n.credential_version
-          AND c.revoked_at IS NULL AND c.expires_at>clock_timestamp()
+          AND c.revoked_at IS NULL
         JOIN node_presence p ON p.node_id=n.id AND p.employee_id=n.employee_id AND p.online AND p.synced
         WHERE t.status='running' AND t.last_reported_at<clock_timestamp()-interval '30 seconds'
           AND EXISTS(SELECT 1 FROM thread_events e WHERE e.thread_id=t.id AND e.kind='turn.started'

@@ -1117,47 +1117,21 @@ describe('lease validation after lock waits', () => {
     30_000,
   )
 
-  it(
-    'rejects a historical cleanup receipt when its credential expires during the run lock wait',
-    async () =>
-      withTestDatabase(async ({ run }) => {
-        const a = await fixture(run),
-          p = await a.create(),
-          r = await a.start(p)
-        await run(projects.stopProject(a.employee, p.id))
-        let receipt: Promise<unknown> | undefined
-        await withRowLocks(run, 'agent_runs', [r.identity.run_id], async () => {
-          await run(
-            Effect.gen(function* () {
-              const sql = yield* SqlClient.SqlClient
-              yield* sql`UPDATE node_credentials SET expires_at=clock_timestamp()+interval '0.2 seconds' WHERE id=${a.credential}`
-            }),
-          )
-          receipt = r.rpc('stopped')
-          void receipt.catch(() => undefined)
-          await run(
-            Effect.gen(function* () {
-              const sql = yield* SqlClient.SqlClient
-              yield* sql`SELECT pg_sleep(0.3)`
-            }),
-          )
-        })
-        await expect(receipt).rejects.toMatchObject({ code: 'node_idle_expired' })
-        expect((await run(projects.projectStatus(a.employee, p.id))).run?.stop_acked_at).toBeUndefined()
-        await run(
-          Effect.gen(function* () {
-            const sql = yield* SqlClient.SqlClient
-            yield* sql`UPDATE node_credentials SET expires_at=clock_timestamp()+interval '1 day' WHERE id=${a.credential}`
-          }),
-        )
-        await r.rpc('stopped')
-        expect((await run(projects.projectStatus(a.employee, p.id))).run).toMatchObject({
-          state: 'finished',
-          end_reason: 'user_stopped',
-        })
-      }),
-    30_000,
-  )
+  it('rejects a historical cleanup receipt from a revoked credential', async () =>
+    withTestDatabase(async ({ run }) => {
+      const a = await fixture(run),
+        p = await a.create(),
+        r = await a.start(p)
+      await run(projects.stopProject(a.employee, p.id))
+      await run(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          yield* sql`UPDATE node_credentials SET revoked_at=clock_timestamp() WHERE id=${a.credential}`
+        }),
+      )
+      await expect(r.rpc('stopped')).rejects.toMatchObject({ code: 'lease_lost' })
+      expect((await run(projects.projectStatus(a.employee, p.id))).run?.stop_acked_at).toBeUndefined()
+    }))
 })
 
 it(

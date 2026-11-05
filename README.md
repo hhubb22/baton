@@ -39,62 +39,47 @@ node apps/server/dist/server.cjs serve
 
 中心默认监听 `127.0.0.1:8080`，由支持 WebSocket 的 HTTPS 反向代理接入；直接 HTTPS 可同时配置 `BATON_TLS_CERT_FILE` 和 `BATON_TLS_KEY_FILE`。签名密钥默认保存在工作目录的 `node-signing.key`，可用 `BATON_NODE_SIGNING_KEY` 指定。文件不存在时生成 `0600` Ed25519 私钥，已有文件校验类型、权限、所有者与内容；Windows 不校验权限位和所有者，依赖目录继承的 ACL。部署时须持久保存数据库和密钥。
 
-中心数据库恢复旧备份后，在停服状态下显式运行 `node apps/server/dist/server.cjs admin restore-finalize`，再启动 `serve`。该命令要求配套的原签名密钥，注销旧会话、使旧设备凭据过期、暂停旧命令派发并将不确定输入和运行标为未知或 lost，Project 保持暂停。员工重新登录、核对原设备并重新认证后，才恢复连接与结果补报。备份材料、数据回退影响、格式兼容检查和操作步骤见 [备份与恢复](specs/release/TECH.md#备份与恢复)。
+中心数据库恢复旧备份后，在停服状态下显式运行 `node apps/server/dist/server.cjs admin restore-finalize`，再启动 `serve`。该命令要求配套的原签名密钥，注销旧浏览器会话、使待确认的设备码会话过期、暂停旧命令派发并将不确定输入和运行标为未知或 lost，Project 保持暂停。未吊销的长效设备凭据与原有吊销事实保留；设备重连并重新同步后恢复可用，未决命令不自动重发。备份材料、数据回退影响、格式兼容检查和操作步骤见 [备份与恢复](specs/release/TECH.md#备份与恢复)。
 
 也可用容器部署中心。根目录的 `Dockerfile` 以 `node:26-bookworm-slim` 构建中心 bundle，由非 root 的 `baton` 用户在 `/var/lib/baton` 运行，签名密钥保存在该目录。`compose.yaml` 同时启动带 pgvector 的 PostgreSQL 16，须设置 `BATON_POSTGRES_PASSWORD` 与 `BATON_ALLOWED_ORIGINS`；中心默认映射到 `127.0.0.1:8080`，可用 `BATON_BIND_ADDR` 和 `BATON_PORT` 修改。账号管理通过 `docker compose exec baton-server node /opt/baton/server.cjs admin employee create …` 执行。
 
-实验室阶段使用当前 schema 基线，结构变化后可重建本地数据。迁移按版本记录幂等执行，正式发布后可用于增量迁移。证书须匹配访问主机名，浏览器和节点须信任签发 CA。反向代理同时转发普通 HTTP 请求及 `/v1/node`、`/api/v1/events` 的 WebSocket 升级。
+实验室阶段使用当前 schema 基线，结构变化后可重建本地数据。迁移按版本记录幂等执行，正式发布后可用于增量迁移。证书须匹配访问主机名，并由系统根证书库信任。反向代理同时转发普通 HTTP 请求及 `/v1/node`、`/api/v1/events` 的 WebSocket 升级。
 
 ### 安装包下载
 
 中心可通过 `BATON_DOWNLOADS_DIR` 托管发布安装包；每个包旁须有同名 `.sha256` 文件。支持的文件名为：
 
-- CLI：`baton-<版本>-<darwin-arm64|linux-x64|linux-arm64>.tar.gz`、`baton-<版本>-win-x64.zip`。
+- CLI：`baton-<版本>-<darwin-arm64|linux-x64|linux-arm64>.tar.gz`。
 - 桌面客户端：`baton-desktop-<版本>-darwin-arm64.dmg`、`baton-desktop-<版本>-win32-x64.exe`。
 
 ```sh
 export BATON_DOWNLOADS_DIR='/srv/baton/releases'
-export BATON_PUBLIC_CA_FILE='/srv/baton/ca.pem'
 node apps/server/dist/server.cjs serve
 ```
 
-公共 CA 签发的中心证书可省略 `BATON_PUBLIC_CA_FILE`。中心核对已发布安装包的 SHA-256 后原样提供；中心地址和 CA 通过接入链接或命令参数单独传递，不修改签名归档。
+中心核对同版本安装包的 SHA-256 后原样提供；接入链接只传递 HTTPS 中心地址，不包含证书或秘密。Windows 下载清单只展示桌面客户端。
 
 `GET /api/v1/downloads` 与 `GET /downloads/<文件名>` 无需登录；未配置目录时清单返回 `enabled: false`。反向代理须转发 `/downloads/`，并保留浏览器请求的 Host，使中心能从 `BATON_ALLOWED_ORIGINS` 选择对应的 HTTPS 源。Host 无匹配时不生成接入链接，安装包仍可下载。
 
-网页注册对话框按平台展示下载链接、版本、大小、SHA-256 和终端命令；Windows 引导下载桌面客户端。Devices 页面提供「Open in desktop app」接入链接。未配置下载时保留原有接入命令。
+网页添加设备弹窗按平台展示下载链接、版本、大小、SHA-256 与无秘密的登录和用户服务命令；Windows 引导下载桌面客户端。Devices 页面提供「在客户端中打开」接入链接。
 
 ### 设备接入
 
-登录网页，在 Devices 领取一次性注册凭据后，在设备上的仓库目录运行：
+在 macOS 或 Linux 安装包目录运行：
 
 ```sh
-BATON_ENROLLMENT_TOKEN='<网页提供的一次性注册凭据>' \
-  node apps/batond/dist/batond.cjs up --coordinator https://baton.example
+./batond login --coordinator https://baton.example
+./batond status
+./batond service install
 ```
 
-已有身份时 `up` 直接复用。首次无目录配置时开放当前用户主目录，已有配置（含空列表）保留；可加 `--workspace /绝对路径` 幂等登记已有目录。网页上在新建对话的选目录弹窗中输入路径添加或移除授权目录。显示名默认主机名，系统自动识别。
+登录命令按需拉起本机唯一的后台守护进程，展示验证网址、短验证码和有效期；有图形环境时打开浏览器。员工在已登录的 `/device-login` 页面核对设备名称、系统和短码，确认后设备自动保存身份并连接中心。登录会话有效期为 10 分钟；过期、拒绝或取消后可重新发起。Ctrl-C 只退出终端等待，取消后台登录使用 `batond login --cancel`。
 
-也可以分步操作：
+已有同中心身份时直接复用；跨中心或凭据已吊销时先执行 `batond logout` 再登录。登出断开中心、停止本机活动执行并清除绑定，保留账本、目录配置和模型凭据。重新绑定后，旧绑定的任务、待发送报告与输出保持隔离，不自动执行或发往新中心。设备连接使用系统根证书库验证 HTTPS / WSS，不需要导入应用私有 CA。设备连接凭据长期有效，直至显式吊销。
 
-```sh
-BATON_ENROLLMENT_TOKEN='<网页提供的一次性注册凭据>' \
-  node apps/batond/dist/batond.cjs register --coordinator https://baton.example
-node apps/batond/dist/batond.cjs files add --id repo --path /你的代码目录
-node apps/batond/dist/batond.cjs run
-```
+默认数据目录为 `~/.baton/data`，各命令可指定相同的 `--data-dir`。CLI 与本地客户端共享受令牌保护的控制通道；`status` 查询未绑定、等待确认、连接中、同步中、在线或已拒绝状态，协议不兼容或凭据已吊销时停止自动重连并保留原因。首次登录且目录配置不存在时开放用户主目录，已有配置（含空列表）保留。目录可在新建对话的选目录弹窗或通过本机 `files` 命令维护。
 
-注册将规范化的中心 HTTPS 地址保存为 `identity.json` 的 `coordinator_url`，`run` 据此推导 WSS 地址；`--relay` 可显式指定。默认数据目录为 `~/.baton/data`，所有命令使用相同的 `--data-dir`。注册凭据也可用 `--enrollment-file` 从私有文件读取。SEA 安装包首次执行 `up` 或 `register` 时，中心地址与 CA 可来自安装目录的 `deployment.json`，显式 `--coordinator` 和 `--ca-file` 优先；源码和 bundle 入口仍需指定中心地址。注册或重新认证成功后，CA 保存为数据目录的私有文件 `coordinator-ca.pem`，后续 `up`、`run`、`reauth` 与设备更新默认使用它，`--ca-file` 可覆盖。已有身份不读取安装包的部署配置。`batond identity` 输出注册状态、中心地址与公开身份，不含凭据。更多本地命令和恢复语义见 [节点文档](apps/batond/README.md)。
-
-macOS 与 Linux 可以将已注册设备安装为当前用户的后台服务；先停止前台运行的 daemon，再执行：
-
-```sh
-node apps/batond/dist/batond.cjs service install
-node apps/batond/dist/batond.cjs service status
-node apps/batond/dist/batond.cjs service uninstall
-```
-
-安装包直接使用 `batond service install|status|uninstall`。命令支持 `--data-dir`，默认 `~/.baton/data`。每个系统用户只有一个服务，重复安装会改用当前程序路径和指定的数据目录并重启；升级后在目标安装目录再次执行 `service install` 即可切换入口。服务在登录后启动，异常退出后自动重启，日志写入数据目录下的 `logs/batond.log`。卸载停止服务并移除服务定义，保留身份、日志和其他本地数据。`status` 输出是否安装、是否运行、程序路径和日志路径，不要求传入安装时的数据目录。
+macOS / Linux 的 `service install` 将守护进程交给当前用户的 launchd / systemd 服务：先正常停止已有后台实例，再接管启动。`service status` 显示是否安装、运行状态、程序路径与日志路径；`service uninstall` 停止并移除服务，保留本地数据。重复安装使用当前程序路径；系统命令失败时恢复原服务定义。Linux 要求可用的 systemd 用户实例与 `XDG_RUNTIME_DIR`，未开启 linger 时注销将停止服务。Windows 不支持 CLI 用户服务。
 
 macOS 与 Linux 的安装包解压后运行一次 `./batond install`，之后可以删除解压目录，在任意位置使用 `batond`。安装后的文件都在 `~/.baton`：`data/` 放身份、Thread 数据和订阅凭据，`program/` 放程序，`backups/` 放升级备份；命令入口是 `~/.local/bin/batond`，该目录不在 PATH 时命令会提示。每次更新完成后只保留当前版本和用于回滚的上一版。
 
@@ -103,8 +88,6 @@ macOS 与 Linux 的安装包解压后运行一次 `./batond install`，之后可
 指定 `--data-dir` 时，程序放在该目录的 `installation/`，备份放在同级的 `<目录>.upgrade-backups`，一台机器上可以这样运行多份互不影响的安装。
 
 Linux 需要有效的 `XDG_RUNTIME_DIR` 和 systemd 用户实例；`status` 还显示 linger 状态，未开启时提示管理员为需要注销后保持运行的用户开启 linger。Windows 使用桌面客户端，不支持 CLI 用户服务。
-
-设备连接凭据在连续 30 天没有有效业务后过期。心跳、重连、能力探测和后台记忆整理不续期。过期后为原设备领取重新认证口令，停止该设备的 batond，再用同一数据目录执行 `batond reauth --enrollment-file <私有文件>`，随后运行 `batond up`。设备与 Thread ID、本地历史和待补报结果保留。
 
 六个 Agent 在程序或 SDK 已安装且认证有效或未知时报告 `available`，按上游 adapter 与已实现的执行路径开放新建与恢复。版本、系统与认证未知写入诊断，缺少某个组合的验证证据不会关闭能力。缺程序、明确未认证或已确认运行依赖失败时报告 `unavailable`。探测只检查认证、模型和依赖，不发送推理请求。
 
@@ -125,6 +108,8 @@ batond update policy manual --data-dir /原数据目录
 ```
 
 默认等待正在运行的任务结束；`update policy idle` 允许设备空闲时自动更新，迁移前可用 `batond update cancel` 取消。桌面客户端使用「更新并重启」。升级前设备生成一致备份，目标版本使用独立目录和固定启动入口；断线后继续等待中心，结果补报并确认完成后恢复队列。
+
+登出重绑后保留的旧任务和未确认报告仍会被现有更新就绪检查计入阻塞；可先停止守护进程并覆盖安装。旧更新链路的清理由发布切片处理，旧绑定数据继续保留。
 
 正式发布基线之前的本地实验数据可重建。备份、失败恢复与验证范围见 [设备准备与切换](specs/release/TECH.md#设备准备与切换)。
 
@@ -157,12 +142,10 @@ node apps/batond/dist/batond.cjs project-runtime connection-key <连接 ID> < ke
 | `BATON_TLS_CERT_FILE` / `BATON_TLS_KEY_FILE` | 中心 | 直接提供 HTTPS/WSS 时的证书与私钥 |
 | `BATON_WEB_DIR` | 中心 | 网页目录，默认 bundle 旁的 `web/` |
 | `BATON_DOWNLOADS_DIR` | 中心 | 发布安装包与同名 `.sha256` 所在目录；未配置时不提供下载 |
-| `BATON_PUBLIC_CA_FILE` | 中心 | 注入 CLI 包并通过接入链接提供的公开 CA PEM 文件；公共信任证书可省略 |
 | `BATON_SESSION_TTL` | 中心 | 浏览器会话期限，默认 `12h`，范围 5 分钟至 7 天 |
 | `BATON_ENROLLMENT_TTL` | 中心 | 一次性注册凭据期限，默认 `10m`，范围 1 分钟至 24 小时 |
 | `BATON_HEARTBEAT_INTERVAL` | 中心 | 连接检查间隔，默认 `10s`，范围 100 ms 至 2 分钟 |
 | `BATON_OFFLINE_AFTER` | 中心 | 设备离线期限，默认 `30s`，范围 200 ms 至 10 分钟，须大于心跳间隔 |
-| `BATON_ENROLLMENT_TOKEN` | 节点注册 / 重新认证 | 一次性凭据，也可用 `--enrollment-file` |
 | `BATON_PROJECT_RUNTIME_DATA_DIR` | 节点 / Runtime | 模型凭据目录，默认 `~/.baton/data/credentials` |
 
 控制操作预算、临时 RPC 名额和 OTLP 追踪配置见 [中心文档](apps/server/README.md)。遥测后端地址和 key 配置在中心，节点与网页经中心转发；设备本地可单独配置 OTLP 用于排查。

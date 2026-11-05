@@ -29,42 +29,29 @@
 
 ## 远程节点
 
-账号、设备注册和启动命令见 [根文档](../../README.md#设备接入)。
-
-SEA 安装包首次执行 `up` 或 `register` 时读取可执行文件旁的 `deployment.json`，使用其中的 `coordinator_url` 和可选的 `ca_pem`；显式 `--coordinator` 和 `--ca-file` 分别优先。部署配置缺失时仍需指定中心地址，格式错误报 `deployment_invalid`。源码与 bundle 入口不读取部署配置，已有身份的命令也不读取它。
-
-`--ca-file` 同时供 HTTPS 注册、重新认证和 WSS 连接校验证书，使用系统已信任证书时可省略。注册和重新认证成功后，在 `identity.lock` 下先原子保存 CA 内容为私有文件 `coordinator-ca.pem`，再保存身份；本次未使用 CA 时删除保存的 CA。后续 `up`、`run`、`reauth` 和更新默认使用保存的 CA；只有注册或重新认证成功才更新保存的 CA。中心地址必须为 HTTPS，Relay 必须为 WSS，证书需匹配访问主机名。
-
-员工在网页为原设备领取一次性重新认证凭据后，在设备本地执行：
+账号与安装包下载见 [根文档](../../README.md#设备接入)。设备接入使用设备码登录：
 
 ```sh
-batond reauth --enrollment-file /私有目录/重新认证凭据
-batond up
+batond login --coordinator https://baton.example
+batond status
+batond login --cancel
+batond logout
+batond service install
+batond service status
+batond service uninstall
 ```
 
-重新认证凭据也可通过 `BATON_ENROLLMENT_TOKEN` 提供；更换自定义 CA 时向 `reauth` 传 `--ca-file`，成功后后续连接使用新 CA。`reauth` 使用 `identity.json` 保存的中心地址，忽略 `--coordinator`，保留设备 ID、注册顺序、Thread 和目录配置，保存本次 CA 与新身份，不启动连接。缺少本地身份或已保存中心地址时返回 `identity_recovery_required`，保留现有数据，不自动注册。
+无位置参数的 `login` 经本地控制通道发起设备绑定，展示验证网址、短码和有效期，在浏览器确认后自动保存身份并上线。`login openai-codex` 等带 provider 参数的命令继续用于模型订阅登录。Ctrl-C 只退出 CLI 等待，不取消后台设备码轮询；`login --cancel` 显式取消。设备码有效期 10 分钟，拒绝或过期后可重新发起。
 
-`reauth` 在 `identity.lock` 下，先将 operation ID、请求摘要、原设备 token 和 enrollment 秘密原子保存到私有文件 `reauth-pending.json`，再向中心提交。响应丢失或保存身份前退出时，直接再次运行 `batond reauth --data-dir <原目录>`；命令优先重用待提交记录，无需重新提供秘密，也不会使用新传入的凭据替换原操作。成功后先保存 CA、原子替换 `identity.json`，再删除待提交记录；若在两步之间退出，下次仍以原请求取回同一响应。不要手动删除或修改待提交记录；无法恢复时保留数据并核对设备身份。`credential.expires_at` 是签发时的期限快照，CLI 不据此判断授权状态。
+每个数据目录只有一个持有 `daemon.lock` 的后台守护进程，CLI 的 `ControlClient` 使用 `control.token` 认证的 UDS / Named Pipe；端点不存在时在 `autostart.lock` 下按需启动 `serve`。`run` 是用户服务的常驻入口；未绑定或被中心拒绝时进程仍保留控制通道。`status` 不带 `--thread-id` 查询本机守护进程，带该参数继续查询 Thread。状态区分 `unbound`、`authorizing`、`connecting`、`syncing`、`online` 和 `rejected`。凭据吊销或协议版本不兼容时停止重连并保存拒绝原因。
 
-`up` 和 `run` 支持 `--control-timeout-seconds <秒>`，取 1～3600 秒的整数，默认 370 秒。认证等待从 WSS 连接建立起计算；认证成功后，同步另有完整的同等预算。到期后断开并按原身份重连。中心默认 15 秒裁决认证握手，其可配置最大期限为 361 秒；节点默认的 370 秒作为等待兜底。
+同中心已有有效身份时 `login` 直接复用，异中心或已吊销身份要求先 `logout`。登出先取消设备码轮询、断开 WSS、停止并回收受管执行进程，再清除身份，保留账本、目录配置和模型凭据；无法确认回收时不清除身份。登出前将旧绑定及其任务标识持久保存到私有的 `retired-bindings.json`；重新绑定后，不恢复旧排队任务、不发送旧报告，也不通过新绑定读取旧输出。备份或搬迁时保留整个数据目录，包括这份绑定停用记录。`shutdown` 通过控制通道正常停止守护进程。设备码登录与 WSS 使用系统根证书库校验 HTTPS / WSS，不分发应用私有 CA，设备连接凭据无闲置过期时间。
 
-所有节点命令支持 `--data-dir`，默认 `~/.baton/data`。仅在授权配置不存在时登记用户主目录，已有配置包括空列表都会保留；`--workspace` 在连接前按真实绝对路径幂等登记工作目录。网页新建对话的选目录弹窗与本地 `files` 命令可以增删授权根；目录选择与附件预览使用同一真实路径边界。节点锁、身份与报告恢复细节见 [远程节点模块](src/daemon/README.md)，实时输出的游标和缓冲规则见 [Worker 文档](src/worker/README.md#real-time-output)。
+所有节点命令支持 `--data-dir`，默认 `~/.baton/data`。首次登录仅在授权配置不存在时登记用户主目录，已有空列表继续保留。目录和文件预览遵循同一真实路径边界；本地 `files` 命令和网页选目录弹窗均可维护授权目录。
 
-`batond identity [--data-dir <目录>]` 在已注册时输出 `{ registered: true, coordinator_url, node_id, employee_id, display_name, system }`，未注册时输出 `{ registered: false }`，不含凭据，也不创建数据目录。
+macOS launchd 与 Linux systemd 用户服务使用同一常驻入口，安装时先通过控制通道停掉已有后台实例，等待锁释放再接管，失败恢复原服务定义。服务可在未绑定时安装，卸载保留身份和数据。Linux 要求有效的 `XDG_RUNTIME_DIR` 与 systemd 用户实例；未开启 linger 时注销将停止服务。Windows 使用桌面客户端或按需启动，不支持 CLI 用户服务。
 
-`batond desktop-directory --thread-id <UUID> --data-dir <已有数据目录>` 为桌面客户端查询中心分配的 Thread 工作目录，成功时 stdout 输出一行 `{ node_id, employee_id, coordinator_url, working_directory }`，退出码为 0。身份通过 `loadIdentity` 读取，Thread 配置只取 `node.db` 的 `node_workers`，不读取本地 `local-open.json`，也不接受调用方传入工作路径。查询以只读连接打开已有账本，不建库、不迁移、不启动 daemon 或 Worker；目录须存在并通过当前授权根的真实路径和符号链接检查，返回 canonical 路径。失败时 stderr 输出 `{ ok: false, code, message }`，退出码为 1：目录已删除为 `directory_missing`，越界或不可访问为 `path_denied`，未知、本地独有或节点身份不匹配的 Thread 为 `thread_unknown`；参数错误、身份不可读、账本不可读分别为 `invalid_arguments`、`identity_unavailable`、`ledger_unavailable`。错误消息不包含凭据或底层异常。
-
-daemon 在连接变化时原子写入私有的 `daemon-status.json`，包含 `pid`、`batond_version`、`state`、`updated_at`；`batond_version` 为当前运行程序的 `BUILD.version`，旧状态文件可能缺失该字段。状态为 `connecting`、`online`、`rejected` 或 `stopping`，拒绝时附上 `code` 和 `message`，不含凭据。读取方需结合 PID 与 `daemon.lock` 判断状态是否过期。同一目录已有 daemon 时，第二个 `up` 或 `run` 报 `daemon_running`。需要重新认证时退出码为 78；业务协议不兼容时保留更新管理通道。
-
-`run --exit-with-stdin` 是供进程监管使用的内部参数：stdin EOF 与 SIGTERM 走相同停止路径，关闭连接并写入 `stopping`。
-
-节点在认证时上报实际构建版本与协议；中心按协议检查业务连接。协议不兼容时业务保持暂停，独立认证更新通道继续运行，并保留本地命令和待补报结果。
-
-设备使用 `batond update` 开始更新，`batond update status` 查看状态，迁移前可用 `batond update cancel` 取消。`batond update policy manual|idle` 选择手动或空闲自动更新，默认为手动。设备后台从已配置中心检查签名清单并预下载，空闲自动更新仍通过准备屏障等待竞争开始的任务结束。
-
-发布构建可内置受信公钥；自托管安装者可在数据目录的私有 `update-trust.json` 显式配置 key ID 到 Ed25519 SPKI 公钥 PEM 的 JSON 对象。更新不会从下载响应导入公钥。新程序通过固定入口及独立版本目录启动，迁移前持锁保存一致备份；业务恢复前的失败可核验备份并回切，恢复后不自动恢复旧数据。
-
-节点连接和能力探测分别进行。Cursor、Pi、Codex、Kiro、Antigravity、Droid 探测完成前上报 `unverified`，创建 Thread 需等待 `available` 且 `capabilities.create: true`；Kiro 与 Droid 另以限时 4 秒、stdout/stderr 各最多 4096 字节的 `--version` 获取版本，只上报版本号，诊断不外传，超时或不可解析记入 reason，已安装时仍允许新建，缺程序报告 `unavailable`。六个 Agent 认证 unknown 均允许新建；整次 host 探测失败且安装状态未确认时报告 `unverified`。Pi、Codex 支持 steer，Cursor、Kiro、Antigravity、Droid 上游不支持；Pi、Codex、Cursor、Antigravity、Droid 支持 Thread 内逐轮换模型，插入消息沿用活动回合的模型；Kiro 上游不支持换模型，原因写入报告。设备进程需显式配置 `CURSOR_API_KEY`。节点退出不结束独立 Worker，重启后从账本重新发现存活 Worker；未确认命令继续使用原 ID，已接收输入不会因为重连再次发送。
+六个 Agent 的探测与中心连接独立进行，程序或 SDK 已安装且认证 valid/unknown 时开放新建与恢复。缺少程序或明确认证缺失时拒绝，未知系统或版本只记录诊断。执行状态机目前继续由独立 Worker 承载；本地控制通道负责守护进程入口和绑定生命周期。
 
 ## 设备目录与模型订阅
 
@@ -120,7 +107,7 @@ Kiro 的 local settings 使用 `agentId: kiro`、`commandPath: kiro-cli`，从 P
 
 使用 `batond env set <名称> --scope <范围>` 从标准输入读取值，`env unset <名称>` 抑制继承，`env reset <名称>` 删除当前范围的设置。范围依次为 `device`、`project:<项目 ID>`、`agent:<类型>`、`project:<项目 ID>:agent:<类型>`；未关联项目的 Thread 可使用工作目录代替项目 ID。各命令支持 `--data-dir`。显式设置值和包含凭据的代理地址保存在独立私有文件中；不采集父进程的全部密钥，也不允许设置 Node 注入选项、TLS 校验关闭变量和 Baton 内部变量。SSH socket 与图形会话地址从当前进程读取，不保存快照。
 
-新进程按系统基础、导入值、设备、项目、Agent 和项目内 Agent 的顺序合并环境。修改配置不会中断正在执行的任务；空闲 Worker 退出后由下一次请求重新启动。daemon 自身的网络代理和证书设置需要重启 daemon 才能生效；更新命令和更新进程启动时读取当前配置。Node 中心连接支持 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` 及小写形式，设置 HTTP 代理时默认启用 `NODE_USE_ENV_PROXY`，可显式设置为 `0`；`ALL_PROXY` 透传给支持它的下游工具。证书路径应位于运行设备上。`--ca-file` 用于节点与中心的连接，Agent 对证书和代理变量的支持由各自的网络库决定。
+新进程按系统基础、导入值、设备、项目、Agent 和项目内 Agent 的顺序合并环境。修改配置不会中断正在执行的任务；空闲 Worker 退出后由下一次请求重新启动。daemon 自身的网络代理和证书设置需要重启 daemon 才能生效；更新命令和更新进程启动时读取当前配置。Node 中心连接支持 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` 及小写形式，设置 HTTP 代理时默认启用 `NODE_USE_ENV_PROXY`，可显式设置为 `0`；`ALL_PROXY` 透传给支持它的下游工具。证书路径应位于运行设备上。设备绑定与中心连接使用系统根证书库；Agent 对证书和代理变量的支持由各自的网络库决定。
 
 `open` 返回 Thread ID 和持久接收回执。启动、发送、恢复和停止的实际终态通过 `command --command-id <UUID>` 或 `reports` 查询；Worker 就绪与 Agent 就绪分别报告。`message` 支持 `--message-id`，执行命令支持 `--command-id`，重试时保留原标识。相同命令 ID、相同内容复用回执和结果，内容冲突会被拒绝。
 

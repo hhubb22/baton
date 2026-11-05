@@ -1,10 +1,17 @@
 import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { afterEach, expect, it, vi } from 'vite-plus/test'
 import type { NodeIdentity } from '@baton/protocol'
-import { manageService, renderLaunchAgent, renderSystemdUnit, type ServiceRunner } from './service.ts'
-import { acquireProcessLock } from '../platform/lock.ts'
+import {
+  isUserServiceInstalled,
+  manageService,
+  renderLaunchAgent,
+  renderSystemdUnit,
+  type ServiceRunner,
+} from './service.ts'
+import { acquireProcessLock, processLockIsHeld } from '../platform/lock.ts'
 import { loadEnvironment, updateEnvironment } from '../environment.ts'
 
 const directories: string[] = []
@@ -39,7 +46,11 @@ async function fixture(platform: 'darwin' | 'linux') {
     platform === 'darwin'
       ? join(home, 'Library', 'LaunchAgents', 'dev.baton.batond.plist')
       : join(home, '.config', 'systemd', 'user', 'baton-batond.service')
-  const runner = vi.fn<ServiceRunner>(async () => ({ code: 0, stdout: '', stderr: '' }))
+  const runner = vi.fn<ServiceRunner>(async (file, args) => ({
+    code: file === 'launchctl' && args[0] === 'print' && args[1]?.endsWith('/dev.baton.batond') ? 113 : 0,
+    stdout: '',
+    stderr: '',
+  }))
   const options = {
     platform,
     homeDirectory: home,
@@ -48,6 +59,7 @@ async function fixture(platform: 'darwin' | 'linux') {
     env: { XDG_RUNTIME_DIR: join(home, 'runtime') },
     command: { executable: process.execPath, args: ['/installation/batond.cjs'] },
     runner,
+    controlClient: () => ({ request: async () => ({ ok: true }), ensureDaemon: async () => {} }),
   }
   return { home, data, path, runner, options }
 }
@@ -86,7 +98,7 @@ it.each(['darwin', 'linux'] as const)(
     const release = await acquireProcessLock(join(f.data, 'daemon.lock'))
     const path = join(f.data, 'daemon-status.json')
     try {
-      for (const state of ['connecting', 'online', 'rejected', 'stopping']) {
+      for (const state of ['unbound', 'authorizing', 'connecting', 'syncing', 'online', 'rejected', 'stopping']) {
         const daemon = {
           pid: process.pid,
           state,
@@ -142,19 +154,19 @@ it('renders launchd arguments, XML escaping, restart policy and combined logs', 
     '<string>/Baton &amp; &lt;node&gt;</string>\n      <string>/app/batond.cjs</string>\n      <string>run</string>\n      <string>--data-dir</string>\n      <string>/data &quot;one&quot;</string>',
   )
   expect(text).toContain('<key>RunAtLoad</key><true/>')
-  expect(text).toContain('<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>')
-  expect(text).toContain('<key>ThrottleInterval</key><integer>30</integer>')
+  expect(text).toContain('<key>KeepAlive</key><true/>')
+  expect(text).toContain('<key>ThrottleInterval</key><integer>10</integer>')
   for (const key of ['StandardOutPath', 'StandardErrorPath'])
     expect(text).toContain(`<key>${key}</key><string>${join('/data &quot;one&quot;', 'logs', 'batond.log')}</string>`)
 })
 
-it('renders systemd with literal paths, no shell expansion, exit 78 and append logs', () => {
+it('renders systemd with literal paths, no shell expansion, restart policy and append logs', () => {
   const text = renderSystemdUnit({
     command: { executable: '/bin/baton "new"', args: [] },
     dataDirectory: '/data %n $HOME\\one',
   })
   expect(text).toContain('ExecStart="/bin/baton \\"new\\"" "run" "--data-dir" "/data %%n $$HOME\\\\one"')
-  expect(text).toContain('Restart=on-failure\nRestartSec=5\nRestartPreventExitStatus=78')
+  expect(text).toContain('Restart=always\nRestartSec=5')
   const log = join('/data %%n $HOME\\one', 'logs', 'batond.log')
   expect(text).toContain(`StandardOutput=append:${log}`)
   expect(text).toContain(`StandardError=append:${log}`)
@@ -192,17 +204,17 @@ it.each(['darwin', 'linux'] as const)(
     expect(replacement).toContain(platform === 'linux' ? JSON.stringify(otherData).slice(1, -1) : otherData)
     expect(replacement).not.toContain('/first/batond.cjs')
     expect(replacement).not.toContain(f.data)
+    await expect(isUserServiceInstalled(otherData, f.options)).resolves.toBe(true)
+    await expect(isUserServiceInstalled(f.data, f.options)).resolves.toBe(false)
     expect(await readdir(dirname(f.path))).toEqual([basename(f.path)])
     expect(await readdir(join(otherData, 'logs'))).toEqual([])
   },
 )
 
 it.each([
-  ['darwin', 'bootout'],
   ['darwin', 'bootstrap'],
   ['linux', 'daemon-reload'],
   ['linux', 'enable'],
-  ['linux', 'restart'],
 ] as const)('rolls back first installation and replacement after %s %s failure', async (platform, failure) => {
   const f = await fixture(platform)
   for (const previous of [undefined, 'original service definition\n']) {
@@ -326,13 +338,249 @@ it('reports a missing Linux unit and an unavailable linger query without creatin
   expect(await readdir(f.home)).toEqual(['private data'])
 })
 
-it('refuses unregistered devices, unsupported systems and unavailable user sessions without definitions', async () => {
+it.each(['darwin', 'linux'] as const)('installs the %s service before device login', async (platform) => {
+  const f = await fixture(platform)
+  await rm(join(f.data, 'identity.json'))
+  await expect(manageService('install', f.data, f.options)).resolves.toEqual({ installed: true })
+  await expect(readFile(join(f.data, 'identity.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+})
+
+it.each(['darwin', 'linux'] as const)(
+  'shuts down a detached daemon and waits for its lock before installing the %s service',
+  async (platform) => {
+    const f = await fixture(platform)
+    const release = await acquireProcessLock(join(f.data, 'daemon.lock'))
+    let pendingRelease: Promise<void> | undefined
+    const client = {
+      request: vi.fn(async (request: { method: 'shutdown' | 'status' }) => {
+        if (request.method === 'status') return { ok: true }
+        await expect(readFile(f.path)).rejects.toMatchObject({ code: 'ENOENT' })
+        pendingRelease = delay(30).then(release)
+        return { ok: true }
+      }),
+      ensureDaemon: vi.fn(async () => {}),
+    }
+    const originalRunner = f.options.runner
+    f.options.runner = vi.fn(async (file, args) => {
+      if (args.includes('bootstrap') || args.includes('enable')) {
+        expect(await processLockIsHeld(join(f.data, 'daemon.lock'))).toBe(false)
+        expect(await processLockIsHeld(join(f.data, 'autostart.lock'))).toBe(true)
+      }
+      return originalRunner(file, args)
+    })
+    try {
+      await expect(manageService('install', f.data, { ...f.options, controlClient: () => client })).resolves.toEqual({
+        installed: true,
+      })
+      expect(client.request).toHaveBeenCalledWith({ method: 'shutdown' }, { autostart: false, timeoutMs: 30_000 })
+      expect(client.ensureDaemon).not.toHaveBeenCalled()
+      expect(await processLockIsHeld(join(f.data, 'autostart.lock'))).toBe(false)
+    } finally {
+      await pendingRelease
+      await release()
+    }
+  },
+)
+
+it('leaves no definition when a detached daemon refuses shutdown or retains its lock', async () => {
+  const f = await fixture('linux')
+  const release = await acquireProcessLock(join(f.data, 'daemon.lock'))
+  try {
+    for (const response of [{ ok: false, message: 'worker shutdown failed' }, { ok: true }]) {
+      const client = {
+        request: vi.fn(async () => response),
+        ensureDaemon: vi.fn(async () => {}),
+      }
+      await expect(
+        manageService('install', f.data, {
+          ...f.options,
+          controlClient: () => client,
+          shutdownTimeoutMs: 1,
+        }),
+      ).rejects.toMatchObject({ code: 'service_unavailable' })
+      await expect(readFile(f.path)).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(await processLockIsHeld(join(f.data, 'daemon.lock'))).toBe(true)
+      expect(await processLockIsHeld(join(f.data, 'autostart.lock'))).toBe(false)
+      expect(client.ensureDaemon).not.toHaveBeenCalled()
+    }
+    expect(f.runner.mock.calls.some(([, args]) => args.includes('enable'))).toBe(false)
+  } finally {
+    await release()
+  }
+})
+
+it('restores a stopped detached daemon when service activation fails', async () => {
+  const f = await fixture('linux')
+  const release = await acquireProcessLock(join(f.data, 'daemon.lock'))
+  const client = {
+    request: vi.fn(async () => {
+      await release()
+      return { ok: true }
+    }),
+    ensureDaemon: vi.fn(async () => {
+      const unlock = await acquireProcessLock(join(f.data, 'autostart.lock'))
+      await unlock()
+    }),
+  }
+  let failed = false
+  f.runner.mockImplementation(async (_file, args) => {
+    if (args.includes('enable') && !failed) {
+      failed = true
+      return { code: 1, stdout: '', stderr: 'cannot activate service' }
+    }
+    return { code: 0, stdout: '', stderr: '' }
+  })
+  try {
+    await expect(manageService('install', f.data, { ...f.options, controlClient: () => client })).rejects.toMatchObject(
+      { code: 'service_unavailable', message: expect.stringContaining('cannot activate service') },
+    )
+    await expect(readFile(f.path)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(client.ensureDaemon).toHaveBeenCalledOnce()
+  } finally {
+    await release()
+  }
+})
+
+it('holds the autostart lock until a service has published its control channel', async () => {
+  const f = await fixture('linux')
+  let published = false
+  let releaseDaemon: (() => Promise<void>) | undefined
+  let publication: Promise<void> | undefined
+  let markActivated: (() => void) | undefined
+  const activated = new Promise<void>((resolve) => {
+    markActivated = resolve
+  })
+  const client = {
+    request: vi.fn(async () => {
+      if (!published) throw new Error('control not ready')
+      return { ok: true }
+    }),
+    ensureDaemon: vi.fn(async () => {}),
+  }
+  f.runner.mockImplementation(async (_file, args) => {
+    if (args.includes('enable')) {
+      markActivated?.()
+      publication = delay(50).then(async () => {
+        expect(await processLockIsHeld(join(f.data, 'autostart.lock'))).toBe(true)
+        releaseDaemon = await acquireProcessLock(join(f.data, 'daemon.lock'))
+        published = true
+      })
+    }
+    return { code: 0, stdout: '', stderr: '' }
+  })
+  const installed = manageService('install', f.data, { ...f.options, controlClient: () => client })
+  try {
+    await activated
+    expect(await processLockIsHeld(join(f.data, 'daemon.lock'))).toBe(false)
+    expect(await processLockIsHeld(join(f.data, 'autostart.lock'))).toBe(true)
+    await expect(installed).resolves.toEqual({ installed: true })
+    expect(published).toBe(true)
+    expect(await processLockIsHeld(join(f.data, 'autostart.lock'))).toBe(false)
+    expect(client.request).toHaveBeenCalledWith(
+      { method: 'status' },
+      { autostart: false, timeoutMs: expect.any(Number) },
+    )
+    expect(client.ensureDaemon).not.toHaveBeenCalled()
+  } finally {
+    await publication
+    await installed.catch(() => {})
+    await releaseDaemon?.()
+  }
+})
+
+it('rolls back the definition when the installed service never becomes ready', async () => {
+  const f = await fixture('linux')
+  const client = {
+    request: vi.fn(async () => ({ ok: false, message: 'startup failed' })),
+    ensureDaemon: vi.fn(async () => {}),
+  }
+  await expect(
+    manageService('install', f.data, { ...f.options, controlClient: () => client, readyTimeoutMs: 1 }),
+  ).rejects.toMatchObject({ code: 'service_unavailable', message: expect.stringContaining('startup failed') })
+  await expect(readFile(f.path)).rejects.toMatchObject({ code: 'ENOENT' })
+  expect(await processLockIsHeld(join(f.data, 'autostart.lock'))).toBe(false)
+  expect(client.ensureDaemon).not.toHaveBeenCalled()
+})
+
+it.each([
+  [true, true],
+  [true, false],
+  [false, true],
+  [false, false],
+])(
+  'restores existing systemd enabled=%s active=%s behavior after activation failure',
+  async (wasEnabled, wasActive) => {
+    const f = await fixture('linux')
+    const original = 'previous unit definition\n'
+    await mkdir(dirname(f.path), { recursive: true })
+    await writeFile(f.path, original)
+    let enabled = wasEnabled
+    let active = wasActive
+    let failed = false
+    const release = wasActive ? await acquireProcessLock(join(f.data, 'daemon.lock')) : undefined
+    const client = { request: vi.fn(async () => ({ ok: true })), ensureDaemon: vi.fn(async () => {}) }
+    f.runner.mockImplementation(async (_file, args) => {
+      if (args.includes('show'))
+        return {
+          code: 0,
+          stderr: '',
+          stdout: `ActiveState=${active ? 'active' : 'inactive'}\nUnitFileState=${enabled ? 'enabled' : 'disabled'}\n`,
+        }
+      if (args.includes('stop') || args.includes('--now')) {
+        active = args.includes('enable')
+        await release?.()
+      }
+      if (args.includes('enable')) enabled = true
+      if (args.includes('disable')) enabled = false
+      if (args.includes('start')) active = true
+      if (args.includes('enable') && args.includes('--now') && !failed) {
+        failed = true
+        return { code: 1, stdout: '', stderr: 'injected activation failure' }
+      }
+      return { code: 0, stdout: '', stderr: '' }
+    })
+    try {
+      await expect(
+        manageService('install', f.data, { ...f.options, controlClient: () => client }),
+      ).rejects.toMatchObject({ code: 'service_unavailable' })
+      expect(await readFile(f.path, 'utf8')).toBe(original)
+      expect({ enabled, active }).toEqual({ enabled: wasEnabled, active: wasActive })
+      expect(client.request).not.toHaveBeenCalledWith({ method: 'shutdown' }, expect.anything())
+      expect(client.ensureDaemon).not.toHaveBeenCalled()
+    } finally {
+      await release?.()
+    }
+  },
+)
+
+it.each([true, false])('restores existing launchd loaded=%s behavior after bootstrap failure', async (wasLoaded) => {
+  const f = await fixture('darwin')
+  const original = 'previous launch agent\n'
+  await mkdir(dirname(f.path), { recursive: true })
+  await writeFile(f.path, original)
+  let loaded = wasLoaded
+  let failed = false
+  f.runner.mockImplementation(async (_file, args) => {
+    if (args[0] === 'print' && args[1]?.endsWith('/dev.baton.batond'))
+      return { code: loaded ? 0 : 113, stdout: '', stderr: '' }
+    if (args[0] === 'bootout') loaded = false
+    if (args[0] === 'bootstrap') {
+      loaded = true
+      if (!failed) {
+        failed = true
+        return { code: 1, stdout: '', stderr: 'injected bootstrap failure' }
+      }
+    }
+    return { code: 0, stdout: '', stderr: '' }
+  })
+  await expect(manageService('install', f.data, f.options)).rejects.toMatchObject({ code: 'service_unavailable' })
+  expect(await readFile(f.path, 'utf8')).toBe(original)
+  expect(loaded).toBe(wasLoaded)
+})
+
+it('refuses unsupported systems and unavailable user sessions without definitions', async () => {
   const f = await fixture('linux')
   await rm(join(f.data, 'identity.json'))
-  await expect(manageService('install', f.data, f.options)).rejects.toMatchObject({
-    code: 'service_not_registered',
-    message: expect.stringContaining('batond register'),
-  })
   await expect(manageService('install', f.data, { ...f.options, platform: 'win32' })).rejects.toMatchObject({
     code: 'service_unsupported',
     message: expect.stringContaining('桌面客户端'),

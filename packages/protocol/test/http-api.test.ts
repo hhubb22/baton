@@ -5,13 +5,23 @@ import { EnrollmentResponse as DeviceEnrollmentResponse, SessionResponse as Auth
 
 it('generates schemas, statuses and cookie security for every implemented HTTP endpoint', () => {
   const endpoints = Object.values(BatonHttpApi.groups).flatMap((group) => Object.values(group.endpoints))
-  expect(endpoints).toHaveLength(66)
+  expect(endpoints).toHaveLength(71)
   const document = httpOpenApi()
   expect(document.info.title).toBe('Baton HTTP API')
   expect(document.paths['/api/v1/release']?.get?.responses).toHaveProperty('200')
   expect(document.paths['/api/v1/release']?.get?.security ?? []).toEqual([])
   expect(document.paths['/api/v1/downloads']?.get?.responses).toHaveProperty('200')
   expect(document.paths['/api/v1/downloads']?.get?.security ?? []).toEqual([])
+  for (const path of ['/api/v1/device-auth/sessions', '/api/v1/device-auth/token']) {
+    expect(document.paths[path]?.post?.security ?? []).toEqual([])
+    expect(document.paths[path]?.post?.requestBody).toMatchObject({ required: true })
+  }
+  for (const action of ['approve', 'deny']) {
+    const endpoint = document.paths[`/api/v1/device-auth/sessions/{sessionId}/${action}`]?.post
+    expect(endpoint?.security).toEqual([{ session: [] }])
+    expect(endpoint?.responses).toHaveProperty('204')
+    expect(endpoint?.responses).toHaveProperty('410')
+  }
   expect(document.paths['/api/v1/login']?.post?.requestBody).toMatchObject({ required: true })
   expect(document.paths['/api/v1/threads']?.post?.responses).toHaveProperty('201')
   expect(document.paths['/api/v1/threads/{threadId}/messages']?.post?.responses).toHaveProperty('202')

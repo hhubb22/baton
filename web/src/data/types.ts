@@ -103,7 +103,6 @@ export interface Device {
     phase: 'draining' | 'ready' | 'migrating' | 'syncing' | 'completed' | 'cancelled' | 'failed'
   } | null
   credentialState?: 'active' | 'idle_expired' | 'revoked'
-  idleExpiresAt?: number
   lastSeenAt: number
   registeredAt: number
   agents: DeviceAgent[]

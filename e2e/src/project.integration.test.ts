@@ -22,7 +22,7 @@ import { registerNode } from '@baton/batond/daemon/identity'
 import { initializeBrowseRoots } from '@baton/batond/devices/roots'
 import { LocalWorkerHost } from '@baton/batond/daemon/host'
 import { runDaemon } from '@baton/batond/daemon/daemon'
-import { runDaemonCLI } from '@baton/batond/daemon/cli'
+import { connectWebSocket } from '@baton/batond/daemon/transport'
 
 const origin = 'https://baton.local'
 function browser(base: string, ca: string) {
@@ -201,7 +201,7 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
         runDaemon({
           dataDirectory: nodeDirectory,
           identity,
-          caFile,
+          transport: (url, options) => connectWebSocket(url, { ...options, ca }),
           host,
           executionCommand: { executable: process.execPath, args: [bundle] },
           probe: async () => capability,
@@ -577,7 +577,7 @@ test('completed chat → background memory and HTTP embeddings → recall → re
         runDaemon({
           dataDirectory: nodeDirectory,
           identity,
-          caFile,
+          transport: (url, options) => connectWebSocket(url, { ...options, ca }),
           host: new LocalWorkerHost(nodeDirectory, {
             executable: process.execPath,
             args: ['--import', loader, fileURLToPath(new URL('./testing/replay-worker.ts', import.meta.url))],
@@ -629,7 +629,39 @@ test('completed chat → background memory and HTTP embeddings → recall → re
     await expect
       .poll(async () => (await events()).some((event) => event.kind === 'assistant'), { timeout: 30000 })
       .toBe(true)
-    await expect.poll(async () => (await memories()).length, { timeout: 30000 }).toBe(1)
+    try {
+      await expect.poll(async () => (await memories()).length, { timeout: 30000 }).toBe(1)
+    } catch (error) {
+      const diagnostic = await database
+        .run(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            return {
+              jobs: yield* sql`SELECT id,kind,state,waiting_reason,attempts,cursor_index,cursor_offset,cardinality(source_ids) AS source_count,next_attempt_at<=clock_timestamp() AS due,
+                  CASE WHEN last_error ~ '^[a-z][a-z0-9_:-]{0,79}$' THEN last_error ELSE NULL END AS error_code
+                  FROM project_memory_jobs WHERE project_id=${project.id} ORDER BY input_seq DESC,id LIMIT 8`,
+              runs: yield* sql`SELECT r.id,r.state,r.memory_job_id IS NOT NULL AS background,r.stop_requested_at IS NOT NULL AS stop_requested,r.stop_acked_at IS NOT NULL AS stop_acked,r.command_attempts,
+                  CASE WHEN r.end_reason ~ '^[a-z][a-z0-9_:-]{0,79}$' THEN r.end_reason ELSE NULL END AS end_code
+                  FROM agent_runs r JOIN project_agents a ON a.id=r.agent_id WHERE a.project_id=${project.id} ORDER BY r.started_at DESC,r.id LIMIT 8`,
+              foreground:
+                yield* sql`SELECT a.lease_run_id,a.lease_until>clock_timestamp() AS lease_valid,c.state,c.failure_count
+                  FROM project_agents a JOIN conversations c ON c.agent_id=a.id WHERE a.project_id=${project.id} LIMIT 1`,
+              presence:
+                yield* sql`SELECT p.online,p.synced,extract(epoch FROM clock_timestamp()-p.last_contact_at)::float8 AS contact_age_seconds,
+                  n.revoked_at IS NOT NULL AS node_revoked,c.revoked_at IS NOT NULL AS credential_revoked
+                  FROM nodes n JOIN node_credentials c ON c.node_id=n.id AND c.version=n.credential_version LEFT JOIN node_presence p ON p.node_id=n.id
+                  WHERE n.id=${identity.node_id} LIMIT 1`,
+              recent_events:
+                yield* sql`SELECT e.seq::float8 AS seq,e.kind FROM conversation_events e JOIN conversations c ON c.id=e.conversation_id JOIN project_agents a ON a.id=c.agent_id
+                  WHERE a.project_id=${project.id} ORDER BY e.seq DESC LIMIT 8`,
+              embedding_requests: embeddingInputs.length,
+            }
+          }),
+        )
+        .catch(() => ({ diagnostics_unavailable: true }))
+      console.error('Memory flow blocked', JSON.stringify(diagnostic))
+      throw error
+    }
     const [memory] = await memories()
     expect(memory!.content).toBe('测试使用 pnpm test:unit。')
     await expect
@@ -686,89 +718,3 @@ test('completed chat → background memory and HTTP embeddings → recall → re
     await rm(directory, { recursive: true, force: true })
   }
 }, 120000)
-
-test('deployment outside the data directory registers without coordinator or CA arguments and connects using saved CA', async () => {
-  const database = await openTestDatabase()
-  const directory = await realpath(await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'bds-')))
-  const installationDirectory = join(directory, 'installation')
-  const dataDirectory = join(directory, 'node')
-  const scope = Scope.makeUnsafe()
-  const controller = new AbortController()
-  let daemon: Promise<unknown> | undefined
-  try {
-    await mkdir(installationDirectory)
-    const keyFile = join(directory, 'server.key')
-    const caFile = join(directory, 'server.crt')
-    await promisify(execFile)('openssl', [
-      'req',
-      '-x509',
-      '-newkey',
-      'ec',
-      '-pkeyopt',
-      'ec_paramgen_curve:prime256v1',
-      '-nodes',
-      '-days',
-      '1',
-      '-subj',
-      '/CN=localhost',
-      '-addext',
-      'subjectAltName=IP:127.0.0.1,DNS:localhost',
-      '-keyout',
-      keyFile,
-      '-out',
-      caFile,
-    ])
-    const ca = await readFile(caFile, 'utf8')
-    const server = await database.run(
-      startServer({
-        port: 0,
-        allowedOrigins: [origin],
-        signer: Nodes.CredentialSigner.generate(),
-        tls: { cert: ca, key: await readFile(keyFile) },
-        heartbeatMs: 1000,
-        offlineMs: 5000,
-      }).pipe(Effect.provideService(Scope.Scope, scope)),
-    )
-    const base = `https://127.0.0.1:${server.port}`
-    await writeFile(
-      join(installationDirectory, 'deployment.json'),
-      JSON.stringify({
-        format: 1,
-        coordinator_url: base,
-        ca_pem: ca,
-      }),
-    )
-    await database.run(Auth.createEmployee('deploymentalice', 'Alice', 'local-t3-initial-password-123'))
-    const alice = browser(base, ca)
-    await signIn(alice, 'deploymentalice')
-    const enrollment = await alice<P.EnrollmentResponse>('/node-enrollments', 'POST', {})
-    expect(enrollment.status).toBe(201)
-    const enrollmentFile = join(directory, 'enrollment')
-    await writeFile(enrollmentFile, enrollment.body.enrollment_token, { mode: 0o600 })
-    await runDaemonCLI(
-      'register',
-      ['--data-dir', dataDirectory, '--enrollment-file', enrollmentFile, '--display-name', 'Deployment workstation'],
-      { installationDirectory },
-    )
-    expect(await readFile(join(dataDirectory, 'coordinator-ca.pem'), 'utf8')).toBe(ca)
-    await writeFile(join(installationDirectory, 'deployment.json'), '{invalid deployment must be ignored')
-    daemon = Effect.runPromiseExit(Effect.scoped(runDaemon({ dataDirectory, probe: async () => [] })), {
-      signal: controller.signal,
-    })
-    const status = async () =>
-      JSON.parse(await readFile(join(dataDirectory, 'daemon-status.json'), 'utf8')) as {
-        state: string
-      }
-    await expect.poll(status, { timeout: 15000 }).toMatchObject({ state: 'online' })
-    controller.abort()
-    await daemon
-    expect(await status()).toMatchObject({ state: 'stopping' })
-    expect(await readFile(join(dataDirectory, 'coordinator-ca.pem'), 'utf8')).toBe(ca)
-  } finally {
-    controller.abort()
-    await daemon
-    await database.runtime.runPromise(Scope.close(scope, Exit.void))
-    await database.close()
-    await rm(directory, { recursive: true, force: true })
-  }
-}, 60000)

@@ -1,4 +1,10 @@
-import type { ActivitySnapshot, BrowserEvent, BrowserNotification, MemoryWorkStatus } from '@baton/protocol'
+import type {
+  ActivitySnapshot,
+  BrowserEvent,
+  BrowserNotification,
+  DeviceLoginSession,
+  MemoryWorkStatus,
+} from '@baton/protocol'
 import type { DownloadsResponse } from '@baton/protocol/http-api'
 import type {
   AgentKind,
@@ -68,6 +74,9 @@ export function isAccessError(error: unknown): boolean {
 export interface BatonClient {
   readonly mode?: 'http' | 'mock'
   getDownloads(): Promise<DownloadsResponse>
+  getDeviceLoginSession(userCode: string): Promise<DeviceLoginSession>
+  approveDeviceLoginSession(sessionId: ID, userCode: string): Promise<void>
+  denyDeviceLoginSession(sessionId: ID): Promise<void>
   replayNotifications?(after?: string): Promise<NotificationReplay>
   getActivity?(): Promise<ActivitySnapshot>
   getSession(): Promise<Session>

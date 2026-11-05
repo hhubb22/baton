@@ -8,6 +8,7 @@ import type * as P from '@baton/protocol'
 import { expect, it } from 'vite-plus/test'
 import * as Auth from './auth.ts'
 import * as Nodes from './nodes.ts'
+import * as DeviceAuth from './device-auth.ts'
 import * as Threads from './threads/index.ts'
 import * as Projects from './project/projects.ts'
 import { getProjectMemory, writeProjectMemory } from './project/memory/index.ts'
@@ -151,6 +152,14 @@ it('RL-A08 preserves restored history and memory, requires new authorization and
       await run(Threads.stop(employee.id, thread.id))
       const history = await run(Threads.timeline(employee.id, thread.id))
       const unusedEnrollment = await run(Nodes.issueEnrollment(employee.id))
+      const pendingLogin = await run(
+        DeviceAuth.createSession({ display_name: 'Pending', system: 'linux' }, 'https://baton.local'),
+      )
+      const consumedLogin = await run(
+        DeviceAuth.createSession({ display_name: 'Consumed', system: 'linux' }, 'https://baton.local'),
+      )
+      await run(DeviceAuth.approveSession(employee.id, consumedLogin.session_id, consumedLogin.user_code))
+      await run(DeviceAuth.token(consumedLogin, signer))
 
       // 只回退备份后改变的行，重现旧会话、旧凭据与已派发但未确认的旧快照。
       await run(Auth.logout(session.token))
@@ -227,26 +236,15 @@ it('RL-A08 preserves restored history and memory, requires new authorization and
         },
       })
       await expect(run(Auth.lookupSession(session.token))).rejects.toMatchObject({ code: 'unauthenticated' })
-      await expect(run(Nodes.authenticateNode(identity.credential.token, signer))).rejects.toMatchObject({
-        code: 'node_idle_expired',
-      })
+      await run(Nodes.authenticateNode(identity.credential.token, signer))
+      expect(await run(DeviceAuth.token(pendingLogin, signer))).toEqual({ status: 'expired' })
+      expect(await run(DeviceAuth.token(consumedLogin, signer))).toEqual({ status: 'expired' })
       await expect(
         run(Nodes.registerNode({ ...sync, enrollment_token: String(unusedEnrollment.enrollment_token) }, signer)),
       ).rejects.toMatchObject({ code: 'enrollment_used' })
       const freshSession = await run(Auth.login(employee.username, `${password}-ready`))
       await run(Auth.lookupSession(freshSession.token))
-      const authorization = await run(Nodes.issueReauthEnrollment(employee.id, identity.node_id))
-      const restored = await run(
-        Nodes.reauthenticateNode(
-          identity.node_id,
-          {
-            operation_id: randomUUID(),
-            enrollment_token: String(authorization.enrollment_token),
-            previous_token: identity.credential.token,
-          },
-          signer,
-        ),
-      )
+      const restored = identity
       await run(Nodes.authenticateNode(restored.credential.token, signer))
       const connected = {
         ...source,

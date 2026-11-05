@@ -57,7 +57,11 @@ export const storageBaseline = [
 ] as const
 
 /** node.db 保留已确认报告，用于补齐中心的序号缺口。 */
-export const makeNodeLedger = Effect.fn('Daemon.makeNodeLedger')(function* (filename: string) {
+export const makeNodeLedger = Effect.fn('Daemon.makeNodeLedger')(function* (
+  filename: string,
+  nodeId?: string,
+  excludedThreadIds: ReadonlySet<string> = new Set(),
+) {
   const clock = yield* Clock.Clock
   yield* Effect.try({
     try: () => checkStorageFormat(filename, 'node', storageBaseline),
@@ -73,18 +77,26 @@ export const makeNodeLedger = Effect.fn('Daemon.makeNodeLedger')(function* (file
   }).pipe(Effect.provide(Reactivity.layer))
   yield* initializeStorage(sql, 'node', storageBaseline)
   yield* sql.unsafe('CREATE INDEX IF NOT EXISTS node_outbox_pending ON node_outbox(thread_id,seq) WHERE acked=0')
+  const belongs = (value: DiscoveredWorker) =>
+    !excludedThreadIds.has(value.threadId) && (!nodeId || value.config.node_id === nodeId)
   const command = (id: string) =>
     sql
-      .unsafe<{ payload: string }>('SELECT payload FROM node_commands WHERE id=?', [id])
+      .unsafe<{ payload: string }>(
+        `SELECT c.payload FROM node_commands c WHERE c.id=?${nodeId ? " AND EXISTS(SELECT 1 FROM node_workers w WHERE w.thread_id=json_extract(c.payload,'$.request.thread_id') AND json_extract(w.payload,'$.config.node_id')=?)" : ''}`,
+        nodeId ? [id, nodeId] : [id],
+      )
       .pipe(Effect.map((rows) => (rows[0] ? (JSON.parse(rows[0].payload) as NodeCommand) : undefined)))
-  const worker = (id: string) =>
+  const rawWorker = (id: string) =>
     sql
       .unsafe<{ payload: string }>('SELECT payload FROM node_workers WHERE thread_id=?', [id])
       .pipe(Effect.map((rows) => (rows[0] ? (JSON.parse(rows[0].payload) as DiscoveredWorker) : undefined)))
+  const worker = (id: string) =>
+    rawWorker(id).pipe(Effect.map((value) => (value && belongs(value) ? value : undefined)))
   const saveWorker = (value: DiscoveredWorker) =>
     sql.withTransaction(
       Effect.gen(function* () {
-        const previous = yield* worker(value.threadId)
+        if (!belongs(value)) return yield* Effect.fail(new Error('binding_mismatch'))
+        const previous = yield* rawWorker(value.threadId)
         if (previous && contentHash(previous.config) !== contentHash(value.config))
           return yield* Effect.fail(new Error('Worker 配置或存储代次不符'))
         const saved = { ...previous, ...value }
@@ -101,6 +113,10 @@ export const makeNodeLedger = Effect.fn('Daemon.makeNodeLedger')(function* (file
   const prepare = (value: NodeCommand) =>
     sql.withTransaction(
       Effect.gen(function* () {
+        if (value.request.thread_id && excludedThreadIds.has(value.request.thread_id))
+          return yield* Effect.fail(new Error('binding_mismatch'))
+        if (nodeId && !value.request.open_config && !(yield* worker(value.request.thread_id!)))
+          return yield* Effect.fail(new Error('binding_mismatch'))
         const existing = yield* command(value.id)
         if (existing) {
           if (existing.hash !== value.hash) return yield* Effect.fail(new Error('command_content_mismatch'))
@@ -141,6 +157,8 @@ export const makeNodeLedger = Effect.fn('Daemon.makeNodeLedger')(function* (file
     sql.withTransaction(
       Effect.gen(function* () {
         const saved = yield* worker(report.thread_id)
+        if (nodeId && (!saved || saved.config.storage_generation !== report.storage_generation))
+          return yield* Effect.fail(new Error('binding_mismatch'))
         if (saved && saved.startup_phase !== 'open_attempted')
           yield* saveWorker({ ...saved, startup_phase: 'open_attempted' })
         const { trace_context: _trace, ...content } = report
@@ -222,6 +240,7 @@ export const makeNodeLedger = Effect.fn('Daemon.makeNodeLedger')(function* (file
   const acknowledge = (ack: ThreadReportResult) =>
     sql.withTransaction(
       Effect.gen(function* () {
+        if (nodeId && !(yield* worker(ack.thread_id))) return
         if (ack.ok) {
           yield* sql.unsafe('UPDATE node_outbox SET acked=1 WHERE thread_id=? AND seq=? AND event_id=?', [
             ack.thread_id,
@@ -250,24 +269,44 @@ export const makeNodeLedger = Effect.fn('Daemon.makeNodeLedger')(function* (file
     markWorkerLost,
     workers: () =>
       sql
-        .unsafe<{ payload: string }>('SELECT payload FROM node_workers ORDER BY thread_id')
-        .pipe(Effect.map((rows) => rows.map((r) => JSON.parse(r.payload) as DiscoveredWorker))),
+        .unsafe<{ payload: string }>(
+          `SELECT payload FROM node_workers${nodeId ? " WHERE json_extract(payload,'$.config.node_id')=?" : ''} ORDER BY thread_id`,
+          nodeId ? [nodeId] : [],
+        )
+        .pipe(Effect.map((rows) => rows.map((r) => JSON.parse(r.payload) as DiscoveredWorker).filter(belongs))),
     pendingCommands: () =>
       sql
         .unsafe<{ payload: string }>(
           `SELECT c.payload FROM node_commands c
           JOIN node_workers w ON w.thread_id=json_extract(c.payload,'$.request.thread_id')
-          WHERE json_extract(w.payload,'$.history_unavailable') IS NULL ORDER BY c.rowid`,
+          WHERE json_extract(w.payload,'$.history_unavailable') IS NULL${nodeId ? " AND json_extract(w.payload,'$.config.node_id')=?" : ''} ORDER BY c.rowid`,
+          nodeId ? [nodeId] : [],
         )
-        .pipe(Effect.map((rows) => rows.map((r) => JSON.parse(r.payload) as NodeCommand).filter((c) => !c.result))),
+        .pipe(
+          Effect.map((rows) =>
+            rows
+              .map((r) => JSON.parse(r.payload) as NodeCommand)
+              .filter((c) => !c.result && !excludedThreadIds.has(c.request.thread_id!)),
+          ),
+        ),
     pendingReports: () =>
       sql
-        .unsafe<{ payload: string }>('SELECT payload FROM node_outbox WHERE acked=0 ORDER BY thread_id,seq LIMIT 128')
-        .pipe(Effect.map((rows) => rows.map((r) => JSON.parse(r.payload) as ThreadReport))),
+        .unsafe<{ payload: string }>(
+          `SELECT o.payload FROM node_outbox o WHERE o.acked=0${nodeId ? " AND EXISTS(SELECT 1 FROM node_workers w WHERE w.thread_id=o.thread_id AND json_extract(w.payload,'$.config.node_id')=?)" : ''} ORDER BY o.thread_id,o.seq LIMIT 128`,
+          nodeId ? [nodeId] : [],
+        )
+        .pipe(
+          Effect.map((rows) =>
+            rows
+              .map((r) => JSON.parse(r.payload) as ThreadReport)
+              .filter((report) => !excludedThreadIds.has(report.thread_id)),
+          ),
+        ),
     reportBacklog: () =>
       sql
         .unsafe<{ count: number; oldest_ms: number | null }>(
-          'SELECT count(*) AS count, min(created_ms) AS oldest_ms FROM node_outbox WHERE acked=0',
+          `SELECT count(*) AS count, min(created_ms) AS oldest_ms FROM node_outbox o WHERE acked=0${nodeId ? " AND EXISTS(SELECT 1 FROM node_workers w WHERE w.thread_id=o.thread_id AND json_extract(w.payload,'$.config.node_id')=?)" : ''}`,
+          nodeId ? [nodeId] : [],
         )
         .pipe(Effect.map((rows) => rows[0]!)),
     pragmas: () =>

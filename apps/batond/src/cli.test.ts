@@ -6,8 +6,12 @@ import { reportBatondError, runBatondCLI, runLocalCLI } from './cli.ts'
 import { manageService, ServiceError } from './daemon/service.ts'
 import { runDaemonCLI } from './daemon/cli.ts'
 import { makePrivateTempDirectory } from './testing/private.ts'
+import { runControlCLI } from './daemon/control-cli.ts'
+import { runProjectCLI } from './project/index.ts'
 
 vi.mock('./daemon/cli.ts', () => ({ runDaemonCLI: vi.fn() }))
+vi.mock('./daemon/control-cli.ts', () => ({ runControlCLI: vi.fn() }))
+vi.mock('./project/index.ts', () => ({ runProjectCLI: vi.fn() }))
 vi.mock('./daemon/service.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./daemon/service.ts')>()),
   manageService: vi.fn(async () => ({ installed: true })),
@@ -22,6 +26,18 @@ it.each(['install', 'uninstall', 'status'])('routes service %s and prints its re
   } finally {
     output.mockRestore()
   }
+})
+
+it('routes device login options independently from provider login positionals', async () => {
+  const args = ['--coordinator', 'https://center.invalid', '--display-name', 'xai']
+  await runBatondCLI(['login', ...args])
+  expect(runControlCLI).toHaveBeenLastCalledWith('login', args)
+  await runBatondCLI(['login', 'xai'])
+  expect(runProjectCLI).toHaveBeenLastCalledWith('login', 'xai')
+  await runBatondCLI(['status', '--data-dir', '/offline-node'])
+  expect(runControlCLI).toHaveBeenLastCalledWith('status', ['--data-dir', '/offline-node'])
+  await runBatondCLI(['logout', '--data-dir', '/offline-node'])
+  expect(runControlCLI).toHaveBeenLastCalledWith('logout', ['--data-dir', '/offline-node'])
 })
 
 it.each([{ args: [] }, { args: ['restart'] }, { args: ['install', 'status'] }])(
@@ -46,14 +62,14 @@ it('preserves service error codes in CLI errors', () => {
   }
 })
 
-it('routes reauth to the node CLI and documents it in help', async () => {
+it('retains reauth routing and documents device login in help', async () => {
   const args = ['--data-dir', '/offline-node', '--enrollment-file', '/private/enrollment']
   await runBatondCLI(['reauth', ...args])
   expect(runDaemonCLI).toHaveBeenCalledWith('reauth', args)
   const output = vi.spyOn(console, 'log').mockImplementation(() => undefined)
   try {
     await runBatondCLI(['--help'])
-    expect(output).toHaveBeenCalledWith(expect.stringContaining('reauth [--enrollment-file'))
+    expect(output).toHaveBeenCalledWith(expect.stringContaining('login [--coordinator'))
   } finally {
     output.mockRestore()
   }

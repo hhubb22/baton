@@ -10,6 +10,7 @@ import {
 } from '@baton/protocol/http-api'
 import * as Auth from '../auth.ts'
 import * as Nodes from '../nodes.ts'
+import * as DeviceAuth from '../device-auth.ts'
 import * as NodeUpdates from '../node-updates.ts'
 import * as Threads from '../threads/index.ts'
 import * as Executions from '../executions.ts'
@@ -45,6 +46,18 @@ export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
     projectHttpHandlers(options),
     HttpApiBuilder.group(BatonHttpApi, 'public', (handlers) =>
       handlers
+        .handle('createDeviceLoginSession', ({ payload, request }) =>
+          httpBusiness(
+            Effect.gen(function* () {
+              const origin = yield* Effect.try({
+                try: () => DeviceAuth.deviceLoginOrigin(request.headers.host ?? '', options.allowedOrigins),
+                catch: (error) => error,
+              })
+              return yield* DeviceAuth.createSession(payload, origin)
+            }),
+          ),
+        )
+        .handle('deviceLoginToken', ({ payload }) => httpBusiness(DeviceAuth.token(payload, options.signer)))
         .handle('release', () => Effect.succeed(P.releaseMetadata()))
         .handle('downloads', ({ request }) =>
           downloads
@@ -88,6 +101,27 @@ export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
         .handle('registerNode', ({ payload }) =>
           httpBusiness(
             Nodes.registerNode(payload, options.signer).pipe(Effect.flatMap(decodeResponse(P.NodeIdentity))),
+          ),
+        ),
+    ),
+    HttpApiBuilder.group(BatonHttpApi, 'deviceAuth', (handlers) =>
+      handlers
+        .handle('sessionByCode', ({ params }) => httpBusiness(DeviceAuth.sessionByCode(params.userCode)))
+        .handle('approveSession', ({ params, payload }) =>
+          httpBusiness(
+            Effect.gen(function* () {
+              const { employee } = yield* CurrentBrowserSession
+              const nodeId = yield* DeviceAuth.approveSession(employee.id, params.sessionId, payload.user_code)
+              options.gateway().notify(employee.id, { type: 'nodes.changed', node_id: nodeId })
+            }),
+          ),
+        )
+        .handle('denySession', ({ params }) =>
+          httpBusiness(
+            Effect.gen(function* () {
+              const { employee } = yield* CurrentBrowserSession
+              yield* DeviceAuth.denySession(employee.id, params.sessionId)
+            }),
           ),
         ),
     ),

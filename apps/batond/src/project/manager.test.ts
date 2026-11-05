@@ -68,6 +68,21 @@ const transport =
   }
 
 describe('Project Runtime host', () => {
+  it.live('rejects a retired Run before enqueueing or starting it', () =>
+    Effect.gen(function* () {
+      const input = command()
+      const { manager, dataDir } = yield* open({ excludedRunIds: new Set([input.run_id]) })
+      const result = yield* Effect.promise(() =>
+        manager.command(input).then(
+          () => undefined,
+          (error: unknown) => error,
+        ),
+      )
+      expect(result).toMatchObject({ code: 'binding_mismatch' })
+      expect(row(dataDir, input.run_id)).toBeUndefined()
+    }),
+  )
+
   it.live('persists foreground and memory starts while draining and resumes them after cancellation', () =>
     Effect.gen(function* () {
       const { manager, dataDir, launchLog } = yield* open({}, 'upgrade-drain')

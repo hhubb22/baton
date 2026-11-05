@@ -29,6 +29,7 @@ import { decodeReplayProtobuf } from '@baton/telemetry/protobuf'
 import { isLoginRequest, LoginRateError } from './login-protection.ts'
 import { loginClientIp } from './login-ip.ts'
 import { LoginInput } from '@baton/protocol'
+import { DeviceLoginProtection, DeviceLoginRateError, isDeviceLoginCreateRequest } from './device-login-protection.ts'
 export { cookieToken } from './security.ts'
 
 const json = (value: unknown, status = 200) =>
@@ -152,6 +153,7 @@ export const httpRouteTemplate = (method: string, pathname: string): string => {
 export const httpApplication = (options: HTTPOptions) =>
   Effect.gen(function* () {
     const services = yield* Effect.context<SqlClient.SqlClient>()
+    const deviceLoginProtection = new DeviceLoginProtection()
     const downloads = options.downloads
       ? yield* Effect.acquireRelease(
           Effect.tryPromise(() => createDownloads(options.downloads!, options.allowedOrigins)),
@@ -235,6 +237,15 @@ export const httpApplication = (options: HTTPOptions) =>
             return json(yield* NodeUpdates.reportUpdate(token, options.signer, { ...report, phase: report.phase }))
           }
           return yield* notFound()
+        }
+        if (isDeviceLoginCreateRequest(request.method, request.url)) {
+          const ip =
+            loginClientIp(
+              Option.getOrUndefined(request.peerAddress),
+              request.headers['x-forwarded-for'],
+              options.trustedProxies,
+            ) ?? 'unknown'
+          yield* Effect.tryPromise({ try: () => deviceLoginProtection.checkIP(ip), catch: (error) => error })
         }
         if (isLoginRequest(request.method, request.url)) {
           const ip =
@@ -391,7 +402,7 @@ export const httpApplication = (options: HTTPOptions) =>
           const { status, ...body } = httpFailure(error, requestId)
           const response = json(body, status)
           return Effect.succeed(
-            error instanceof LoginRateError
+            error instanceof LoginRateError || error instanceof DeviceLoginRateError
               ? Response.setHeader(response, 'retry-after', String(error.retryAfter))
               : response,
           )

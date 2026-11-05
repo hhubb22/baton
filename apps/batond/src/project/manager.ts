@@ -270,6 +270,8 @@ class Manager implements ProjectManager {
     const decoded = Schema.decodeUnknownOption(ProjectRunCommand)(input)
     if (decoded._tag === 'None' || decoded.value.lease_epoch <= 0 || this.cancel.signal.aborted) return
     const command = decoded.value
+    if (this.options.excludedRunIds?.has(command.run_id))
+      throw new IPCError('binding_mismatch', 'Project Run 属于已解除的设备绑定')
     if (upgradeOffline(await readUpgradeState(this.options.dataDir)))
       throw new IPCError('node_upgrading', '设备已准备升级')
     const queued = this.serial.then(async () => {
@@ -762,7 +764,7 @@ export const makeProjectManager = Effect.fn('Project.makeProjectManager')(functi
     await file.close()
     await ensurePrivateDirectory(join(options.dataDir, 'project-runtimes'))
   })
-  const ledger = yield* makeProjectLedger(filename)
+  const ledger = yield* makeProjectLedger(filename, options.excludedRunIds)
   const watchdog =
     process.platform === 'win32'
       ? undefined

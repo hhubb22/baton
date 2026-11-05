@@ -54,65 +54,28 @@ afterAll(async () => {
   await db?.close()
 })
 
-it('uses database idle expiry and keeps heartbeat, reconnect and capability reports separate from business', async () => {
+it('keeps long-lived credentials valid after long inactivity and never renews an expiry', async () => {
   const { identity, source } = await register()
-  const second = await register()
+  expect(identity.credential.expires_at).toBeNull()
+  const jwt = JSON.parse(Buffer.from(identity.credential.token.split('.')[1]!, 'base64url').toString())
+  expect(jwt.exp).toBeUndefined()
   await run(
     query(
-      "UPDATE node_credentials SET created_at=clock_timestamp()-interval '29 days',last_business_at=clock_timestamp()-interval '29 days',expires_at=clock_timestamp()+interval '1 day' WHERE id=$1",
+      "UPDATE node_credentials SET created_at=clock_timestamp()-interval '366 days',last_business_at=clock_timestamp()-interval '366 days',expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",
       [identity.credential.id],
     ),
   )
-  const before = await run(
-    query('SELECT last_business_at,expires_at FROM node_credentials WHERE id=$1', [identity.credential.id]),
-  )
+  await run(Nodes.authenticateNode(identity.credential.token, signer))
   await run(Nodes.touchNode(source))
-  await run(
-    Nodes.saveRuntimeReport(source, {
-      agents: [],
-      roots: [],
-      repos: [],
-      exec: { enabled: false, shell: '/bin/sh' },
-      user: 'local',
-    }),
-  )
+  await run(business(source))
   await run(Nodes.disconnectNode(source))
   const reconnected = { ...source, conn_id: randomUUID() }
   await run(Nodes.claimConnection(reconnected))
   await run(Nodes.syncNode(reconnected, sync))
-  await run(business(second.source))
-  expect(
-    await run(query('SELECT last_business_at,expires_at FROM node_credentials WHERE id=$1', [identity.credential.id])),
-  ).toEqual(before)
-  await run(Nodes.authenticateNode(identity.credential.token, signer))
-  await run(business(reconnected))
-  const renewed = await run(
-    query("SELECT expires_at>clock_timestamp()+interval '29 days' AS renewed FROM node_credentials WHERE id=$1", [
-      identity.credential.id,
-    ]),
-  )
-  expect(renewed).toMatchObject([{ renewed: true }])
-  const jwt = JSON.parse(Buffer.from(identity.credential.token.split('.')[1]!, 'base64url').toString())
-  expect(jwt.exp).toBeUndefined()
-  await run(
-    query("UPDATE node_credentials SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1", [
-      identity.credential.id,
-    ]),
-  )
-  const expired = await run(
-    query('SELECT last_business_at,expires_at FROM node_credentials WHERE id=$1', [identity.credential.id]),
-  )
-  await expect(run(Nodes.authenticateNode(identity.credential.token, signer))).rejects.toMatchObject({
-    code: 'node_idle_expired',
-  })
-  await expect(run(business(reconnected))).rejects.toMatchObject({ code: 'node_idle_expired' })
-  await expect(run(Nodes.touchNode(reconnected))).rejects.toMatchObject({ code: 'node_idle_expired' })
-  expect(
-    await run(query('SELECT last_business_at,expires_at FROM node_credentials WHERE id=$1', [identity.credential.id])),
-  ).toEqual(expired)
   expect(await run(Nodes.getNode(employee.id, identity.node_id))).toMatchObject({
-    credential_state: 'idle_expired',
-    executable: false,
+    credential_state: 'active',
+    executable: true,
+    idle_expires_at: null,
   })
 })
 
@@ -154,7 +117,7 @@ it('reissues once after lost responses and keeps the original device, default an
     credential: { version: 2 },
   })
   await expect(run(Nodes.authenticateNode(identity.credential.token, signer))).rejects.toMatchObject({
-    code: 'invalid_node_credential',
+    code: 'credential_revoked',
   })
   await run(Nodes.authenticateNode(fresh.credential.token, signer))
   await run(
@@ -265,11 +228,11 @@ it('checks enrollment time after the node lock wait and cannot revive a concurre
   expect(revoked.status).toBe('fulfilled')
   if (replacement.status === 'fulfilled')
     await expect(run(Nodes.authenticateNode(replacement.value.credential.token, signer))).rejects.toMatchObject({
-      code: 'invalid_node_credential',
+      code: 'credential_revoked',
     })
   else expect(replacement.reason).toMatchObject({ code: 'forbidden' })
   await expect(run(Nodes.authenticateNode(identity.credential.token, signer))).rejects.toMatchObject({
-    code: 'invalid_node_credential',
+    code: 'credential_revoked',
   })
 })
 
