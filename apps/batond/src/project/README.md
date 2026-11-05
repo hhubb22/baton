@@ -4,7 +4,7 @@
 
 manager 支持 `command(project_run_start|stop|wake)`、`command(project_memory_start|stop)`、`probe()`、`report()`、`subscriptions()`、`login(provider)`、`startDeviceLogin(provider, signal?, onDone?)` 和幂等 `close()`。连接替换会取消旧请求并清除控制回执能力，现有 Runtime 保留到退出或租约失效。manager 关闭时等待进程树回收及后台操作，随后 Scope 关闭 watchdog 与数据库。
 
-`finish` 或 `report_failure` 的成功响应写入后，宿主等待 Runtime 完成遥测导出并自然退出；5 秒后仍未退出时强制回收进程树。租约或后台 claim 失效时仍及时停止运行。
+`finish` 或 `report_failure` 的成功响应写入后，宿主等待 Runtime 自然退出；5 秒后仍未退出时强制回收进程树。租约或后台 claim 失效时仍及时停止运行。
 
 SEA 和开发 bundle 默认通过自身的 `project-runtime` 与 `watchdog` 子命令启动进程，保留同一构建身份，不再查找 Runtime 源码或 tsx。源码开发命令通过 Runtime 包的 tsx loader 启动 `runtimes/project-agent/src/cli.ts`，`--import` 使用 loader 的 file URL，支持 Windows 盘符及包含空格的路径。直接源码运行需要保留仓库布局和已安装的锁定依赖。Runtime 在自身进程内直接读写凭据文件。`runtimeCommand` 可提供其他本地入口，宿主追加 `probe`、`run`、`memory`、`login` 或 `login-device`；环境与当前进程合并。Runtime 的命令处理导出为 `runProjectRuntimeCLI(args)`，模型、工具、恢复与压缩逻辑保持在 Runtime 内。
 

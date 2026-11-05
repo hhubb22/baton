@@ -1,8 +1,7 @@
 import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
-import { Option, Schema, Tracer } from 'effect'
-import { traceParent } from '@baton/telemetry'
+import { Schema } from 'effect'
 import { afterEach, expect, test, vi } from 'vite-plus/test'
 import type { BrowserEvent, SessionResult } from '@baton/protocol'
 import { WebSocket } from 'ws'
@@ -38,11 +37,7 @@ const envelope = (body: unknown, correlationId?: string) => ({
   },
 })
 
-async function fixture(
-  overrides: Partial<GatewayHandlers> = {},
-  tracer?: Tracer.Tracer,
-  options: Partial<GatewayOptions> = {},
-) {
+async function fixture(overrides: Partial<GatewayHandlers> = {}, options: Partial<GatewayOptions> = {}) {
   const employeeId = randomUUID(),
     nodeId = randomUUID()
   const seen: Array<Record<string, unknown>> = []
@@ -87,7 +82,7 @@ async function fixture(
       }),
       ...overrides,
     },
-    { allowedOrigins: ['https://baton.local'], pollMs: 50, ...(tracer ? { tracer } : {}), ...options },
+    { allowedOrigins: ['https://baton.local'], pollMs: 50, ...options },
   )
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   const address = server.address() as import('node:net').AddressInfo
@@ -118,93 +113,6 @@ async function fixture(
   }
   return { gateway, base, employeeId, nodeId, seen, connect, source: () => source! }
 }
-
-test('丢弃处理失败的遥测并继续处理心跳', async () => {
-  const telemetry = vi.fn(() => {
-    throw new Error('malformed telemetry')
-  })
-  const heartbeat = vi.fn(async () => undefined)
-  const f = await fixture({ telemetry, heartbeat })
-  const { ws } = await f.connect()
-  ws.send(JSON.stringify(envelope({ type: 'telemetry.export', signal: 'logs', payload: { malformed: true } })))
-  await expect.poll(() => telemetry.mock.calls.length).toBe(1)
-  ws.send(JSON.stringify({ kind: 'heartbeat' }))
-  await expect.poll(() => heartbeat.mock.calls.length).toBe(1)
-  expect(ws.readyState).toBe(WebSocket.OPEN)
-})
-
-test.each([false, true])('telemetry admission during queued business work: override=%s', async (override) => {
-  const entered = Promise.withResolvers<void>()
-  const release = Promise.withResolvers<void>()
-  const telemetry = vi.fn()
-  const f = await fixture(
-    {
-      telemetry,
-      handle: async (_source, input) => {
-        if ((input.body as { type: string }).type === 'thread.report') {
-          entered.resolve()
-          await release.promise
-          return undefined
-        }
-        return { type: 'node.sync_result', ok: true }
-      },
-    },
-    undefined,
-    override ? { telemetryAdmission: () => true } : {},
-  )
-  cleanups.push(async () => release.resolve())
-  const { ws } = await f.connect()
-  ws.send(
-    JSON.stringify(
-      envelope({
-        type: 'thread.report',
-        thread_id: randomUUID(),
-        event_id: randomUUID(),
-        worker_seq: 1,
-        kind: 'thread.opened',
-      }),
-    ),
-  )
-  await entered.promise
-  ws.send(JSON.stringify(envelope({ type: 'telemetry.export', signal: 'logs', payload: {} })))
-  const pong = once(ws, 'pong')
-  ws.ping()
-  await pong
-  expect(telemetry).toHaveBeenCalledTimes(override ? 1 : 0)
-  release.resolve()
-})
-
-test('propagates the actual WSS enqueue span independently of command content', async () => {
-  const spans: Tracer.NativeSpan[] = []
-  const tracer = Tracer.make({
-    span(options) {
-      const span = new Tracer.NativeSpan(options)
-      spans.push(span)
-      return span
-    },
-  })
-  const f = await fixture({}, tracer)
-  const { frames } = await f.connect()
-  const command = {
-    type: 'thread.command',
-    thread_id: randomUUID(),
-    action: 'stop',
-    trace_context: { traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01` },
-  }
-  const id = randomUUID()
-  expect(f.gateway.send(f.nodeId, f.employeeId, id, command)).toBe(true)
-  await expect
-    .poll(() => frames.some((frame) => (frame.envelope as { message_id?: string } | undefined)?.message_id === id))
-    .toBe(true)
-  const frame = frames.find((frame) => (frame.envelope as { message_id?: string } | undefined)?.message_id === id)!
-  const delivered = (frame.envelope as { body: typeof command }).body
-  expect({ ...delivered, trace_context: command.trace_context }).toEqual(command)
-  const send = spans.find((span) => span.name === 'baton.gateway.send')!
-  expect(send.traceId).toBe('a'.repeat(32))
-  expect(Option.getOrUndefined(send.parent)?.spanId).toBe('b'.repeat(16))
-  expect(traceParent(delivered.trace_context)?.spanId).toBe(send.spanId)
-  expect(send.attributes.get('baton.dispatch.accepted')).toBe(true)
-})
 
 test('authenticated source replaces supplied identity and node-to-node routes are rejected', async () => {
   const f = await fixture()
@@ -440,7 +348,6 @@ test('validates RPCs before sending, including credentials revoked while a reque
         if (++validations === 3) throw new AppError(401, 'credential_revoked')
       },
     },
-    undefined,
     { rpc: { readConcurrency: 1 } },
   )
   const { ws, frames } = await f.connect()
@@ -479,7 +386,6 @@ test('reserves RPC capacity during asynchronous validation and never sends from 
         await validated.promise
       },
     },
-    undefined,
     { rpc: { readConcurrency: 1 } },
   )
   cleanups.push(async () => {
@@ -517,9 +423,12 @@ test('credential revocation closes a quiet connection and rejects durable sends 
 })
 
 test('reading at capacity leaves management slots available and queues reads in order', async () => {
-  const f = await fixture({}, undefined, {
-    rpc: { readConcurrency: 1, managementConcurrency: 1, maxQueued: 1, queueMs: 5000 },
-  })
+  const f = await fixture(
+    {},
+    {
+      rpc: { readConcurrency: 1, managementConcurrency: 1, maxQueued: 1, queueMs: 5000 },
+    },
+  )
   const { ws, frames } = await f.connect()
   const read = () => ({ type: 'files.browse', operation_id: randomUUID() })
   const firstBody = read()
@@ -551,7 +460,7 @@ test('reading at capacity leaves management slots available and queues reads in 
 })
 
 test('RPC execution gets its full timeout after waiting for a slot', async () => {
-  const f = await fixture({}, undefined, { rpc: { readConcurrency: 1, queueMs: 1000 } })
+  const f = await fixture({}, { rpc: { readConcurrency: 1, queueMs: 1000 } })
   const { ws, frames } = await f.connect()
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   const received = once(ws, 'message')
@@ -569,7 +478,7 @@ test('RPC execution gets its full timeout after waiting for a slot', async () =>
 })
 
 test('an expired queued management request is never sent when a slot becomes available', async () => {
-  const f = await fixture({}, undefined, { rpc: { managementConcurrency: 1, maxQueued: 1, queueMs: 100 } })
+  const f = await fixture({}, { rpc: { managementConcurrency: 1, maxQueued: 1, queueMs: 100 } })
   const { ws, frames } = await f.connect()
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   const received = once(ws, 'message')
@@ -591,9 +500,12 @@ test('an expired queued management request is never sent when a slot becomes ava
 })
 
 test('a sent management timeout does not resend its side effect or accept its late response for another request', async () => {
-  const f = await fixture({}, undefined, {
-    rpc: { managementConcurrency: 1, timeouts: { 'node.project_exec_set': 100 } },
-  })
+  const f = await fixture(
+    {},
+    {
+      rpc: { managementConcurrency: 1, timeouts: { 'node.project_exec_set': 100 } },
+    },
+  )
   const { ws, frames } = await f.connect()
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   const body = { type: 'node.project_exec_set', operation_id: randomUUID(), enabled: true }
@@ -622,7 +534,7 @@ test('a sent management timeout does not resend its side effect or accept its la
 })
 
 test('disconnect rejects queued RPCs and a replacement connection does not send them', async () => {
-  const f = await fixture({}, undefined, { rpc: { managementConcurrency: 1 } })
+  const f = await fixture({}, { rpc: { managementConcurrency: 1 } })
   const { ws } = await f.connect()
   const body = { type: 'node.project_exec_set', operation_id: randomUUID(), enabled: true }
   const first = f.gateway.request(f.nodeId, f.employeeId, body)

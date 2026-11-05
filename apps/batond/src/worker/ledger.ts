@@ -8,7 +8,6 @@ import {
 import type { ThreadAnswerInput, ThreadQuestion } from '@baton/protocol'
 import * as Sqlite from '@baton/sqlite'
 import { checkStorageFormat, initializeStorage, StorageFormatError } from '../storage-format.ts'
-import type { TraceContext } from '@baton/telemetry'
 import { lstat } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite'
@@ -26,7 +25,6 @@ export type Outcome = 'succeeded' | 'failed' | 'cancelled' | 'unknown'
 type Phase = 'empty' | 'opening' | 'idle' | 'busy' | 'stopping' | 'stopped' | 'unknown' | 'failed'
 
 export interface Command {
-  trace_context?: TraceContext
   receipt: WorkerCommandReceipt
   digest: string
   status: WorkerCommandStatus
@@ -34,7 +32,6 @@ export interface Command {
 }
 export interface Message {
   receivedAtMs?: number
-  trace_context?: TraceContext
   input: AgentMessage
   digest: string
   state: 'queued' | 'intent' | 'sent' | 'withdrawn' | 'unknown'

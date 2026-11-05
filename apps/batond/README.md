@@ -6,7 +6,7 @@
 
 ## 开发入口
 
-中心同步允许转发时，节点通过随机端口的本机 OTLP 接收端收集自身和子进程数据，再经 WSS 发给中心。本机令牌只经环境变量传给 agent-host 和 Project Runtime，不写账本或命令行。节点本地设置 `OTEL_EXPORTER_OTLP_*` 时使用本地配置，不启动转发接收端。等待事件和周期指标来自现有状态与账本；账本预算比率目前只用于观察，不阻止新 Thread。旧开发账本可以自行重建，程序不会自动删除本地数据。详见[可观测性设计](../../specs/observability/TECH.md)。
+daemon、agent-host 和 Project Runtime 向 stderr 输出单行 JSON 日志，字段和脱敏规则见[可观测性设计](../../specs/observability/TECH.md)。账本预算比率目前只用于观察，不阻止新 Thread。旧开发账本可以自行重建，程序不会自动删除本地数据。
 
 环境要求、安装和构建命令见 [AGENTS.md](../../AGENTS.md#常用构建与验证命令)，参数见 [工具说明](../../tools/README.md#本地开发)。统一入口为 `src/index.ts`，调用 `src/cli.ts` 导出的 `runBatondCLI(args)`；开发 bundle 的 Project Runtime 与 watchdog 使用同一 bundle 的子命令，直接源码运行使用 Runtime 包解析的 tsx loader。
 
@@ -129,11 +129,9 @@ daemon 启动时读取 `node.db` 恢复 Thread 与 Execution 状态机。queued 
 
 agent-host 在 Thread 空闲且没有待处理问题时启动十分钟计时，到时关闭并回收进程树，不产生 `thread.stopped`。下一条输入透明 resume 同一原生会话；恢复失败按原因上报 `thread.stopped`，历史不可用时为 `history_lost`。停止先持久登记，再中断启动、准备或发送，撤回 queued 输入；已提交的 intent 通过只读快照核对裁决。取消响应与真实终止分别处理，最多一分钟后回收所属进程树。POSIX 的 agent-host 组和 Windows 的持久进程身份由 `node_processes` 登记，watchdog 负责回收。
 
-## 追踪
+## 日志
 
-daemon 与 agent-host 使用 `@baton/telemetry`，默认服务名为 `batond`。中心允许转发时，子进程向本机接收端发送 OTLP/HTTP；连接断开、未启用或发送队列有积压时丢弃批次。设备本地设置 `OTEL_EXPORTER_OTLP_*` 时子进程继承本地配置并直接导出。配置和本地查看命令见 [中心追踪说明](../server/README.md#http-契约与追踪)。
-
-中心持久命令携带标准 trace context，经节点账本传入进程内 Thread 状态机。接收、派发、执行和恢复按命令、Thread 与原始上下文关联；追踪元数据独立于命令和消息的业务摘要，重试不会因为新的 span 身份而产生内容冲突。SQLite 提交核查与执行恢复语义继续由账本决定。
+daemon、agent-host 和 Project Runtime 使用 `@baton/logging` 输出单行 JSON，服务名分别为 `batond`、`baton-agent-host` 和 `project-runtime`。日志覆盖启动与连接状态、Thread 停止和等待、Turn 开始与结束、恢复裁决、命令处理和 Project Run 结果，并带版本、提交和进程号。字段过滤丢弃消息正文、提示词、凭据和原始错误详情；恢复与提交语义仍由 SQLite 账本决定，日志不影响重试和幂等判断。字段定义见[可观测性设计](../../specs/observability/TECH.md)。
 
 ## 验证
 

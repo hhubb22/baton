@@ -50,7 +50,7 @@ Basis: [桌面客户端行为规格](PRODUCT.md) DC-01～DC-15；[设备接入�
 | `diagnostics` | `{ nodeId }` | 核验本机身份后调用本地控制通道 `status` 与 `diagnostics`，返回客户端版本、`batond` 版本、平台、连接状态、`service_installed`、最近一次异常或拒绝的时间与原因，以及 `canRestart: !service_installed` |
 | `restartDaemon` | `{ nodeId }` | 仅在 `!service_installed` 时允许：调用本地控制通道 `shutdown` 等待旧实例退出，再由 `ControlClient` 自动拉起新后台 `batond` |
 | `openLogs` | `{ nodeId }` | 打开固定日志目录 `~/.baton/data/logs` |
-| `copyDiagnostics` | `{ nodeId }` | 主进程从本地控制通道 `diagnostics` 取得脱敏摘要与末尾最多 200 行日志（带字节上限），再次剥离凭据令牌、设备码、会话 Cookie、模型 API 密钥、私钥块及 URL 查询/用户信息后直接写入系统剪贴板，日志正文不返回给网页渲染进程 |
+| `copyDiagnostics` | `{ nodeId }` | 主进程从本地控制通道取得版本与最近退出码，只把时间、客户端与服务端版本、设备 ID 和固定错误码写入系统剪贴板；不读取日志正文，不含平台、进程状态、退出原因、路径、凭据或业务正文 |
 
 ## Testing and validation
 
@@ -60,5 +60,5 @@ Basis: [桌面客户端行为规格](PRODUCT.md) DC-01～DC-15；[设备接入�
 | DC-04 | 本地控制通道替身返回 `rejected(node_version_incompatible)`；模拟客户端覆盖升级后读取同一 `userData` 与数据目录 | 托盘或详情页未显示版本不兼容与下载入口；升级后丢失原中心配置或设备身份 | `apps/desktop` 单元 + `web` 单元 | automated |
 | DC-05～DC-10 | 模拟窗口隐藏、聚焦同 Thread、聚焦其他 Thread、页面重载与待回复列表变化 | 聚焦同 Thread 仍弹窗；重载后重复弹已见事件；`waiting > 0` 未更新托盘标记或菜单跳转失效 | `apps/desktop` 单元 | automated |
 | DC-11～DC-13 | 用控制通道替身覆盖本机 Thread、其他设备 Thread、缺失目录、越界符号链接、编辑器无 shell 启动及目录选择取消 | 其他设备或 Project 显示入口；缺失目录被自动创建；越界链接被打开；取消选择改动原输入 | `apps/desktop` 单元 + `web` 单元 | automated |
-| DC-14、DC-15 | 注入含连接凭据、设备码、模型密钥与带参 URL 的日志末尾，分别在 `service_installed` 为 `true`/`false` 下查看详情并复制摘要 | 服务托管时仍开放重启；网页脚本能读到原始日志；剪贴板摘要残留任何秘密或查询串 | `apps/desktop` 单元 | automated |
+| DC-14、DC-15 | 向日志注入含连接凭据、设备码、模型密钥与带参 URL 的内容，分别在 `service_installed` 为 `true`/`false` 下查看详情并复制摘要 | 服务托管时仍开放重启；网页脚本能读到原始日志；剪贴板摘要出现日志正文、退出原因、平台或任何秘密 | `apps/desktop` 单元 | automated |
 | 原生平台验证 | macOS arm64 DMG 与 Windows x64 NSIS 真机核验窗口常驻、通知权限、访达/资源管理器打开与剪贴板 | 任一原生交互与规格不符 | 手动验证（未测平台如实记录） | manual pending |

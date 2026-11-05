@@ -1,5 +1,4 @@
 import { Schema } from 'effect'
-import { TraceContext } from './trace.ts'
 import { MemoryEmbeddingConfig, MemoryEmbeddingConfigInput } from './project-memory.ts'
 import {
   UUID,
@@ -232,7 +231,6 @@ export const ProjectExecutionUpdate = Schema.Struct({ execution_id: UUID, versio
 export type ProjectExecutionUpdate = typeof ProjectExecutionUpdate.Type
 
 export const ProjectRunCommand = Schema.Struct({
-  trace: Schema.optionalKey(TraceContext),
   type: Schema.Literals([
     'project_run_start',
     'project_run_stop',
@@ -265,7 +263,6 @@ export const ProjectRunView = Schema.Struct({
 export type ProjectRunView = typeof ProjectRunView.Type
 
 export const ProjectRuntimeRequest = Schema.Struct({
-  trace: Schema.optionalKey(TraceContext),
   type: Schema.Literal('project_runtime.request'),
   run_id: UUID,
   lease_epoch: NonNegativeInteger,

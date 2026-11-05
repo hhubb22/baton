@@ -259,7 +259,6 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
     const url = new URL(`${options.baseUrl ?? '/api/v1'}/events`, origin)
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
     const next = new Socket(url.href)
-    transport.traceSocket(next)
     socket = next
     next.onmessage = (event) => {
       if (socket !== next) return

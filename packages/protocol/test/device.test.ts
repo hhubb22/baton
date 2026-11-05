@@ -1,16 +1,6 @@
 import { Schema } from 'effect'
 import { expect, it } from 'vite-plus/test'
-import { MaxMessageBytes, NodeStatus, NodeToControlBody, RuntimeReport } from '../src/index.ts'
-
-it('遥测消息只接受三种信号且受节点消息容量限制', () => {
-  for (const signal of ['traces', 'logs', 'metrics']) {
-    expect(Schema.is(NodeToControlBody)({ type: 'telemetry.export', signal, payload: { records: [] } })).toBe(true)
-  }
-  expect(Schema.is(NodeToControlBody)({ type: 'telemetry.export', signal: 'other', payload: {} })).toBe(false)
-  expect(
-    Schema.is(NodeToControlBody)({ type: 'telemetry.export', signal: 'logs', payload: 'x'.repeat(MaxMessageBytes) }),
-  ).toBe(false)
-})
+import { NodeStatus, RuntimeReport } from '../src/index.ts'
 
 it('RuntimeReport 与 NodeStatus 只保留当前字段', () => {
   const report: RuntimeReport = {

@@ -1,12 +1,12 @@
 import { Console } from 'node:console'
-import { Cause, Clock, Context, Effect, Exit, Fiber, Layer, Option, Semaphore, Stream, Tracer } from 'effect'
+import { Cause, Context, Effect, Exit, Fiber, Layer, Semaphore, Stream } from 'effect'
+import { createLogger } from '@baton/logging'
 import { RpcServer, RpcSerialization } from 'effect/rpc'
 import { NodeStdio } from '@effect/platform-node'
 import { installHostProcessGroup } from '../platform/host-process-group.ts'
 import { agentHostLayer, type AgentHostEnvironment } from './host-layer.ts'
 import type { AgentHostPaths } from './paths.ts'
 import { makeProcessRegistrar } from './process-registrar.ts'
-import { itemToolTelemetry } from '../genai.ts'
 import {
   AgentHostDriver,
   AgentHostError,
@@ -35,6 +35,8 @@ export interface HostRunOptions {
   readonly paths: AgentHostPaths
 }
 
+const log = createLogger('baton-agent-host')
+
 /**
  * One Agent host process: a POSIX process-group leader whose stdout carries
  * only RPC, whose Scope owns the Agent session, and whose child processes are
@@ -43,6 +45,7 @@ export interface HostRunOptions {
 export const runAgentHost = (module: AgentHostModule, options: HostRunOptions) =>
   Effect.gen(function* () {
     if (process.platform !== 'win32') process.umask(0o077)
+    log.info('agent_host.start', { agent: options.agentType })
     const originalConsole = globalThis.console
     globalThis.console = new Console({ stdout: process.stderr, stderr: process.stderr })
     yield* Effect.addFinalizer(() =>
@@ -109,80 +112,24 @@ const makeAgentHostHandlers = <Services>(driver: AgentHostDriverShape, context: 
     let sequence = 0
     let agentName = ''
     let conversationId = ''
-    const clock = yield* Clock.Clock
-    const tracer = yield* Tracer.Tracer
-    const turns = new Map<string, Tracer.Span>()
     const hosted = <A, E>(effect: Effect.Effect<A, E>) => effect.pipe(Effect.provideContext(context))
     const frames = driver.events.pipe(
       Stream.map((event): HostEvent => {
-        if (event.type === 'item') {
-          const parent = turns.get(event.messageId)
-          const kinds: Record<string, string> = {
-            command_execution: 'command',
-            file_change: 'file_change',
-            mcp_tool_call: 'mcp',
-            dynamic_tool: 'mcp',
-            file_search: 'file_search',
-            web_search: 'web',
-            subagent: 'subagent',
-            tool_call: 'other',
-          }
-          const kind = kinds[event.item.type]
-          const telemetry = itemToolTelemetry(event.item)
-          if (parent && telemetry) {
-            const start = Date.parse(event.item.started_at ?? '')
-            const end = Date.parse(event.item.completed_at ?? '')
-            const now = clock.currentTimeNanosUnsafe()
-            const endTime = Number.isFinite(end) ? BigInt(end) * 1_000_000n : now
-            const startTime = Number.isFinite(start) ? BigInt(start) * 1_000_000n : endTime
-            const span = tracer.span({
-              name: telemetry.approval ? 'baton.agent.approval' : 'baton.agent.tool',
-              parent: Option.some(parent),
-              annotations: Context.empty(),
-              links: [],
-              startTime: startTime < endTime ? startTime : endTime,
-              kind: 'internal',
-              root: false,
-              sampled: parent.sampled,
-            })
-            if (kind) span.attribute('baton.tool.kind', kind)
-            for (const [key, value] of Object.entries(telemetry.attributes)) span.attribute(key, value)
-            span.end(endTime, event.item.status === 'failed' ? Exit.fail('tool_failed') : Exit.void)
-          }
-        }
-        if (event.type === 'end') {
-          const span = turns.get(event.messageId)
-          if (span) {
-            span.attribute('baton.turn.result', event.outcome === 'cancelled' ? 'stopped' : event.outcome)
-            span.end(clock.currentTimeNanosUnsafe(), event.outcome === 'failed' ? Exit.fail('turn_failed') : Exit.void)
-            turns.delete(event.messageId)
-          }
-        }
+        if (event.type === 'end')
+          log.info('agent_host.turn', {
+            thread_id: conversationId,
+            agent: agentName,
+            outcome: event.outcome,
+          })
         return { generation, sequence: ++sequence, event }
       }),
     )
     yield* Effect.addFinalizer(() => hosted(driver.close).pipe(Effect.ignore))
-    yield* Effect.addFinalizer(() =>
-      Effect.sync(() => {
-        for (const span of turns.values()) {
-          span.attribute('baton.turn.result', 'lost')
-          span.end(clock.currentTimeNanosUnsafe(), Exit.void)
-        }
-        turns.clear()
-      }),
-    )
     return AgentHostRpc.of({
       probe: () => regular.withPermit(hosted(driver.probe)),
       open: ({ config, generation: next }) =>
         regular.withPermit(
           hosted(driver.open({ config, generation: next })).pipe(
-            Effect.withSpan('baton.agent.session', {
-              attributes: {
-                'baton.recovery': false,
-                'gen_ai.agent.name': config.agent_type,
-                'gen_ai.conversation.id': config.thread_id,
-              },
-            }),
             Effect.tap((identity) =>
               Effect.sync(() => {
                 generation = next
@@ -197,13 +144,6 @@ const makeAgentHostHandlers = <Services>(driver: AgentHostDriverShape, context: 
       resume: ({ config, generation: next, nativeSessionId }) =>
         regular.withPermit(
           hosted(driver.resume({ config, generation: next, nativeSessionId })).pipe(
-            Effect.withSpan('baton.agent.session', {
-              attributes: {
-                'baton.recovery': true,
-                'gen_ai.agent.name': config.agent_type,
-                'gen_ai.conversation.id': config.thread_id,
-              },
-            }),
             Effect.tap((identity) =>
               Effect.sync(() => {
                 generation = next
@@ -221,33 +161,7 @@ const makeAgentHostHandlers = <Services>(driver: AgentHostDriverShape, context: 
             ? hosted(driver.answer(answer))
             : Effect.fail(new AgentHostError({ message: 'Agent does not support answering questions' })),
         ),
-      send: ({ message, preparation }) =>
-        regular.withPermit(
-          Effect.gen(function* () {
-            if (message.mode === 'queue') {
-              const span = yield* Effect.makeSpan('baton.agent.turn', {
-                attributes: {
-                  'gen_ai.operation.name': 'invoke_agent',
-                  'gen_ai.agent.name': agentName,
-                  'gen_ai.conversation.id': conversationId,
-                },
-              })
-              turns.set(message.id, span)
-            }
-            return yield* hosted(driver.send({ message, preparation })).pipe(
-              Effect.onError(() =>
-                Effect.sync(() => {
-                  const span = turns.get(message.id)
-                  if (span) {
-                    span.attribute('baton.turn.result', 'failed')
-                    span.end(clock.currentTimeNanosUnsafe(), Exit.void)
-                    turns.delete(message.id)
-                  }
-                }),
-              ),
-            )
-          }),
-        ),
+      send: ({ message, preparation }) => regular.withPermit(hosted(driver.send({ message, preparation }))),
       sent: ({ config, message, preparation }) =>
         regular.withPermit(
           hosted(driver.sent({ config, message, preparation })).pipe(Effect.map((value) => value ?? null)),

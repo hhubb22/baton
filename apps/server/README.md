@@ -8,7 +8,7 @@
 
 中心构建生成 bundle、相邻的网页和 SQL 迁移，输出布局见 [工具说明](../../tools/README.md#本地开发)。环境要求、账号、HTTPS、设备接入和通用配置见 [根文档](../../README.md)。
 
-中心使用 `OTEL_EXPORTER_OTLP_ENDPOINT` 和 `OTEL_EXPORTER_OTLP_HEADERS` 导出并转发遥测；设置 `BATON_TELEMETRY_FORWARD=off` 可关闭设备与网页转发，`BATON_WEB_SESSION_REPLAY=masked` 启用遮挡回放。设备和网页不接收后端地址或 key。配置、敏感字段和本地 ClickStack 示例见[可观测性设计](../../specs/observability/TECH.md)与[遥测包](../../packages/telemetry/README.md)。
+中心、节点、Worker、agent-host 和 Project Runtime 向 stderr 输出单行 JSON 日志。每条日志包含 `time`、`level`、`service`、`version`、`commit`、`pid` 和 `event`，覆盖启动、连接与断连、迁移、恢复裁决和未预期异常。日志不记录口令、凭据、消息正文、请求体和原始错误详情；服务端版本与提交取自构建元数据，默认构建身份为 `development`。日志字段和当前排障入口见[可观测性设计](../../specs/observability/TECH.md)。
 
 `node server.cjs --version` 无需数据库配置即可输出构建版本、提交、平台、协议与格式版本；默认身份为 `development`。公开只读的 `GET /api/v1/release` 返回相同发布元数据，无需登录，不访问或续期设备凭据；已登录诊断的 `release` 字段与其一致。节点身份验证后、登记业务连接和同步前核对协议版本，产品版本不同可以共存；协议不兼容返回 `node_version_incompatible` 并关闭业务连接，不改写业务、outbox 或设备凭据。
 
@@ -16,7 +16,7 @@
 
 数据库迁移按文件版本记录，在事务 advisory lock 内串行执行；`serve`、`migrate` 和账号管理都会先执行并核对迁移。时间配置接受整数加 `ms`、`s`、`m`、`h`。
 
-员工登录按顺序限制全局每分钟 120 次、客户端 IP 每分钟 20 次、账号每 5 分钟 10 次；账号窗口不会因成功或再次尝试延长。登录请求体最多 8 KiB，同时最多执行两次口令验证，超限分别返回 429（含 `Retry-After`）或 503。计数保存在单个中心进程内，重启后清空；多实例部署须使用共享计数才能获得全局限制。遥测记录活跃登录验证数量及各门限的拒绝次数，不记录 IP 或账号。
+员工登录按顺序限制全局每分钟 120 次、客户端 IP 每分钟 20 次、账号每 5 分钟 10 次；账号窗口不会因成功或再次尝试延长。登录请求体最多 8 KiB，同时最多执行两次口令验证，超限分别返回 429（含 `Retry-After`）或 503。计数保存在单个中心进程内，重启后清空；多实例部署须使用共享计数才能获得全局限制。结构化日志记录各门限的拒绝事件，不记录 IP 或账号。
 
 默认使用直接连接的 socket 地址。只有配置 `BATON_TRUSTED_PROXY_CIDRS`（逗号分隔的可信代理 CIDR）后，来自这些代理的请求才从右向左检查 `X-Forwarded-For` 代理链。IPv4 映射地址归一为 IPv4，IPv6 以 /64 计数。只将受控代理加入列表，并确保代理正确维护转发头。
 
@@ -71,7 +71,7 @@ Thread 的 HTTP 响应使用结构化 `stop_code` 区分用户停止、强制停
 
 网页时间线按事件游标分页读取这些记录，设备离线时仍可查看。在 Baton 之外继续同一原生会话产生的消息不会出现。`src/threads/` 拥有 Thread 的状态、回合和持久消息读取；`view`、`readTurns` 与 `trace` 接受 `{ employeeId, projectId? }`，指定 Project 时同时校验员工与 Project 归属。Project 工具 `threads.read` 读取同一份输入和回复，每个 Turn 的 `item_count` 为过程项数量，`token_usage` 保留上游用量 JSON。`history.read` 按序号读取 Project 主对话已经保存在中心的事件；`history.search` 复用记忆来源词项索引，返回原序号、片段、来源字节范围及当前停用/纠正标识。两者均保留员工、Project 和已读序号边界，不访问设备。
 
-`turn.item` 按连续 Worker 报告序号写入 `thread_turn_items`；同一员工、Thread、Turn 和 `item_id` 的冲突保留首个版本，重复报告返回原 ACK。过程项不进入 Project 输入队列或 `thread_events`，时间线的 `turn.ended.payload.item_count` 保存该轮数量。`data` 和 Turn 的 `token_usage` 使用 PostgreSQL `json`，读取不经过 `jsonb` 转换，保留原文中的 NUL、孤立代理项转义和嵌套 null；用量正文只保存在 Turn 中，不重复写入时间线。中心不对过程正文脱敏，也不将正文导出到追踪。
+`turn.item` 按连续 Worker 报告序号写入 `thread_turn_items`；同一员工、Thread、Turn 和 `item_id` 的冲突保留首个版本，重复报告返回原 ACK。过程项不进入 Project 输入队列或 `thread_events`，时间线的 `turn.ended.payload.item_count` 保存该轮数量。`data` 和 Turn 的 `token_usage` 使用 PostgreSQL `json`，读取不经过 `jsonb` 转换，保留原文中的 NUL、孤立代理项转义和嵌套 null；用量正文只保存在 Turn 中，不重复写入时间线。中心不对过程正文脱敏，也不将正文写入日志。
 
 `GET /api/v1/threads/{threadId}/trace` 必填 `worker_turn_seq`，可选 `cursor`，从中心数据库读取过程项，设备离线时仍可访问。按 `(ordinal, worker_seq)` 排序，每页最多 50 项且整个业务 JSON 不超过 1 MiB。首次请求以 Thread 已提交的 `last_worker_seq` 固定 highwater，后续页仅包含不超过该序号的过程项；游标同时绑定员工、Thread、Turn、highwater 和页起点。每页返回 `page_cursor` 供原样重读，用 `next_cursor` 续页。后到的过程项在不带 cursor 的新快照中读取，包括 ordinal 小于已读位置的项。存在的 Turn 没有过程项时返回 `{ok:false,code:"trace_missing",steps:[],page_cursor}`，该空快照也可稳定重读；Turn 不存在返回 404。步骤包含上游 `data`、截断信息及可选 `full_output` 引用；引用的 `storage_generation` 必须与 Thread 绑定代次一致，全文通过现有设备完整输出接口读取。
 
@@ -97,17 +97,13 @@ Project 工具 `threads.trace` 使用相同查询，参数为 `thread_id`、`wor
 
 `nodes.exec` 由已保存的 Project 工具调用创建独立 Execution，以原对话和工具调用身份去重，本机开关默认关闭。中心通过持久命令与报告跟踪执行，`/api/v1/executions` 提供查询、停止和完整输出入口。设备执行前重新读取授权和开关；工具等待结束后命令继续运行，终态通过一条 `execution.finished` 输入交付。缺少可信完成证据时标记 `unknown`，不自动重跑。设备配置与登录命令见 [节点文档](../batond/README.md#设备目录与模型订阅)。
 
-## HTTP 契约与追踪
+## HTTP 契约与请求标识
 
 `src/http/` 提供路由 handler、安全校验与静态文件服务，依赖 Gateway 的请求、通知、断线及诊断操作。`packages/protocol/src/http-api.ts` 使用 Effect `HttpApi` 定义登录、账号、设备、Thread、Project、记忆和诊断接口的路径、入参、响应与错误。服务端通过同一声明构建路由并验证请求和返回值。已登录且完成改密的员工可读取 `GET /api/v1/openapi.json`；文档由契约生成，契约中的写请求要求允许的 Origin 和会话 CSRF token。
 
-中心、节点、Worker、agent-host 和 Project Runtime 使用 Effect 原生 OTLP/HTTP 追踪、日志和指标。未配置地址时不发起导出请求；信号地址、关闭开关和资源属性见[遥测包](../../packages/telemetry/README.md)。
+每个 HTTP 响应都回传 `X-Request-Id`。中心为未携带该头的请求生成 UUID；客户端传入合法 UUID 时沿用原值。错误响应包含相同的 `request_id` 和固定错误 `code`，不含会话正文、凭据或原始异常。`/api/` 请求记录一条结构化 `http.request` 日志，包含请求标识、方法、路径、状态码和耗时；请求体、Cookie 和响应正文不写入日志。
 
-网页使用同源 `POST /api/v1/telemetry/v1/traces` 和 `/logs`，两者要求已登录会话和允许的 Origin；traces 还校验 CSRF token。固定版本录制器不提供自定义请求头，logs 依靠 Origin 与 `SameSite=Strict` 会话 Cookie。logs 支持 gzip OTLP protobuf，压缩请求和解压结果各限 1 MiB；JSON 请求也限 1 MiB。转发关闭返回 404，网页在下一次 trace 导出收到 404 后停止采集。中心覆盖认证身份并过滤后转发，最多四个并发请求，失败后暂停 60 秒。
-
-HTTP 接受标准 `traceparent` 和可选 `tracestate`。命令的追踪上下文独立保存在中心 outbox、节点账本及 Worker 命令和消息记录中，经 WSS 和认证 IPC 传递；重连、重复派发和 Worker 恢复继续关联持久来源。追踪元数据不参与业务内容摘要或幂等判断。数据库查询耗时、事务事件和连接等待随 Effect span 导出，查询文本、绑定参数、消息正文、凭据及原始错误详情不导出。
-
-本地 ClickStack 单容器、ingestion key 与 MCP 排障示例见 [AGENTS.md](../../AGENTS.md#遥测排障)。每个进程共享两个导出请求名额，等待响应头和读取响应体最长三秒；超时、失败或达到并发上限时丢弃当前批次并暂停六十秒，业务执行结果保持原样。
+诊断接口直接读取 PostgreSQL 实时表，不使用后台定时指标轮询。`GET /api/v1/diagnostics` 返回当前员工的在线设备数、按动作分组的未确认下行积压及最老未确认时长、Thread 状态分布、活动 Run 数和后台记忆队列；另带当前进程的 Gateway 连接与队列计数和发布元数据。响应不包含消息正文或凭据。
 
 ## 当前能力范围
 
@@ -133,6 +129,6 @@ Kiro 的配置、原生恢复和生产探测限制见 [节点接入说明](../ba
 
 命令与测试数据库配置见 [AGENTS.md](../../AGENTS.md#常用构建与验证命令)。单元组不需要 PostgreSQL，集成组运行数据库测试。测试辅助模块位于 `src/testing/`，数据库创建、清理、连接重启和节点数据准备分别由 `withTestDatabase`、`openTestDatabase` 与 `seedNode` 提供。
 
-`GET /api/v1/diagnostics` 返回当前员工的设备与浏览器连接数、收发字节数、控制队列占用、待完成 RPC 和 Thread 状态分布，不包含消息正文或凭据。断线状态写入失败后按原连接身份重试；未完成的凭据吊销由独立维护循环继续关闭连接并确认生效。
+`GET /api/v1/diagnostics` 返回当前员工的在线设备数、下行积压、Thread 状态分布、活动 Run 和后台记忆队列，并附带当前进程的连接、收发字节数、控制队列与待完成 RPC 计数；响应不包含消息正文或凭据。断线状态写入失败后按原连接身份重试；未完成的凭据吊销由独立维护循环继续关闭连接并确认生效。
 
 `@baton/e2e` 的远程集成测试使用本机 HTTP/WebSocket、独立 Worker 进程和确定性 replay Agent，覆盖账号、注册、远程消息、输出、停止、中心与 daemon 重启、输入不重发及设备吊销，不调用在线模型或外部 API。

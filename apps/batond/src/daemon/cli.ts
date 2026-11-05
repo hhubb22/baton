@@ -1,12 +1,10 @@
 import { parseArgs } from 'node:util'
 import { createReadStream } from 'node:fs'
 import type { Readable } from 'node:stream'
-import { Effect, Option } from 'effect'
-import { telemetryEnvironment, telemetryLayer } from '@baton/telemetry'
+import { Effect } from 'effect'
 import { defaultDataDirectory, isMissing, loadIdentity } from './identity.ts'
 import { initializeBrowseRoots } from '../devices/roots.ts'
 import { runDaemon } from './daemon.ts'
-import { startTelemetryRelay } from './telemetry-relay.ts'
 
 export async function runDaemonCLI(
   action: 'run' | 'serve' | 'identity',
@@ -78,33 +76,11 @@ export async function runDaemonCLI(
     }
     await Effect.runPromise(
       Effect.scoped(
-        Effect.gen(function* () {
-          const localEndpoint = Object.keys(process.env).some((key) => key.startsWith('OTEL_EXPORTER_OTLP_'))
-          const relay = localEndpoint
-            ? Option.none()
-            : yield* Effect.acquireRelease(
-                Effect.tryPromise({
-                  try: startTelemetryRelay,
-                  catch: () => new Error('Telemetry relay unavailable'),
-                }).pipe(Effect.option),
-                (value) => (Option.isSome(value) ? Effect.promise(() => value.value.close()) : Effect.void),
-              )
-          const local = Option.getOrUndefined(relay)
-          return yield* runDaemon({
-            dataDirectory,
-            ...(identity ? { identity } : {}),
-            ...(local ? { telemetryRelay: local } : {}),
-            controlTimeoutSeconds,
-            ...(values.relay ? { relayURL: values.relay } : {}),
-          }).pipe(
-            Effect.provide(
-              telemetryLayer('batond', {
-                ...process.env,
-                ...telemetryEnvironment(local),
-                BATON_TELEMETRY_NODE_ID: identity?.node_id,
-              }),
-            ),
-          )
+        runDaemon({
+          dataDirectory,
+          ...(identity ? { identity } : {}),
+          controlTimeoutSeconds,
+          ...(values.relay ? { relayURL: values.relay } : {}),
         }),
       ),
       { signal: controller.signal },

@@ -26,11 +26,6 @@ export const SessionResponse = Schema.Struct({
   employee: Employee,
   csrf_token: Schema.String,
   expires_at: Timestamp,
-  telemetry: Schema.optionalKey(
-    Schema.Struct({
-      session_replay: Schema.optionalKey(Schema.Literal('masked')),
-    }),
-  ),
 })
 export type SessionResponse = typeof SessionResponse.Type
 

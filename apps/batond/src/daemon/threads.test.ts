@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { realpath, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { Effect, Option, Tracer } from 'effect'
+import { Effect } from 'effect'
 import type * as Scope from 'effect/Scope'
 import type {
   NodeIdentity,
@@ -297,10 +297,7 @@ it('queries a prepared command and resends the identical request only when the W
       expect(queries).toHaveLength(1)
       expect(queries[0]?.command_id).toBe(commandId)
       expect(delivered).toHaveLength(2)
-      const { trace_context: firstTrace, ...firstRequest } = delivered[0]!
-      const { trace_context: retryTrace, ...retryRequest } = delivered[1]!
-      expect(retryRequest).toEqual(firstRequest)
-      expect(retryTrace?.traceparent.split('-')[1]).toBe(firstTrace?.traceparent.split('-')[1])
+      expect(delivered[1]).toEqual(delivered[0])
       expect(yield* ledger.pendingCommands()).toEqual([])
     }),
   )
@@ -335,91 +332,6 @@ it('rejects an undelivered open when its mode becomes unavailable before retry',
       expect(result).toMatchObject({ ok: false, code: 'runtime_mode_unavailable', reason: 'Sandbox unavailable' })
       expect(delivered).toHaveLength(1)
       expect(yield* ledger.pendingCommands()).toEqual([])
-    }),
-  )
-})
-
-it('retains the original trace across daemon ledger restart and accepts a retry with a new trace', async () => {
-  await withService(({ commandId, command, host, path, setHandler }) =>
-    Effect.gen(function* () {
-      const spans: Tracer.NativeSpan[] = []
-      const tracer = Tracer.make({
-        span(options) {
-          const span = new Tracer.NativeSpan(options)
-          spans.push(span)
-          return span
-        },
-      })
-      const requests: WorkerRequest[] = []
-      let generation: string | undefined
-      const persistentHost: DaemonWorkerHost = {
-        ensureWorker: (id) => host.ensureWorker(id),
-        request: (id, request, options) =>
-          request.type === 'status' && generation
-            ? Promise.resolve({
-                type: 'result',
-                ok: true,
-                worker_ready: true,
-                session_id: id,
-                runtime_mode: 'full-access',
-                storage_generation: generation,
-              })
-            : host.request(id, request, options),
-      }
-      setHandler(async (_id, request) => {
-        if (request.type === 'thread_command_status') return { type: 'result', ok: false, code: 'command_not_found' }
-        generation = request.storage_generation
-        requests.push(request)
-        if (requests.length === 1) throw new IPCError('closed', 'lost receipt')
-        return accepted(request)
-      })
-      const identity = { node_id: randomUUID() } as NodeIdentity
-      const makeService = (ledger: import('./ledger.ts').NodeLedger) =>
-        makeThreadService({
-          dataDirectory: path,
-          identity,
-          ledger,
-          host: persistentHost,
-          tracer,
-          capability: () => capability,
-        })
-      let original: string | undefined
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const ledger = yield* makeNodeLedger(join(path, 'node.db'))
-          const service = makeService(ledger)
-          yield* Effect.promise(async () => {
-            await expect(
-              service.command(commandId, {
-                ...command,
-                trace_context: { traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01` },
-              }),
-            ).rejects.toBeInstanceOf(CommandDeliveryUncertain)
-          })
-          original = (yield* ledger.command(commandId))?.request.trace_context?.traceparent.split('-')[2]
-        }),
-      )
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const ledger = yield* makeNodeLedger(join(path, 'node.db'))
-          const service = makeService(ledger)
-          const result = yield* Effect.promise(() =>
-            service.command(commandId, {
-              ...command,
-              trace_context: { traceparent: `00-${'c'.repeat(32)}-${'d'.repeat(16)}-01` },
-            }),
-          )
-          expect(result.ok).toBe(true)
-          expect(yield* ledger.pendingCommands()).toEqual([])
-        }),
-      )
-      expect(requests).toHaveLength(2)
-      expect(requests.map((request) => request.trace_context?.traceparent.split('-')[1])).toEqual([
-        'a'.repeat(32),
-        'a'.repeat(32),
-      ])
-      const dispatches = spans.filter((span) => span.name === 'baton.worker.dispatch')
-      expect(dispatches.map((span) => Option.getOrUndefined(span.parent)?.spanId)).toEqual([original, original])
     }),
   )
 })

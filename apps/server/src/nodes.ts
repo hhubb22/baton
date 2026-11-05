@@ -12,7 +12,6 @@ import { link, lstat, mkdir, open, unlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { RuntimeReport } from '@baton/protocol'
 import { Effect, Schema } from 'effect'
-import { waitEvent } from '@baton/telemetry'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { hasControlCharacters } from './auth.ts'
 import { type DatabaseEffect, dbError } from './database.ts'
@@ -302,7 +301,7 @@ export const claimConnection = (source: NodeSource): DatabaseEffect<void> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     yield* Effect.try({ try: () => validateSource(source), catch: dbError })
-    const offlineMs = yield* sql.withTransaction(
+    yield* sql.withTransaction(
       Effect.gen(function* () {
         const nodes =
           yield* sql`SELECT id FROM nodes WHERE id=${source.node_id}::uuid AND employee_id=${source.employee_id}::uuid AND revoked_at IS NULL FOR UPDATE`
@@ -325,11 +324,8 @@ export const claimConnection = (source: NodeSource): DatabaseEffect<void> =>
         synced=CASE WHEN node_presence.conn_id=EXCLUDED.conn_id AND node_presence.incarnation=EXCLUDED.incarnation THEN node_presence.synced ELSE false END,
         incarnation=EXCLUDED.incarnation, conn_id=EXCLUDED.conn_id, last_contact_at=clock_timestamp(), status_updated_at=clock_timestamp()`
         yield* revalidateNodeSource(source, false)
-        return old[0] && !old[0].online ? old[0].offline_ms : undefined
       }),
     )
-    if (offlineMs !== undefined)
-      yield* waitEvent('end', 'device_offline', { 'baton.node.id': source.node_id }, undefined, offlineMs)
   }).pipe(Effect.mapError(dbError))
 
 export const syncNode = (source: NodeSource, input: SyncInput): DatabaseEffect<void> =>
@@ -371,7 +367,7 @@ export const disconnectNode = (source: NodeSource): DatabaseEffect<void> =>
     const sql = yield* SqlClient.SqlClient
     const changed = yield* sql`UPDATE node_presence SET online=false, synced=false, status_updated_at=clock_timestamp()
     WHERE node_id=${source.node_id}::uuid AND employee_id=${source.employee_id}::uuid AND conn_id=${source.conn_id} AND incarnation=${source.incarnation} AND (online OR synced) RETURNING node_id`
-    if (changed.length) yield* waitEvent('start', 'device_offline', { 'baton.node.id': source.node_id })
+    return changed.length
   }).pipe(Effect.mapError(dbError))
 
 export const resetConnections = (): DatabaseEffect<void> =>
@@ -380,7 +376,7 @@ export const resetConnections = (): DatabaseEffect<void> =>
     const changed = yield* sql<{
       node_id: string
     }>`UPDATE node_presence SET online=false, synced=false, status_updated_at=clock_timestamp() WHERE online OR synced RETURNING node_id`
-    for (const node of changed) yield* waitEvent('start', 'device_offline', { 'baton.node.id': node.node_id })
+    return changed.length
   }).pipe(Effect.mapError(dbError))
 
 export const saveRuntimeReport = (source: NodeSource, report: Record<string, unknown>): DatabaseEffect<number> =>

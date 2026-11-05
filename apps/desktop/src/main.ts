@@ -33,7 +33,7 @@ import {
 } from './notifications.ts'
 import { notificationsDisabled, notificationSettingsURL } from './notification-permission.ts'
 import { LocalActions, localAccount, registerLocalBridge } from './local.ts'
-import { diagnosticSummary, readLogTail, redactDiagnostics, type DesktopDiagnostics } from './diagnostics.ts'
+import { diagnosticSummary, redactDiagnostics, type DesktopDiagnostics } from './diagnostics.ts'
 import { editorPreferences, launchEditor } from './editor.ts'
 
 app.setName('Baton')
@@ -376,8 +376,13 @@ async function start() {
       batondVersion: current.batond_version ?? 'unknown',
       platform: current.platform ?? `${process.platform} ${process.arch}`,
       processState: current.state,
+      ...(current.node_id ? { deviceId: current.node_id } : {}),
       lastExit: current.last_error
-        ? { at: current.last_error.at, reason: redactDiagnostics(current.last_error.message) }
+        ? {
+            at: current.last_error.at,
+            reason: redactDiagnostics(current.last_error.message),
+            code: current.last_error.code,
+          }
         : null,
       canRestart: current.service_installed !== true && !quitting,
     }
@@ -413,10 +418,7 @@ async function start() {
       if (error) throw new Error('无法打开日志文件夹。')
     },
     copyDiagnostics: async () => {
-      const summary = diagnosticSummary(
-        await localDiagnostics(),
-        await readLogTail(join(dataDirectory, 'logs', 'batond.log')),
-      )
+      const summary = diagnosticSummary(await localDiagnostics())
       await clipboard.writeText(summary)
     },
   })

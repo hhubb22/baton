@@ -17,7 +17,7 @@ import { projectHttpHandlers } from './projects.ts'
 import { readThreadOutput, readThreadTranscript } from '../full-output.ts'
 import * as DeviceManagement from '../device-management.ts'
 import { cookieToken, httpBusiness, decodeResponse } from './security.ts'
-import { telemetryForwardEnabled } from '../telemetry-forward-client.ts'
+import { readDiagnostics } from '../diagnostics.ts'
 
 export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
   const changed = (employeeId: string, threadId: string) =>
@@ -109,21 +109,7 @@ export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
     ),
     HttpApiBuilder.group(BatonHttpApi, 'account', (handlers) =>
       handlers
-        .handle('me', () =>
-          CurrentBrowserSession.pipe(
-            Effect.map((session) => ({
-              ...session,
-              ...(telemetryForwardEnabled(options.telemetryEnv)
-                ? {
-                    telemetry:
-                      (options.telemetryEnv ?? process.env).BATON_WEB_SESSION_REPLAY === 'masked'
-                        ? { session_replay: 'masked' as const }
-                        : {},
-                  }
-                : {}),
-            })),
-          ),
-        )
+        .handle('me', () => CurrentBrowserSession)
         .handle('replayNotifications', ({ query }) =>
           httpBusiness(
             Effect.gen(function* () {
@@ -474,16 +460,9 @@ export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
         httpBusiness(
           Effect.gen(function* () {
             const { employee } = yield* CurrentBrowserSession
-            const sql = yield* SqlClient.SqlClient
-            const statuses = yield* sql<{
-              status: typeof P.ThreadStatus.Type
-              count: number
-            }>`SELECT status,count(*)::integer AS count
-        FROM threads WHERE employee_id=${employee.id}::uuid GROUP BY status ORDER BY status`
             return {
-              ...options.gateway().diagnostics(employee.id),
               release: P.releaseMetadata(),
-              thread_statuses: statuses,
+              ...(yield* readDiagnostics(employee.id, options.gateway().diagnostics(employee.id))),
             }
           }),
         ),

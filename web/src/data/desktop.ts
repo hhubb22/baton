@@ -53,7 +53,8 @@ export interface DesktopDiagnostics {
   batondVersion: string
   platform: string
   processState: string
-  lastExit: { at: string; reason: string } | null
+  deviceId?: string
+  lastExit: { at: string; reason: string; code?: string } | null
   canRestart: boolean
 }
 

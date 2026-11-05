@@ -2,48 +2,42 @@ import { createReadStream } from 'node:fs'
 import { readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
-export function telemetryMarkers(env) {
-  const result = []
-  for (const [name, value] of Object.entries(env)) {
-    if (!value || !/^OTEL_EXPORTER_OTLP_(?:(?:TRACES|LOGS|METRICS)_)?(?:ENDPOINT|HEADERS)$/.test(name)) continue
-    const values = name.endsWith('_HEADERS')
-      ? value.split(',').flatMap((entry) => {
-          const index = entry.indexOf('=')
-          if (index < 0) return []
-          const raw = entry.slice(index + 1).trim()
-          try {
-            return [raw, decodeURIComponent(raw)]
-          } catch {
-            return [raw]
-          }
-        })
-      : [value]
-    for (const marker of values) if (marker) result.push({ name, bytes: Buffer.from(marker) })
-  }
-  return result
-}
+// 安装包和网页产物不得包含外部遥测导出、配置开关或回放库。
+// 标记分片拼接，避免工具源码本身命中删除项搜索。
+const marker = (...parts) => parts.join('')
+const markers = [
+  marker('OTEL', '_EXPORTER', '_OTLP'),
+  marker('BATON', '_TELEMETRY', '_FORWARD'),
+  marker('BATON', '_TELEMETRY', '_LOCAL', '_RELAY'),
+  marker('BATON', '_WEB', '_SESSION', '_REPLAY'),
+  marker('@hyper', 'dx/', 'otel-', 'web'),
+  marker('@opentelemetry/', 'exporter-', 'trace-', 'otlp-', 'http'),
+  marker('rr', 'web'),
+].map((value) => ({ value, bytes: Buffer.from(value) }))
 
-async function scanFile(path, markers) {
+async function scanFile(path) {
   const longest = Math.max(...markers.map((marker) => marker.bytes.length))
   let tail = Buffer.alloc(0)
   for await (const chunk of createReadStream(path)) {
     const data = Buffer.concat([tail, chunk])
     for (const marker of markers)
-      if (data.includes(marker.bytes)) throw new Error(`遥测配置出现在构建产物中：${marker.name}`)
+      if (data.includes(marker.bytes)) throw new Error(`安装包包含已删除的遥测标记：${marker.value}`)
     tail = data.subarray(Math.max(0, data.length - longest + 1))
   }
 }
 
-async function scanDirectory(path, markers) {
+async function scanDirectory(path) {
   for (const entry of await readdir(path, { withFileTypes: true })) {
+    // 只检查 Baton 自己的 bundle、网页产物和安装布局；第三方包可能附带未加载的功能源码，
+    // releases/ 保存旧安装包，不属于当前产物。
+    if (entry.name === 'node_modules' || entry.name === 'releases') continue
     const child = join(path, entry.name)
-    if (entry.isDirectory()) await scanDirectory(child, markers)
-    else if (entry.isFile()) await scanFile(child, markers)
+    if (entry.isDirectory()) await scanDirectory(child)
+    else if (entry.isFile()) await scanFile(child)
   }
 }
 
-export async function scanTelemetryArtifacts(directories, env = process.env) {
-  const markers = telemetryMarkers(env)
+export async function scanTelemetryArtifacts(directories) {
   const available = []
   for (const directory of directories) {
     try {
@@ -52,10 +46,6 @@ export async function scanTelemetryArtifacts(directories, env = process.env) {
       if (error?.code !== 'ENOENT') throw error
     }
   }
-  if (markers.length) for (const directory of available) await scanDirectory(directory, markers)
-  return {
-    provided: [...new Set(markers.map((marker) => marker.name))],
-    scanned: markers.length > 0,
-    directories: available.length,
-  }
+  for (const directory of available) await scanDirectory(directory)
+  return { scanned: true, directories: available.length, externalTelemetry: false }
 }

@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { Schema, type Tracer } from 'effect'
-import { tracePromise } from '@baton/telemetry'
+import { Schema } from 'effect'
 import {
   ThreadReport,
   WorkerCommandResult,
@@ -66,7 +65,6 @@ export function makeThreadService(options: {
   excludedThreadIds?: ReadonlySet<string>
   ledger: NodeLedger
   host: DaemonWorkerHost
-  tracer?: Tracer.Tracer
   capability: () => RuntimeAgent | readonly RuntimeAgent[]
   pollIntervalMs?: number
   onActivity?: () => void
@@ -88,24 +86,14 @@ export function makeThreadService(options: {
     polls.delete(threadId)
     options.onActivity?.()
   }
-  const commandHash = ({ trace_context: _trace, ...business }: ThreadCommand) => contentHash(business)
+  const commandHash = (command: ThreadCommand) => contentHash(command)
   async function deliver(saved: NodeCommand, deadline: number, reconcile: boolean): Promise<ThreadCommandResult> {
-    return tracePromise(
-      options.tracer,
-      'baton.worker.dispatch',
-      saved.request.trace_context,
-      (trace) => deliverRequest(saved, deadline, reconcile, trace),
-      {
-        kind: 'client',
-        attributes: { 'baton.command.id': saved.id, 'baton.recovery': reconcile },
-      },
-    )
+    return deliverRequest(saved, deadline, reconcile)
   }
   async function deliverRequest(
     saved: NodeCommand,
     deadline: number,
     reconcile: boolean,
-    trace: import('@baton/telemetry').TraceContext | undefined,
   ): Promise<ThreadCommandResult> {
     const req = saved.request
     const config = req.open_config ?? (await io(ledger.worker(req.thread_id!)))?.config
@@ -125,11 +113,7 @@ export function makeThreadService(options: {
     const request = (value: WorkerRequest) => {
       const remaining = Math.floor(ipcDeadline - performance.now())
       if (remaining <= 0) throw new CommandDeliveryUncertain()
-      return host.request(
-        req.thread_id!,
-        { ...value, ...(trace ? { trace_context: trace } : {}) },
-        { timeoutMs: remaining },
-      )
+      return host.request(req.thread_id!, value, { timeoutMs: remaining })
     }
     let reply: WorkerIPCMessage | undefined
     if (reconcile) {
@@ -329,7 +313,6 @@ export function makeThreadService(options: {
             : {}),
         })
       }
-      request = { ...request, ...(cmd.trace_context ? { trace_context: cmd.trace_context } : {}) }
       saved = await io(ledger.prepare({ id, hash, request: decodeRequest(request) }))
     }
     return deliver(saved, deadline, reconcile)
@@ -347,16 +330,7 @@ export function makeThreadService(options: {
               code: 'command_content_mismatch',
             })
       wake(cmd.thread_id)
-      const result = tracePromise(
-        options.tracer,
-        'baton.command.receive',
-        cmd.trace_context,
-        (trace) => execute(id, { ...cmd, ...(trace ? { trace_context: trace } : {}) }),
-        {
-          kind: 'consumer',
-          attributes: { 'baton.command.id': id, 'baton.thread.id': cmd.thread_id, 'baton.command.action': cmd.action },
-        },
-      )
+      const result = execute(id, cmd)
         .catch((error: unknown): ThreadCommandResult => {
           if (error instanceof DaemonStorageFailure || error instanceof WorkerHistoryUnavailable) throw error
           if (!(error instanceof AdmissionRejected)) throw new CommandDeliveryUncertain()

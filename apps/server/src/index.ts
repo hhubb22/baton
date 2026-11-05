@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Cause, Effect, Exit } from 'effect'
-import { telemetryLayer } from '@baton/telemetry'
+import { createLogger, describeError } from '@baton/logging'
 import { createDatabaseRuntime, migrateDatabase } from './database.ts'
 import { initializeEmployee, resetPassword } from './auth.ts'
 import { loadSigningKey, resetConnections } from './nodes.ts'
@@ -32,6 +32,8 @@ BATON_NODE_SIGNING_KEY、BATON_TLS_CERT_FILE、BATON_TLS_KEY_FILE、BATON_TRUSTE
 BATON_RPC_MAX_QUEUED、BATON_RPC_QUEUE_TIMEOUT、BATON_RPC_READ_TIMEOUT、
 BATON_RPC_MANAGEMENT_TIMEOUT、BATON_RPC_LOGIN_TIMEOUT。配置范围见 apps/server/README.md。`
 
+const log = createLogger('baton-server')
+
 async function main() {
   const args = process.argv.slice(2)
   if (!args.length || ['help', '--help', '-h'].includes(args[0])) {
@@ -44,10 +46,7 @@ async function main() {
   }
   const url = process.env.BATON_DATABASE_URL?.trim()
   if (!url) throw new AppError(400, 'database_required', '需要设置 BATON_DATABASE_URL')
-  const runtime = createDatabaseRuntime(
-    { url, schema: process.env.BATON_DB_SCHEMA?.trim() || 'public' },
-    telemetryLayer('baton-server'),
-  )
+  const runtime = createDatabaseRuntime({ url, schema: process.env.BATON_DB_SCHEMA?.trim() || 'public' })
   const controller = new AbortController()
   const stop = () => controller.abort()
   process.once('SIGINT', stop)
@@ -59,6 +58,7 @@ async function main() {
       throw Cause.squash(result.cause)
     }
     const migrationDirectory = join(dirname(fileURLToPath(import.meta.url)), 'migrations')
+    log.info('server.starting', { command: args[0], schema: process.env.BATON_DB_SCHEMA?.trim() || 'public' })
     await run(migrateDatabase(migrationDirectory))
     if (args[0] === 'migrate' && args.length === 1) return
     if (args[0] === 'admin' && args[1] === 'restore-finalize' && args.length === 2) {
@@ -136,6 +136,7 @@ async function main() {
         console.log(
           JSON.stringify({ event: 'listening', host: server.host, port: server.port, release: releaseMetadata() }),
         )
+        log.info('server.listening', { host: server.host, port: server.port })
         yield* Effect.never
       }),
     )
@@ -150,12 +151,9 @@ async function main() {
 }
 
 void main().catch((error: unknown) => {
-  console.error(
-    JSON.stringify({
-      ok: false,
-      code: error instanceof AppError ? error.code : 'server_failed',
-      message: error instanceof AppError ? error.message : 'Coordinator 启动失败',
-    }),
-  )
+  log.error('server.failed', {
+    error_code: error instanceof AppError ? error.code : 'server_failed',
+    ...describeError(error),
+  })
   process.exitCode = 1
 })

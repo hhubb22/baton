@@ -11,7 +11,7 @@ import {
   type WorkerOpenConfig,
   type WorkerRequest,
 } from '@baton/protocol'
-import { Clock, Deferred, Effect, Exit, Fiber, Logger, Option, Queue, References, Schema, Stream, Tracer } from 'effect'
+import { Deferred, Effect, Fiber, Logger, Queue, Schema, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { vi } from 'vite-plus/test'
 import { TestClock } from 'effect/testing'
@@ -242,205 +242,6 @@ describe('reliable Worker', () => {
     ),
   )
 
-  it.effect('keeps the Turn span open through output and ends it with reported usage', () =>
-    fixture((dbPath) => {
-      const spans: Tracer.NativeSpan[] = []
-      const tracer = Tracer.make({
-        span(options) {
-          const span = new Tracer.NativeSpan(options)
-          spans.push(span)
-          return span
-        },
-      })
-      return Effect.gen(function* () {
-        const { cfg, f, worker } = yield* readyWorker(dbPath)
-        const input = message(cfg)
-        yield* worker.handle(input)
-        yield* completed(worker, input.command_id!)
-        const turn = spans.find((span) => span.name === 'baton.turn')!
-        expect(turn.status._tag).toBe('Started')
-        const reply = event(input.client_message_id!, 'reply')
-        if (reply.type !== 'reply') throw new Error('Expected reply')
-        yield* Queue.offer(f.events, { ...reply, truncated: true, original_bytes: 512 })
-        yield* Queue.offer(f.events, {
-          ...delta(input.client_message_id!, ''),
-          type: 'end',
-          outcome: 'completed',
-          tokenUsage: {
-            inputTokens: 0,
-            outputTokens: 3,
-            cachedInputTokens: 2,
-            cacheCreationTokens: 1,
-            reasoningTokens: 1,
-          },
-        })
-        yield* until(reports(worker), (items) => items.some((item) => item.kind === 'turn.ended'))
-        expect(turn.status._tag).toBe('Ended')
-        expect(turn.attributes.get('baton.turn.seq')).toBe(1)
-        expect(turn.attributes.get('baton.turn.result')).toBe('completed')
-        expect(turn.attributes.get('baton.turn.first_output_ms')).toEqual(expect.any(Number))
-        expect(turn.attributes.get('baton.usage.reported')).toBe(true)
-        expect(turn.attributes.get('gen_ai.usage.input_tokens')).toBe(0)
-        expect(turn.attributes.get('gen_ai.usage.cache_read.input_tokens')).toBe(2)
-        expect(turn.attributes.get('gen_ai.usage.cache_creation_input_tokens')).toBe(1)
-        expect(turn.attributes.get('gen_ai.usage.reasoning.output_tokens')).toBe(1)
-        expect(turn.attributes.get('gen_ai.operation.name')).toBe('chat')
-        expect(turn.attributes.get('gen_ai.agent.name')).toBe(cfg.agent_type)
-        expect(turn.attributes.get('gen_ai.conversation.id')).toBe(cfg.thread_id)
-        expect(turn.attributes.get('ttft_ms')).toEqual(expect.any(Number))
-        expect(JSON.parse(String(turn.attributes.get('gen_ai.input.messages')))).toEqual([
-          { role: 'user', parts: [{ type: 'text', content: input.payload }] },
-        ])
-        expect(JSON.parse(String(turn.attributes.get('gen_ai.output.messages')))).toEqual([
-          { role: 'assistant', parts: [{ type: 'text', content: reply.text }], finish_reason: 'completed' },
-        ])
-        const output = spans.find((span) => span.name === 'baton.output')!
-        expect(output.attributes.get('baton.output.truncated')).toBe(true)
-        expect(output.attributes.get('baton.output.bytes')).toBe(512)
-      }).pipe(Effect.provideService(Tracer.Tracer, tracer))
-    }),
-  )
-
-  it.effect('records the confirmed stop result on the command trace', () =>
-    fixture((dbPath) => {
-      const spans: Tracer.NativeSpan[] = []
-      const tracer = Tracer.make({
-        span(options) {
-          const span = new Tracer.NativeSpan(options)
-          spans.push(span)
-          return span
-        },
-      })
-      return Effect.gen(function* () {
-        const { cfg, worker } = yield* readyWorker(dbPath)
-        const stopping = request(cfg, 'thread_stop')
-        yield* worker.handle(stopping)
-        yield* completed(worker, stopping.command_id!)
-        expect(spans.find((span) => span.name === 'baton.worker.stop')?.attributes.get('baton.stop.result')).toBe(
-          'stopped',
-        )
-      }).pipe(Effect.provideService(Tracer.Tracer, tracer))
-    }),
-  )
-
-  it.effect('records an unknown stop outcome without inventing confirmation', () =>
-    fixture((dbPath) => {
-      const spans: Tracer.NativeSpan[] = []
-      const tracer = Tracer.make({
-        span(options) {
-          const span = new Tracer.NativeSpan(options)
-          spans.push(span)
-          return span
-        },
-      })
-      return Effect.gen(function* () {
-        const cfg = config()
-        const f = yield* fake
-        f.sendTask = Effect.never
-        const worker = yield* makeWorker({ dbPath, agentFactory: () => f.agent, stopTimeoutMs: 200 })
-        yield* worker.handle(request(cfg, 'thread_open'))
-        yield* opened(worker)
-        const input = message(cfg)
-        yield* worker.handle(input)
-        yield* called(f, `send:${input.client_message_id}`)
-        const stopping = request(cfg, 'thread_stop')
-        yield* worker.handle(stopping)
-        yield* Queue.offer(f.events, {
-          type: 'exited',
-          reason: 'Process tree termination confirmed',
-          processTreeStopped: true,
-        })
-        yield* completed(worker, stopping.command_id!)
-        expect(spans.find((span) => span.name === 'baton.worker.stop')?.attributes.get('baton.stop.result')).toBe(
-          'unknown',
-        )
-      }).pipe(Effect.provideService(Tracer.Tracer, tracer))
-    }),
-  )
-
-  it.effect('marks a failed Turn without exporting the provider error text', () =>
-    fixture((dbPath) => {
-      const spans: Tracer.NativeSpan[] = []
-      const tracer = Tracer.make({
-        span(options) {
-          const span = new Tracer.NativeSpan(options)
-          spans.push(span)
-          return span
-        },
-      })
-      return Effect.gen(function* () {
-        const { cfg, f, worker } = yield* readyWorker(dbPath)
-        const input = message(cfg)
-        yield* worker.handle(input)
-        yield* completed(worker, input.command_id!)
-        yield* Queue.offer(f.events, {
-          ...delta(input.client_message_id!, ''),
-          type: 'end',
-          outcome: 'failed',
-          reason: 'private provider error',
-        })
-        yield* until(reports(worker), (items) => items.some((item) => item.kind === 'turn.ended'))
-        const turn = spans.find((span) => span.name === 'baton.turn')!
-        expect(turn.attributes.get('baton.turn.result')).toBe('failed')
-        expect(turn.attributes.get('baton.error.code')).toBe('turn_failed')
-        expect(turn.attributes.get('baton.usage.reported')).toBe(false)
-        expect(turn.status._tag === 'Ended' && Exit.isFailure(turn.status.exit)).toBe(true)
-        expect(JSON.stringify([...turn.attributes])).not.toContain('private provider error')
-      }).pipe(Effect.provideService(Tracer.Tracer, tracer))
-    }),
-  )
-
-  it.effect('starts the Turn timing at message receipt after a queued wait', () =>
-    fixture((dbPath) => {
-      const spans: Tracer.NativeSpan[] = []
-      const logs: Array<{ message: unknown; attributes: Readonly<Record<string, unknown>>; traceId?: string }> = []
-      const tracer = Tracer.make({
-        span(options) {
-          const span = new Tracer.NativeSpan(options)
-          spans.push(span)
-          return span
-        },
-      })
-      return Effect.gen(function* () {
-        const { cfg, f, worker } = yield* readyWorker(dbPath)
-        const release = yield* Deferred.make<void>()
-        f.prepareTask = Deferred.await(release)
-        const clock = yield* Clock.Clock
-        const before = clock.currentTimeMillisUnsafe()
-        const input = { ...message(cfg), trace_context: { traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01` } }
-        yield* worker.handle(input)
-        yield* called(f, `prepare:${input.client_message_id}`)
-        expect(spans.some((span) => span.name === 'baton.turn')).toBe(false)
-        yield* TestClock.adjust('5 seconds')
-        yield* Deferred.succeed(release, undefined)
-        yield* completed(worker, input.command_id!)
-        const turn = spans.find((span) => span.name === 'baton.turn')!
-        expect(turn.status.startTime).toBe(BigInt(before) * 1_000_000n)
-        const waits = logs.filter(
-          (entry) => Array.isArray(entry.message) && String(entry.message[0]).startsWith('baton.wait.'),
-        )
-        expect(waits.map((entry) => entry.message)).toEqual([['baton.wait.start'], ['baton.wait.end']])
-        expect(waits[1]!.attributes['baton.wait.duration_ms']).toBe(5000)
-        expect(
-          waits.every((entry) => entry.attributes['baton.wait.reason'] === 'queue' && entry.traceId === 'a'.repeat(32)),
-        ).toBe(true)
-      }).pipe(
-        Effect.provideService(Tracer.Tracer, tracer),
-        Effect.provideService(
-          Logger.CurrentLoggers,
-          new Set([
-            Logger.make(({ message, fiber }) =>
-              logs.push({
-                message,
-                attributes: fiber.getRef(References.CurrentLogAnnotations),
-                ...(fiber.cache.span ? { traceId: fiber.cache.span.traceId } : {}),
-              }),
-            ),
-          ]),
-        ),
-      )
-    }),
-  )
   it.effect('returns the current execution identity only while a freshly queried turn is active', () =>
     fixture((dbPath) =>
       Effect.gen(function* () {
@@ -1527,23 +1328,11 @@ describe('reliable Worker', () => {
         ),
     )
 
-    it.effect('restores a persistent queued input and its trace after Scope exit without changing retry identity', () =>
+    it.effect('restores a persistent queued input after Scope exit without changing retry identity', () =>
       fixture((dbPath) =>
         Effect.gen(function* () {
           const cfg = config()
-          const input = {
-            ...message(cfg),
-            trace_context: { traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01` },
-          } as WorkerRequest
-          const spans: Tracer.NativeSpan[] = []
-          const tracer = Tracer.make({
-            span(options) {
-              const span = new Tracer.NativeSpan(options)
-              spans.push(span)
-              return span
-            },
-          })
-          let durableSpan: string | undefined
+          const input = message(cfg)
           yield* Effect.scoped(
             Effect.gen(function* () {
               const f = yield* fake
@@ -1552,23 +1341,11 @@ describe('reliable Worker', () => {
               yield* worker.handle(request(cfg, 'thread_open'))
               yield* opened(worker)
               const receipt = yield* worker.handle(input)
-              const retry = yield* worker.handle({
-                ...input,
-                trace_context: { traceparent: `00-${'c'.repeat(32)}-${'d'.repeat(16)}-01` },
-              })
+              const retry = yield* worker.handle(input)
               expect(retry.receipt).toEqual(receipt.receipt)
               yield* called(f, `prepare:${input.client_message_id}`)
-            }).pipe(Effect.provideService(Tracer.Tracer, tracer)),
+            }),
           )
-          const db = new DatabaseSync(dbPath, { readOnly: true })
-          try {
-            const row = db.prepare('SELECT payload FROM thread_messages WHERE id = ?').get(input.client_message_id!)
-            const saved = JSON.parse(String(row?.payload)) as { trace_context: { traceparent: string } }
-            expect(saved.trace_context.traceparent.split('-')[1]).toBe('a'.repeat(32))
-            durableSpan = saved.trace_context.traceparent.split('-')[2]
-          } finally {
-            db.close()
-          }
           yield* Effect.scoped(
             Effect.gen(function* () {
               const f = yield* fake
@@ -1576,15 +1353,8 @@ describe('reliable Worker', () => {
               yield* completed(worker, input.command_id!)
               expect(f.calls.includes('resume')).toBe(true)
               expect(f.sentInputs.map((message) => message.id)).toEqual([input.client_message_id])
-            }).pipe(Effect.provideService(Tracer.Tracer, tracer)),
+            }),
           )
-          const sent = spans.find((span) => span.name === 'baton.worker.send')
-          expect(sent?.traceId).toBe('a'.repeat(32))
-          const turn = spans.find((span) => span.name === 'baton.turn')
-          expect(turn && Option.getOrUndefined(turn.parent)?.spanId).toBe(durableSpan)
-          expect(sent && Option.getOrUndefined(sent.parent)?.spanId).toBe(turn?.spanId)
-          const retried = spans.find((span) => span.name === 'baton.worker.receive' && span.traceId === 'c'.repeat(32))
-          expect(retried?.links[0]?.span.spanId).toBe(durableSpan)
         }),
       ),
     )

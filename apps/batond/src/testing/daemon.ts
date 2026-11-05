@@ -3,7 +3,6 @@ import { rm } from 'node:fs/promises'
 import { Effect } from 'effect'
 import { WebSocketServer } from 'ws'
 import type { NodeIdentity, RuntimeAgent } from '@baton/protocol'
-import { telemetryEnvironment, telemetryLayer } from '@baton/telemetry'
 import { initializeBrowseRoots } from '../devices/roots.ts'
 import { runDaemon, type RunDaemonOptions } from '../daemon/daemon.ts'
 import { connectWebSocket } from '../daemon/transport.ts'
@@ -66,22 +65,7 @@ export async function setupDaemon(cleanup: Array<() => Promise<unknown>>) {
         ...options,
       }),
     )
-    const running = Effect.runPromise(
-      options.telemetryRelay
-        ? program.pipe(
-            Effect.provide(
-              telemetryLayer('batond', {
-                OTEL_BSP_SCHEDULE_DELAY: '30',
-                OTEL_BLRP_SCHEDULE_DELAY: '30',
-                OTEL_METRIC_EXPORT_INTERVAL: '300',
-                ...telemetryEnvironment(options.telemetryRelay),
-                OTEL_BSP_MAX_EXPORT_BATCH_SIZE: '64',
-              }),
-            ),
-          )
-        : program,
-      { signal: controller.signal },
-    ).catch((error: unknown) => {
+    const running = Effect.runPromise(program, { signal: controller.signal }).catch((error: unknown) => {
       if (!controller.signal.aborted) failure = error
     })
     const stop = async () => {

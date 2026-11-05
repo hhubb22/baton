@@ -1,16 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import type { IncomingMessage, Server } from 'node:http'
-import { Effect, Predicate, Schema, Tracer } from 'effect'
-import { captureTrace, withTraceSpan } from '@baton/telemetry'
+import { Schema } from 'effect'
 import { WebSocket, WebSocketServer, type RawData } from 'ws'
-import {
-  AuthFrame,
-  BrowserSubscription,
-  Envelope,
-  MaxMessageBytes,
-  NodeToControlBody,
-  TelemetryExport,
-} from '@baton/protocol'
+import { AuthFrame, BrowserSubscription, Envelope, MaxMessageBytes, NodeToControlBody } from '@baton/protocol'
 import type {
   BrowserEvent,
   SessionResult,
@@ -82,7 +74,6 @@ export interface GatewayHandlers {
   heartbeat(source: NodeSource): Promise<void>
   disconnected(source: NodeSource): Promise<void>
   handle(source: NodeSource, envelope: Envelope): Promise<Body | undefined>
-  telemetry?(source: NodeSource, body: typeof TelemetryExport.Type): void
   browser(cookie: string): Promise<string>
   thread(employeeId: string, threadId: string): Promise<void>
   output(employeeId: string, threadId: string, cursor?: string): Promise<SessionResult>
@@ -136,14 +127,12 @@ interface PendingRPC {
   timer: ReturnType<typeof setTimeout>
 }
 export interface GatewayOptions {
-  tracer?: Tracer.Tracer
   allowedOrigins: ReadonlyArray<string>
   heartbeatMs?: number
   offlineMs?: number
   pollMs?: number
   maxConnections?: number
   authenticationTimeoutMs?: number
-  telemetryAdmission?: (queued: number) => boolean
   rpc?: {
     readonly readConcurrency?: number
     readonly managementConcurrency?: number
@@ -245,30 +234,7 @@ export class Gateway {
   send(nodeId: string, employeeId: string, messageId: string, body: unknown, correlationId?: string): boolean {
     const connection = this.nodes.get(nodeId)
     if (!connection || connection.source.employee_id !== employeeId || !connection.synced) return false
-    const tracer = this.options.tracer
-    if (!tracer || !Predicate.isObject(body) || body.type !== 'thread.command')
-      return this.reply(connection, messageId, body, correlationId)
-    return Effect.runSync(
-      withTraceSpan(
-        Effect.gen({ self: this }, function* () {
-          const trace = yield* captureTrace
-          const sent = this.reply(
-            connection,
-            messageId,
-            { ...body, ...(trace ? { trace_context: trace } : {}) },
-            correlationId,
-          )
-          yield* Effect.annotateCurrentSpan('baton.dispatch.accepted', sent)
-          return sent
-        }),
-        'baton.gateway.send',
-        body.trace_context,
-        {
-          kind: 'producer',
-          attributes: { 'baton.command.id': messageId },
-        },
-      ).pipe(Effect.provideService(Tracer.Tracer, tracer)),
-    )
+    return this.reply(connection, messageId, body, correlationId)
   }
 
   async sendValidated(nodeId: string, employeeId: string, messageId: string, body: unknown): Promise<boolean> {
@@ -402,31 +368,6 @@ export class Gateway {
             )
           }
         })()
-        return
-      }
-      if (
-        frame.kind === 'envelope' &&
-        Predicate.isObject(frame.envelope) &&
-        Predicate.isObject(frame.envelope.body) &&
-        frame.envelope.body.type === 'telemetry.export'
-      ) {
-        const current = connection
-        if (
-          !current.synced ||
-          !(this.options.telemetryAdmission?.(queued) ?? queued === 0) ||
-          this.nodes.get(current.source.node_id) !== current
-        )
-          return
-        const envelope = Schema.decodeUnknownOption(Envelope)(frame.envelope)
-        if (envelope._tag === 'None' || envelope.value.route.to !== 'control') return
-        const body = Schema.decodeUnknownOption(TelemetryExport)(envelope.value.body)
-        if (body._tag === 'Some') {
-          try {
-            this.handlers.telemetry?.(current.source, body.value)
-          } catch {
-            /* 丢弃格式错误的遥测。 */
-          }
-        }
         return
       }
       if (Date.now() - rateStart >= 1000) {

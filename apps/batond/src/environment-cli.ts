@@ -149,7 +149,7 @@ export async function runEnvironmentCLI(args: string[]): Promise<void> {
   if ((action === 'set' || action === 'unset' || action === 'reset') && name && positionals.length === 2) {
     if (
       !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ||
-      /^(NODE_OPTIONS|NODE_TLS_REJECT_UNAUTHORIZED|LD_PRELOAD|DYLD_.*|BASH_ENV|BATON_.*|OTEL_.*)$/i.test(name)
+      /^(NODE_OPTIONS|NODE_TLS_REJECT_UNAUTHORIZED|LD_PRELOAD|DYLD_.*|BASH_ENV|BATON_.*)$/i.test(name)
     )
       throw new Error('环境变量名称无效或受禁止')
     if (!/^(device|agent:(cursor|pi|codex|kiro|antigravity|droid)|project:.+)$/.test(values.scope!))

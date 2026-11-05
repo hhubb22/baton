@@ -1,31 +1,49 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { scanTelemetryArtifacts } from './lib/telemetry-scan.mjs'
 
-test('detects endpoint and decoded header values without reporting them', async () => {
+test('rejects deleted telemetry markers in build artifacts', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'baton-telemetry-scan-'))
   const file = join(directory, 'artifact')
   try {
-    const env = {
-      OTEL_EXPORTER_OTLP_ENDPOINT: 'http://127.0.0.1:1/scan-marker',
-      OTEL_EXPORTER_OTLP_HEADERS: 'authorization=scan%2Dsecret',
-    }
     await writeFile(file, 'safe')
-    const clean = await scanTelemetryArtifacts([directory], env)
-    assert.equal(clean.scanned, true)
-    assert.equal(clean.directories, 1)
-    await writeFile(file, `${'x'.repeat(65534)}scan-secret`)
-    await assert.rejects(scanTelemetryArtifacts([directory], env), (error) => {
-      assert.match(error.message, /OTEL_EXPORTER_OTLP_HEADERS/)
-      assert.doesNotMatch(error.message, /scan-secret/)
-      return true
+    assert.deepEqual(await scanTelemetryArtifacts([directory]), {
+      scanned: true,
+      directories: 1,
+      externalTelemetry: false,
     })
-    await writeFile(file, env.OTEL_EXPORTER_OTLP_ENDPOINT)
-    await assert.rejects(scanTelemetryArtifacts([directory], env), /OTEL_EXPORTER_OTLP_ENDPOINT/)
-    assert.deepEqual(await scanTelemetryArtifacts([directory], {}), { provided: [], scanned: false, directories: 1 })
+
+    const replay = ['rr', 'web'].join('')
+    await writeFile(file, `${'x'.repeat(65534)}${replay}`)
+    await assert.rejects(scanTelemetryArtifacts([directory]), new RegExp(replay))
+
+    const endpoint = ['OTEL', '_EXPORTER', '_OTLP', '_ENDPOINT'].join('')
+    await writeFile(file, endpoint)
+    await assert.rejects(scanTelemetryArtifacts([directory]), new RegExp(['OTEL', '_EXPORTER', '_OTLP'].join('')))
+
+    assert.deepEqual(await scanTelemetryArtifacts([join(directory, 'missing')]), {
+      scanned: true,
+      directories: 0,
+      externalTelemetry: false,
+    })
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('skips third-party package source with unused replay features', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'baton-telemetry-scan-'))
+  try {
+    const dependency = join(directory, 'node_modules', 'example')
+    const archived = join(directory, 'releases', 'old')
+    await mkdir(dependency, { recursive: true })
+    await mkdir(archived, { recursive: true })
+    await writeFile(join(dependency, 'replay.js'), ['rr', 'web'].join(''))
+    await writeFile(join(archived, 'old'), ['OTEL', '_EXPORTER', '_OTLP'].join(''))
+    assert.equal((await scanTelemetryArtifacts([directory])).externalTelemetry, false)
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

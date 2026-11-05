@@ -3,7 +3,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { randomUUID } from 'node:crypto'
-import { telemetryEnvironment } from '@baton/telemetry'
 import { isSea } from 'node:sea'
 import { Schema } from 'effect'
 import { ProjectRuntime, ModelConnection, normalizeProjectProvider } from '@baton/protocol'
@@ -90,11 +89,6 @@ export class RuntimeRunner {
     if (config.revision) {
       resolved = {
         ...resolveEnvironment(config, baseEnvironment(process.env), project ? { project } : {}).env,
-        ...Object.fromEntries(
-          Object.entries(process.env).filter(
-            ([name]) => name.startsWith('OTEL_') || name === 'BATON_TELEMETRY_LOCAL_RELAY',
-          ),
-        ),
         ...(process.env.BATON_PROJECT_RUNTIME_DATA_DIR
           ? { BATON_PROJECT_RUNTIME_DATA_DIR: process.env.BATON_PROJECT_RUNTIME_DATA_DIR }
           : {}),
@@ -105,7 +99,7 @@ export class RuntimeRunner {
         ...command,
         args: [...(command.args ?? []), ...args],
         ...((cwd ?? command.cwd) ? { cwd: cwd ?? command.cwd! } : {}),
-        env: { ...resolved, ...telemetryEnvironment(this.options.telemetry), ...command.env, ...env },
+        env: { ...resolved, ...command.env, ...env },
       },
       {
         watchdog: this.watchdog,

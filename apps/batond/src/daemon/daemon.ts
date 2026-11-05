@@ -1,13 +1,12 @@
 import { BUILD, PROTOCOL_VERSION } from '@baton/protocol/release'
+import { createLogger } from '@baton/logging'
 import { readProjectRunTranscriptPage } from '../transcript/reader.ts'
 import { randomUUID } from 'node:crypto'
 import { unlink } from 'node:fs/promises'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { Clock, Context, Effect, Exit, Option, Queue, Schema, Tracer } from 'effect'
-import { HttpTraceContext } from 'effect/http'
-import { traceParent, waitEvent } from '@baton/telemetry'
+import { Clock, Context, Effect, Queue, Schema } from 'effect'
 import type * as Scope from 'effect/Scope'
 import {
   ControlToNodeBody,
@@ -37,10 +36,10 @@ import { makeExecutionService } from '../execution/service.ts'
 import { connectWebSocket, reconnectDelay, type DaemonTransport, type DaemonConnection } from './transport.ts'
 import { DaemonStorageFailure, ledgerPromise } from './storage.ts'
 import { pruneDeviceOutputs } from '../worker/full-output.ts'
-import { nodeMetricsLoop } from './telemetry.ts'
-import type { TelemetryRelay } from './telemetry-relay.ts'
 import { readOwnProcessIdentity } from '../platform/identity.ts'
 export { DaemonStorageFailure } from './storage.ts'
+
+const log = createLogger('batond')
 
 export class NeedsReauthentication extends Error {
   constructor(
@@ -58,7 +57,6 @@ export interface RunDaemonOptions {
     onState: (state: ConnectionState) => Promise<void>,
   ) => Effect.Effect<void, Error, Scope.Scope>
   readonly onState?: (state: ConnectionState) => Promise<void>
-  readonly telemetryRelay?: TelemetryRelay
   readonly identity?: NodeIdentity
   readonly relayURL?: string
   readonly controlTimeoutSeconds?: number
@@ -123,10 +121,8 @@ async function connected(options: {
   connection: DaemonConnection
   signal: AbortSignal
   identity: NodeIdentity
-  tracer: Tracer.Tracer
   connectivity: (online: boolean) => void
   onState?: (state: ConnectionState) => Promise<void>
-  telemetryRelay?: TelemetryRelay
   incarnation: string
   heartbeatMs: number
   controlTimeoutMs: number
@@ -154,7 +150,7 @@ async function connected(options: {
   const started = performance.now()
   let reportPending: { id: string; hash: string; sent: number } | undefined
   let reportAcked = ''
-  const sentReports = new Map<string, { report: ThreadReport; sentAt: number; span: Tracer.Span }>()
+  const sentReports = new Map<string, { report: ThreadReport; sentAt: number }>()
   const sentExecutions = new Map<string, { report: import('@baton/protocol').ExecutionReport; sentAt: number }>()
   let executionPollAt = 0
   const reportAttempts: number[] = []
@@ -206,30 +202,9 @@ async function connected(options: {
     while (reportAttempts.length && reportAttempts[0]! <= now - 1000) reportAttempts.shift()
     if (reportAttempts.length >= 32 || (!sentReports.has(report.event_id) && sentReports.size >= 8)) return false
     // Reserve the window before writing so a fast ACK can release the matching entry.
-    const parent = traceParent(report.trace_context)
-    const span =
-      sentReports.get(report.event_id)?.span ??
-      options.tracer.span({
-        name: 'baton.report',
-        parent: parent ? Option.some(parent) : Option.none(),
-        annotations: Context.empty(),
-        links: [],
-        startTime: BigInt(Date.now()) * 1_000_000n,
-        kind: 'internal',
-        root: !parent,
-        sampled: parent?.sampled ?? true,
-      })
-    span.attribute('baton.thread.id', report.thread_id)
-    span.attribute('baton.node.id', identity.node_id)
-    sentReports.set(report.event_id, { report, sentAt: now, span })
+    sentReports.set(report.event_id, { report, sentAt: now })
     reportAttempts.push(now)
-    await envelope({
-      ...report,
-      trace_context: {
-        traceparent: HttpTraceContext.toHeaders(span).traceparent!,
-        ...(report.trace_context?.tracestate ? { tracestate: report.trace_context.tracestate } : {}),
-      },
-    })
+    await envelope(report)
     // Keep the window conservative when encoding or transport delays the actual write.
     reportAttempts[reportAttempts.length - 1] = performance.now()
     return true
@@ -339,26 +314,10 @@ async function connected(options: {
       if (body.type === 'node.sync_result') {
         if (env.correlation_id === syncId) {
           if (body.ok) {
-            if (options.telemetryRelay) options.telemetryRelay.send = undefined
-            if (body.telemetry?.forward && options.telemetryRelay) {
-              const relay = options.telemetryRelay
-              relay.send = (signal, payload) => {
-                if (!synced) return
-                connection.tryTelemetry?.({
-                  kind: 'envelope',
-                  envelope: {
-                    version: 1,
-                    message_id: randomUUID(),
-                    route: { to: 'control' },
-                    priority: '',
-                    body: { type: 'telemetry.export', signal, payload },
-                  },
-                })
-              }
-            }
             synced = true
             await options.onState?.('online')
             options.connectivity(true)
+            log.info('daemon.connected', { node_id: identity.node_id })
             projects?.setTransport(projectRPC.request)
             options.refreshDevices()
           } else if (terminal(body.code) || body.code === 'node_version_incompatible')
@@ -379,14 +338,12 @@ async function connected(options: {
         if (body.ok) {
           const sent = sentReports.get(body.event_id)
           if (sent?.report.thread_id === body.thread_id && sent.report.worker_seq === body.worker_seq) {
-            sent.span.end(BigInt(Date.now()) * 1_000_000n, Exit.void)
             sentReports.delete(body.event_id)
           }
         } else if (body.expected_worker_seq !== undefined) {
           reportEpoch++
           for (const [id, sent] of sentReports)
             if (sent.report.thread_id === body.thread_id && sent.report.worker_seq >= body.expected_worker_seq) {
-              sent.span.end(BigInt(Date.now()) * 1_000_000n, Exit.fail('report_rejected'))
               sentReports.delete(id)
             }
         }
@@ -524,9 +481,8 @@ async function connected(options: {
     if (failure) throw failure
     if (!signal.aborted) throw new Error('节点连接已断开')
   } finally {
-    if (options.telemetryRelay) options.telemetryRelay.send = undefined
     options.connectivity(false)
-    for (const sent of sentReports.values()) sent.span.end(BigInt(Date.now()) * 1_000_000n, Exit.fail('disconnected'))
+    log.info('daemon.disconnected', { node_id: identity.node_id })
     abort()
     projectRPC.close()
     projects?.onDisconnect()
@@ -589,30 +545,17 @@ const runBoundDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error, S
     const excludedThreads = new Set(bindingFence.thread_ids)
     const excludedExecutions = new Set(bindingFence.execution_ids)
     const excludedProjectRuns = new Set(bindingFence.project_run_ids)
-    const tracer = yield* Tracer.Tracer
-    const telemetry = yield* Effect.context<never>()
     const clock = yield* Clock.Clock
     let offlineSince: number | undefined = clock.currentTimeMillisUnsafe()
-    void Effect.runPromiseWith(telemetry)(
-      waitEvent('start', 'device_offline', { 'baton.node.id': identity.node_id }),
-    ).catch(() => {})
+    log.info('daemon.starting', { node_id: identity.node_id })
     const connectivity = (online: boolean) => {
-      try {
-        const now = clock.currentTimeMillisUnsafe()
-        if (online && offlineSince !== undefined) {
-          const duration = now - offlineSince
-          offlineSince = undefined
-          void Effect.runPromiseWith(telemetry)(
-            waitEvent('end', 'device_offline', { 'baton.node.id': identity.node_id }, undefined, duration),
-          ).catch(() => {})
-        } else if (!online && offlineSince === undefined) {
-          offlineSince = now
-          void Effect.runPromiseWith(telemetry)(
-            waitEvent('start', 'device_offline', { 'baton.node.id': identity.node_id }),
-          ).catch(() => {})
-        }
-      } catch {
-        // Telemetry must not change connection handling.
+      const now = clock.currentTimeMillisUnsafe()
+      if (online && offlineSince !== undefined) {
+        log.info('daemon.online', { node_id: identity.node_id, offline_ms: now - offlineSince })
+        offlineSince = undefined
+      } else if (!online && offlineSince === undefined) {
+        log.info('daemon.offline', { node_id: identity.node_id })
+        offlineSince = now
       }
     }
     let address = options.relayURL
@@ -646,10 +589,8 @@ const runBoundDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error, S
                 connection,
                 signal,
                 identity,
-                tracer,
                 connectivity,
                 ...(options.onState ? { onState: options.onState } : {}),
-                ...(options.telemetryRelay ? { telemetryRelay: options.telemetryRelay } : {}),
                 incarnation,
                 heartbeatMs,
                 controlTimeoutMs: controlTimeoutSeconds * 1000,
@@ -704,17 +645,11 @@ const runBoundDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error, S
                 dataDir: options.dataDirectory,
                 nodeId: identity.node_id,
                 excludedRunIds: excludedProjectRuns,
-                ...(options.telemetryRelay ? { telemetry: options.telemetryRelay } : {}),
                 onReportChanged: () => {
                   devicesDirty = true
                   options.project?.onReportChanged?.()
                 },
               }),
-            )
-            yield* Effect.forkScoped(
-              nodeMetricsLoop(options.dataDirectory, ledger, projects, () =>
-                offlineSince === undefined ? 0 : Math.max(0, (clock.currentTimeMillisUnsafe() - offlineSince) / 1000),
-              ),
             )
             const devices = yield* Effect.acquireRelease(
               attempt(() =>
@@ -737,7 +672,6 @@ const runBoundDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error, S
               ledger,
               host: services.host,
               capability: () => agents,
-              tracer: yield* Tracer.Tracer,
               pollIntervalMs: pollMs,
               onActivity: () => {
                 Effect.runSync(Queue.offer(reportWake, undefined))

@@ -95,7 +95,6 @@ describe('node.db durable handoff', () => {
           )
           for (const r of reports) {
             yield* ledger.ingest(r)
-            yield* ledger.ingest({ ...r, trace_context: { traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01` } })
           }
           for (const r of reports) yield* ledger.acknowledge({ ...r, type: 'thread.report_result', ok: true })
           expect(yield* ledger.pendingReports()).toEqual([])

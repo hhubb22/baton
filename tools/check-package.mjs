@@ -224,9 +224,7 @@ async function main() {
     const home = join(root, 'home')
     await mkdir(home, { mode: 0o700 })
     const options = { cwd: home, env: isolatedEnv(home) }
-    await check('telemetryConfigurationLeak', () =>
-      scanTelemetryArtifacts([installed, resolve('apps/server/dist/web')]),
-    )
+    await check('externalTelemetry', () => scanTelemetryArtifacts([installed, resolve('apps/server/dist/web')]))
     await check('help', () => {
       const result = run(executable, ['--help'], options)
       assert.equal(result.status, 0, result.stderr)

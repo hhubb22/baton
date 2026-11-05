@@ -9,7 +9,6 @@ import type {
   ThreadMessage,
   ThreadMessageInput,
 } from '@baton/protocol'
-import { captureTrace, withTraceSpan } from '@baton/telemetry'
 import { AppError } from '../errors.ts'
 
 import type { DatabaseEffect } from '../database.ts'
@@ -69,19 +68,10 @@ export const touch = (id: string) =>
     yield* sql`UPDATE threads SET version=version+1,last_activity_at=clock_timestamp() WHERE id=${id}`
   })
 export const enqueue = (t: Thread, action: ThreadCommand['action'], payload: unknown = {}) =>
-  withTraceSpan(
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const trace = yield* captureTrace
-      yield* sql`INSERT INTO thread_outbox(employee_id,thread_id,node_id,message_id,action,payload,trace_context) VALUES(${t.employee_id},${t.id},${t.node_id},${uuid()},${action},${JSON.stringify(payload)}::jsonb,${trace ? JSON.stringify(trace) : null}::jsonb)`
-    }),
-    'baton.command.enqueue',
-    undefined,
-    {
-      kind: 'producer',
-      attributes: { 'baton.thread.id': t.id, 'baton.command.action': action },
-    },
-  )
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    yield* sql`INSERT INTO thread_outbox(employee_id,thread_id,node_id,message_id,action,payload) VALUES(${t.employee_id},${t.id},${t.node_id},${uuid()},${action},${JSON.stringify(payload)}::jsonb)`
+  })
 export const admission = (
   employee: string,
   node: string,
@@ -160,7 +150,6 @@ export const normalizeMessage = (input: ThreadMessageInput) =>
     } as const
     const body = {
       type: 'thread.command',
-      trace_context: { traceparent: `00-${'f'.repeat(32)}-${'f'.repeat(16)}-01`, tracestate: '\\'.repeat(512) },
       thread_id: uuid(),
       action: 'message',
       storage_generation: '\\'.repeat(256),

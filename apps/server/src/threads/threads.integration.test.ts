@@ -1,12 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
-import { Effect, Exit, Option, Schema, Scope, Tracer } from 'effect'
+import { Effect, Exit, Schema, Scope } from 'effect'
 import * as HttpEffect from 'effect/http/HttpEffect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, it } from 'vite-plus/test'
 import * as P from '@baton/protocol'
 import { seedNode, withTestDatabase, type TestDatabase } from '../testing/database.ts'
-import { withTraceSpan } from '@baton/telemetry'
 import * as threads from './index.ts'
 import { digest, sessionCSRF } from '../auth.ts'
 import { httpApplication } from '../http/index.ts'
@@ -385,51 +384,21 @@ it('backfills published stop reasons and report facts without changing thread da
     expect(saved).toEqual(expected.sort((a, b) => a.id.localeCompare(b.id)))
   }))
 
-it('persists request trace separately from business identity and dispatches it after database runtime restart', () =>
+it('keeps idempotent durable commands and retries after database runtime restart', () =>
   withTestDatabase(async ({ run, restart }) => {
     const f = await fixture(run)
-    const spans: Tracer.NativeSpan[] = []
-    const tracer = Tracer.make({
-      span(options) {
-        const span = new Tracer.NativeSpan(options)
-        spans.push(span)
-        return span
-      },
-    })
-    const create = (traceId: string) =>
-      run(
-        withTraceSpan(threads.create(f.employee, f.input), 'http.server', {
-          traceparent: `00-${traceId}-${'b'.repeat(16)}-01`,
-        }).pipe(Effect.provideService(Tracer.Tracer, tracer)),
-      )
-    const first = await create('a'.repeat(32))
-    const retry = await create('c'.repeat(32))
+    const first = await run(threads.create(f.employee, f.input))
+    const retry = await run(threads.create(f.employee, f.input))
     expect(retry.thread.id).toBe(first.thread.id)
-    const records = await run(
-      query<{ trace_context: { traceparent: string } }>(
-        'SELECT trace_context FROM thread_outbox WHERE thread_id=$1 ORDER BY id',
-        first.thread.id,
-      ),
-    )
-    expect(records).toHaveLength(2)
-    expect(records.every((row) => row.trace_context.traceparent.split('-')[1] === 'a'.repeat(32))).toBe(true)
     const afterRestart = await restart()
-    const claimed = await afterRestart(threads.claimCommands().pipe(Effect.provideService(Tracer.Tracer, tracer)))
+    const claimed = await afterRestart(threads.claimCommands())
     expect(claimed).toHaveLength(1)
-    expect(claimed[0]!.body.trace_context?.traceparent.split('-')[1]).toBe('a'.repeat(32))
-    const dispatch = spans.find((span) => span.name === 'baton.command.dispatch')!
-    expect(Option.getOrUndefined(dispatch.parent)?.spanId).toBe(records[0]!.trace_context.traceparent.split('-')[2])
-    expect(dispatch.attributes.get('baton.retry.count')).toBe(0)
+    expect(Object.hasOwn(claimed[0]!.body, 'trace_context')).toBe(false)
     await afterRestart(
       query('UPDATE thread_outbox SET next_attempt_at=clock_timestamp() WHERE message_id=$1', claimed[0]!.message_id),
     )
-    await afterRestart(threads.claimCommands().pipe(Effect.provideService(Tracer.Tracer, tracer)))
-    expect(
-      spans
-        .filter((span) => span.name === 'baton.command.dispatch')
-        .at(-1)
-        ?.attributes.get('baton.retry.count'),
-    ).toBe(1)
+    const retried = await afterRestart(threads.claimCommands())
+    expect(retried.find((item) => item.message_id === claimed[0]!.message_id)?.body).toMatchObject(claimed[0]!.body)
   }))
 
 it('persists browser execution limits and dispatches idempotent settings with their original budgets', () =>
@@ -449,8 +418,7 @@ it('persists browser execution limits and dispatches idempotent settings with th
       query('UPDATE thread_outbox SET next_attempt_at=clock_timestamp() WHERE message_id=$1', opened.message_id),
     )
     const retried = await run(threads.claimCommands())
-    const { trace_context: _trace, ...original } = opened.body
-    expect(retried.find((item) => item.message_id === opened.message_id)?.body).toMatchObject(original)
+    expect(retried.find((item) => item.message_id === opened.message_id)?.body).toMatchObject(opened.body)
     await run(
       threads.processReceipt(f.source, opened.message_id, {
         type: 'thread.command_result',
@@ -1054,14 +1022,7 @@ it('commits ordered turns and replies once, rolls back invalid reports, and requ
     expect((await run(threads.view({ employeeId: f.employee }, t.id))).last_worker_seq).toBe(4)
     const ack = await run(threads.processReport(f.source, reply))
     expect(await run(threads.processReport(f.source, reply))).toEqual(ack)
-    expect(
-      await run(
-        threads.processReport(f.source, {
-          ...reply,
-          trace_context: { traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01` },
-        }),
-      ),
-    ).toEqual(ack)
+    expect(await run(threads.processReport(f.source, reply))).toEqual(ack)
     await expect(run(threads.processReport(f.source, { ...reply, content: 'conflict' }))).rejects.toMatchObject({
       status: 409,
     })

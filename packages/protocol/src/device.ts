@@ -438,7 +438,6 @@ export const NodeSyncResult = Schema.Struct({
   type: Schema.Literal('node.sync_result'),
   ok: Schema.Boolean,
   code: Schema.optionalKey(Text),
-  telemetry: Schema.optionalKey(Schema.Struct({ forward: Schema.Literal(true) })),
 })
 export type NodeSyncResult = typeof NodeSyncResult.Type
 

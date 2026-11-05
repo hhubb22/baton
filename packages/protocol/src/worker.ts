@@ -1,7 +1,6 @@
 import { Schema } from 'effect'
 import { RuntimeMode } from '@t3tools/contracts'
 import { ReleaseMetadata } from './release.ts'
-import { TraceContext } from './trace.ts'
 import { ThinkingSelection } from './device.ts'
 import { ThreadAnswerInput } from './thread-question.ts'
 import {
@@ -84,7 +83,6 @@ export type WorkerOpenConfig = typeof WorkerOpenConfig.Type
 
 // Worker IPC 字段集合，含异步命令契约。
 export const WorkerIPCMessage = Schema.Struct({
-  trace_context: Schema.optionalKey(TraceContext),
   client_message_id: Schema.optionalKey(ClientMessageID),
   mode: Schema.optionalKey(Schema.Literals(['queue', 'steer'])),
   model: Schema.optionalKey(summary(512)),

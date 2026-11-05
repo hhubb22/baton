@@ -10,7 +10,6 @@
     "./daemon/control-client": "./src/daemon/control-client.ts",
     "./daemon/identity": "./src/daemon/identity.ts",
     "./daemon/transport": "./src/daemon/transport.ts",
-    "./daemon/telemetry-relay": "./src/daemon/telemetry-relay.ts",
     "./devices/roots": "./src/devices/roots.ts",
     "./daemon/host": "./src/daemon/host.ts",
     "./daemon/in-process-host": "./src/daemon/in-process-host.ts",
@@ -38,9 +37,9 @@
     "test:integration": "vp test run --config ../../vitest.config.ts --project integration"
   },
   "dependencies": {
+    "@baton/logging": "workspace:*",
     "@baton/protocol": "workspace:*",
     "@baton/sqlite": "workspace:*",
-    "@baton/telemetry": "workspace:*",
     "@cursor/sdk": "1.0.35",
     "@effect/platform-node": "catalog:",
     "@t3tools/contracts": "workspace:*",

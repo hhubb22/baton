@@ -1,5 +1,5 @@
 import { ClientError } from '../client'
-import { clearFailure, recordFailure, resetFailures } from '../../telemetry/diagnostics'
+import { clearFailure, recordFailure, recordServerVersion, resetFailures } from '../../diagnostics/diagnostics'
 
 export interface ErrorPayload {
   code?: string
@@ -68,7 +68,6 @@ export function createTransport(options: TransportOptions = {}) {
   const fetcher: typeof fetch = options.fetch ?? ((...args) => globalThis.fetch(...args))
   const base = (options.baseUrl ?? '/api/v1').replace(/\/$/, '')
   let csrf: string | null = null
-  let telemetry: typeof import('../../telemetry/index') | undefined
   let generation = 0
   const request = async <T>(path: string, init: RequestInit = {}, retry = true): Promise<T> => {
     const requestGeneration = generation
@@ -86,9 +85,12 @@ export function createTransport(options: TransportOptions = {}) {
       recordFailure(path, null, 'unavailable')
       throw new ClientError('unavailable', '无法连接 Baton，请检查网络后重试。')
     }
+    recordServerVersion(response.headers.get('x-baton-version'))
     const payload = response.status === 204 ? null : ((await response.json().catch(() => null)) as ErrorPayload | null)
     if (!response.ok) {
-      recordFailure(path, response.headers.get('traceresponse'), payload?.code)
+      const requestId =
+        typeof payload?.request_id === 'string' ? payload.request_id : response.headers.get('x-request-id')
+      recordFailure(path, requestId, payload?.code)
       if (response.status === 403 && payload?.code === 'csrf_rejected' && retry && path !== '/login') {
         csrf = null
         await request('/me')
@@ -97,7 +99,6 @@ export function createTransport(options: TransportOptions = {}) {
       if (response.status === 401 && path !== '/login' && path !== '/me/password') {
         csrf = null
         generation++
-        telemetry?.stopTelemetry()
         resetFailures()
         options.onUnauthorized?.()
       }
@@ -111,35 +112,13 @@ export function createTransport(options: TransportOptions = {}) {
       if (csrf !== payload.csrf_token) generation++
       csrf = payload.csrf_token
     }
-    if (path === '/me' && payload) {
-      const config = payload.telemetry
-      if (config && typeof config === 'object' && !Array.isArray(config) && csrf) {
-        const currentGeneration = generation
-        try {
-          telemetry ??= await import('../../telemetry/index')
-          if (generation !== currentGeneration || !csrf) return payload as T
-          telemetry.startTelemetry(
-            'session_replay' in config && config.session_replay === 'masked' ? { session_replay: 'masked' } : {},
-            () => csrf,
-          )
-        } catch {
-          try {
-            telemetry?.stopTelemetry()
-          } catch {
-            /* 遥测不可用时继续使用 Baton。 */
-          }
-        }
-      } else telemetry?.stopTelemetry()
-    }
     return payload as T
   }
   return {
     request,
-    traceSocket: (socket: WebSocket) => telemetry?.traceSocket(socket),
     clear: () => {
       csrf = null
       generation++
-      telemetry?.stopTelemetry()
       resetFailures()
     },
   }

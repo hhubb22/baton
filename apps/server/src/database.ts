@@ -1,11 +1,14 @@
 import { PgClient } from '@effect/sql-pg'
-import { Effect, Layer, ManagedRuntime, Redacted } from 'effect'
+import { Effect, ManagedRuntime, Redacted } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import type { SqlError } from 'effect/sql/SqlError'
 import { createHash, randomUUID } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { AppError } from './errors.ts'
+import { createLogger } from '@baton/logging'
+
+const log = createLogger('baton-server')
 
 export type DatabaseEffect<A> = Effect.Effect<A, AppError, SqlClient.SqlClient>
 
@@ -38,8 +41,7 @@ export const databaseLayer = (config: DatabaseConfig) => {
   })
 }
 
-export const createDatabaseRuntime = (config: DatabaseConfig, telemetry: Layer.Layer<never> = Layer.empty) =>
-  ManagedRuntime.make(databaseLayer(config).pipe(Layer.provideMerge(telemetry)))
+export const createDatabaseRuntime = (config: DatabaseConfig) => ManagedRuntime.make(databaseLayer(config))
 
 /** 在同一事务内锁定迁移并执行 SQL 脚本。 */
 export const migrateDatabase = (
@@ -92,6 +94,7 @@ export const migrateDatabase = (
             `DO $outer_${tag}$ BEGIN EXECUTE $script_${tag}$${file.body}$script_${tag}$; END $outer_${tag}$`,
           ).unprepared
           yield* sql`INSERT INTO schema_migrations (version, checksum, applied_at) VALUES (${file.name}, ${file.checksum}, now())`
+          log.info('database.migration_applied', { version: file.name, checksum: file.checksum })
         }
         const saved = yield* sql<{ version: string }>`SELECT version FROM schema_migrations ORDER BY version`
         if (saved.length !== files.length || saved.some((row, index) => row.version !== files[index].name)) {

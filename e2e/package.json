@@ -12,7 +12,6 @@
     "@baton/server": "workspace:*",
     "@baton/batond": "workspace:*",
     "@baton/protocol": "workspace:*",
-    "@baton/telemetry": "workspace:*",
     "@baton/project-agent-runtime": "workspace:*",
     "@types/node": "catalog:",
     "effect": "catalog:",

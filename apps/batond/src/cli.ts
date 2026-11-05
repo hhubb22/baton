@@ -7,7 +7,6 @@ import { basename, join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { isSea } from 'node:sea'
 import { Effect, Schema } from 'effect'
-import { telemetryLayer } from '@baton/telemetry'
 import {
   DEFAULT_RUNTIME_MODE,
   RuntimeMode,
@@ -284,8 +283,6 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
       if (!agentType || !values.cwd || !values.state)
         throw new Error('Agent host needs an Agent type, --cwd and --state')
       const { runAgentHostCommand } = await import('./cli/agent-host.ts')
-      const telemetryEnv = { ...process.env }
-      for (const name of Object.keys(process.env)) if (name.startsWith('OTEL_')) delete process.env[name]
       await Effect.runPromise(
         Effect.scoped(
           runAgentHostCommand(agentType, {
@@ -293,7 +290,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
             privateDirectory: values.state,
             ...(values['data-dir'] ? { dataDirectory: values['data-dir'] } : {}),
           }),
-        ).pipe(Effect.provide(telemetryLayer('baton-agent-host', telemetryEnv))),
+        ),
         { signal: controller.signal },
       )
     } catch (error) {

@@ -155,4 +155,7 @@ export const httpSecurity = () =>
     ),
   )
 
-export const newRequestId = () => randomUUID()
+const requestIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export const newRequestId = (provided?: string) =>
+  provided && requestIdPattern.test(provided) ? provided.toLowerCase() : randomUUID()

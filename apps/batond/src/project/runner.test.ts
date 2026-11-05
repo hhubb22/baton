@@ -42,19 +42,13 @@ const open = async (mode = 'idle', real = false) => {
   cleanups.push(() => Effect.runPromise(Scope.close(scope, Exit.void)))
   return manager
 }
-const quickRunner = async (
-  program: string,
-  credentialsDirectory?: string,
-  telemetry?: import('@baton/telemetry').LocalTelemetry,
-  clock?: ProjectClock,
-) => {
+const quickRunner = async (program: string, credentialsDirectory?: string, clock?: ProjectClock) => {
   const dataDir = await makePrivateTempDirectory('baton-early-output-')
   cleanups.push(() => rm(dataDir, { recursive: true, force: true }))
   const runner = new RuntimeRunner(
     {
       dataDir,
       ...(clock ? { clock } : {}),
-      ...(telemetry ? { telemetry } : {}),
       runtimeCommand: {
         file: process.execPath,
         args: ['-e', program],
@@ -82,44 +76,6 @@ const quickRunner = async (
   cleanups.push(() => runner.close())
   return { runner, dataDir }
 }
-it('passes current telemetry headers to Runtime through its environment', async () => {
-  const telemetry: import('@baton/telemetry').LocalTelemetry = {
-    endpoint: 'http://127.0.0.1:1',
-    headers: 'authorization=local-key',
-  }
-  const { runner } = await quickRunner(
-    'console.log(JSON.stringify({headers:process.env.OTEL_EXPORTER_OTLP_HEADERS,argv:process.argv}))',
-    undefined,
-    telemetry,
-  )
-  const old = process.env.OTEL_EXPORTER_OTLP_HEADERS
-  delete process.env.OTEL_EXPORTER_OTLP_HEADERS
-  try {
-    let output = ''
-    let outputEnded: Promise<void> | undefined
-    const owned = await runner.spawn(
-      ['run'],
-      new AbortController().signal,
-      undefined,
-      undefined,
-      undefined,
-      (child) => {
-        outputEnded = new Promise((resolve) => child.stdout.once('end', resolve))
-        child.stdout.on('data', (chunk) => {
-          output += String(chunk)
-        })
-      },
-    )
-    await outputEnded
-    await runner.reap(owned)
-    const result = JSON.parse(output) as { headers: string; argv: string[] }
-    expect(result.headers).toBe('authorization=local-key')
-    expect(result.argv.join(' ')).not.toContain('local-key')
-  } finally {
-    if (old === undefined) delete process.env.OTEL_EXPORTER_OTLP_HEADERS
-    else process.env.OTEL_EXPORTER_OTLP_HEADERS = old
-  }
-})
 it('uses file URLs for source Runtime and watchdog import loaders', () => {
   for (const command of [defaultRuntimeCommand(), defaultWatchdogCommand()]) {
     expect(command.args?.[0]).toBe('--import')
@@ -210,7 +166,6 @@ it('retains a timestamped report after probe timeout and invalidates it when cre
     else console.log(JSON.stringify({version:'0.1.0',providers:[{provider:'openai-codex',status:mode === 'ok' ? 'available' : mode}]}));
   `,
     credentials,
-    undefined,
     { wall: () => Date.now(), monotonic: () => now },
   )
   const refresh = () => {
@@ -260,7 +215,6 @@ it('shares probes, reuses fresh reports and backs off failures without sharing c
   let now = 0
   const { runner, dataDir } = await quickRunner(
     `setTimeout(() => console.log(JSON.stringify({version:'0.1.0',providers:[]})), 40)`,
-    undefined,
     undefined,
     { wall: () => Date.now(), monotonic: () => now },
   )

@@ -253,16 +253,15 @@ export const openThreadLedger = Effect.fn('Worker.openThreadLedger')(function* (
           }
           for (const entry of state.outbox) {
             if (baseline.outbox.includes(outboxPayload(entry))) continue
-            const { report } = entry
-            const { trace_context: _trace, ...content } = report
+            const content = entry.report
             yield* sql.unsafe(
               `INSERT INTO thread_outbox(thread_id,seq,event_id,hash,payload,created_ms,acked,worker_acked)
                VALUES(?,?,?,?,?,?,0,?)
                ON CONFLICT(thread_id,seq) DO NOTHING`,
               [
                 threadId,
-                report.worker_seq,
-                report.event_id,
+                entry.report.worker_seq,
+                entry.report.event_id,
                 hash(content),
                 outboxPayload(entry),
                 Date.now(),

@@ -143,7 +143,7 @@ interface TranscriptLine {
 | R-22、R-23 | 检查设备本地 `transcript.jsonl`、网页客户端分页请求与中心归属校验 | 缺少步骤或被截断；非所属员工可读；出现连接私钥、`control.token` 或订阅 token | `apps/batond/src/transcript/transcript.test.ts`、`apps/batond/src/agent-host/driver.test.ts`、`apps/server/src/full-output.integration.test.ts`、`web/src/data/http/transcript.test.ts` | partial：已覆盖追加写入、末尾半行、脱敏、Thread 归属与客户端分页；完整审批回合和浏览器 E2E 未覆盖 |
 | R-23（崩溃现场保留） | `agent-host` 回合尚未结束时读取本地文件；Project Runtime 写入后未关闭即读取 | 已发生的 `turn.started` / `item.started` / `run.started` 丢失或读取器崩溃 | `apps/batond/src/agent-host/driver.test.ts`、`runtimes/project-agent/test/transcript.test.ts` | partial：验证同步落盘；尚未用真实子进程 `SIGKILL` 复现第二次模型调用中断 |
 | R-23（Project 前后台运行记录） | 启动一次 Project 前台运行后调 `/api/v1/projects/:id/runs` 与 `.../transcript` | 列表缺少运行；中心未向节点转发；非所属员工可读 | `apps/server/src/project/projects.integration.test.ts`、`runtimes/project-agent/test/transcript.test.ts` | partial：已覆盖运行摘要、归属与 WSS 转发；完整前台工具/压缩与后台记忆运行的真实流水未覆盖 |
-| RL-09 | 检查 `transcript.jsonl` 行信封、结构化日志与诊断输出 | 缺少 `version` / `commit` 或相关实体 ID；残留任何外部遥测网络请求 | 单测 + 打包检查 | partial：信封字段由写入器单测覆盖；结构化日志与打包检查沿用现有测试 |
+| RL-09 | 检查 `transcript.jsonl` 行信封、结构化日志与诊断输出 | 缺少 `version` / `commit` 或相关实体 ID；残留任何外部遥测网络请求 | `packages/logging/src/index.test.ts`、`apps/server/src/diagnostics.integration.test.ts`、`web/src/diagnostics/diagnostics.test.tsx`、`tools/telemetry-scan.test.mjs` | covered：日志校验字段、版本、提交与敏感键过滤；诊断校验实时聚合且不含正文；网页校验复制摘要只含规定字段；打包扫描校验产物无外部遥测标记 |
 
 ## Open questions
 

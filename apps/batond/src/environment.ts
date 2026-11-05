@@ -81,7 +81,7 @@ const agentNames: Record<string, readonly string[]> = {
 }
 const allowed = (name: string) => common.has(name.toUpperCase()) || /^LC_[A-Z0-9_]+$/i.test(name)
 const forbidden = (name: string) =>
-  /^(NODE_OPTIONS|NODE_TLS_REJECT_UNAUTHORIZED|LD_PRELOAD|DYLD_.*|BASH_ENV|BATON_.*|OTEL_.*)$/i.test(name)
+  /^(NODE_OPTIONS|NODE_TLS_REJECT_UNAUTHORIZED|LD_PRELOAD|DYLD_.*|BASH_ENV|BATON_.*)$/i.test(name)
 const sensitive = (name: string, value: string) => {
   if (!/^(HTTP|HTTPS|ALL)_PROXY$/i.test(name)) return false
   try {

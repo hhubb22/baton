@@ -220,8 +220,7 @@ export const makeNodeLedger = Effect.fn('Daemon.makeNodeLedger')(function* (
           return yield* Effect.fail(new Error('binding_mismatch'))
         if (saved && saved.startup_phase !== 'open_attempted')
           yield* saveWorker({ ...saved, startup_phase: 'open_attempted' })
-        const { trace_context: _trace, ...content } = report
-        const hash = contentHash(content)
+        const hash = contentHash(report)
         const rows = yield* sql.unsafe<{ hash: string }>(
           'SELECT hash FROM thread_outbox WHERE (thread_id=? AND seq=?) OR event_id=?',
           [report.thread_id, report.worker_seq, report.event_id],

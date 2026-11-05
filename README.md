@@ -145,7 +145,7 @@ node apps/batond/dist/batond.cjs project-runtime connection-key <连接 ID> < ke
 | `BATON_OFFLINE_AFTER` | 中心 | 设备离线期限，默认 `30s`，范围 200 ms 至 10 分钟，须大于心跳间隔 |
 | `BATON_PROJECT_RUNTIME_DATA_DIR` | 节点 / Runtime | 模型凭据目录，默认 `~/.baton/data/credentials` |
 
-控制操作预算、临时 RPC 名额和 OTLP 追踪配置见 [中心文档](apps/server/README.md)。遥测后端地址和 key 配置在中心，节点与网页经中心转发；设备本地可单独配置 OTLP 用于排查。
+控制操作预算和临时 RPC 名额见 [中心文档](apps/server/README.md)。中心、节点和 Runtime 的 JSON 日志、请求标识与实时诊断见[可观测性设计](specs/observability/TECH.md)。
 
 ## 本地开发与测试
 

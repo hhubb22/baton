@@ -28,8 +28,6 @@ import {
 
 import { queryEmbedding } from './embeddings.js'
 import type { ProjectTranscript } from './transcript.js'
-import { providerUsage, type RuntimeTelemetry } from './usage.js'
-import { modelInputAttributes, modelOutputAttributes, streamUsageAttributes } from './genai.js'
 export { modelMessages } from './context.js'
 
 export const IDLE_MS = 180_000
@@ -76,7 +74,6 @@ export class ProjectRuntime {
     private timer: Clock = clock,
     compaction: Partial<CompactionSettings> = {},
     budget: Partial<ModelBudget> = {},
-    private telemetry?: RuntimeTelemetry,
     private transcript?: ProjectTranscript,
   ) {
     this.compaction = compactionSettings(compaction)
@@ -95,11 +92,11 @@ export class ProjectRuntime {
     }
   }
   private traced<T>(
-    name: string,
-    attributes: Record<string, unknown>,
+    _name: string,
+    _attributes: Record<string, unknown>,
     task: (annotate: (attributes: Record<string, unknown>) => void) => Promise<T>,
   ): Promise<T> {
-    return this.telemetry ? this.telemetry.span(name, attributes, task) : task(() => {})
+    return task(() => {})
   }
   private async prepareMemory(outputReserve: number, signal?: AbortSignal, suffix: Message[] = []): Promise<Message[]> {
     const settings = this.boot.memory_settings
@@ -123,7 +120,6 @@ export class ProjectRuntime {
           inputSeq,
           undefined,
           signal,
-          this.telemetry,
           {
             'gen_ai.agent.name': 'project',
             'gen_ai.conversation.id': this.boot.project.conversation.id,
@@ -146,16 +142,8 @@ export class ProjectRuntime {
     })
     return [...modelMessages(this.boot, this.events, this.memoryContext), ...suffix]
   }
-  private chatAttributes(model: { provider: string; id: string }, messages: Message[]) {
-    return {
-      'gen_ai.operation.name': 'chat',
-      'gen_ai.agent.name': 'project',
-      'gen_ai.conversation.id': this.boot.project.conversation.id,
-      'gen_ai.provider.name': model.provider,
-      'gen_ai.request.model': model.id,
-      ...modelInputAttributes(messages),
-      'baton.usage.reported': false,
-    }
+  private chatAttributes(_model: { provider: string; id: string }, _messages: Message[]) {
+    return {}
   }
   private takeModelCall() {
     if (this.modelCalls >= this.budget.maxModelCalls) throw new RuntimeError('model_call_budget_exhausted')
@@ -327,29 +315,22 @@ export class ProjectRuntime {
         const response = await this.traced(
           `chat ${model.id}`,
           this.chatAttributes(model, summaryMessages),
-          async (annotate) => {
-            const started = this.timer.now()
+          async () => {
             let firstOutput = false
             const stream = this.models.streamSimple(model, modelContext({ messages: summaryMessages }), {
               maxTokens: Math.min(this.budget.maxOutputTokens, model.maxTokens, available),
               maxRetries: 0,
               sessionId: this.boot.project.conversation.id,
               toolChoice: 'none',
-              onProviderStreamEvent: (event, providerModel) => {
-                const usage = providerUsage(providerModel.api, event)
-                if (Object.keys(usage).length) annotate(streamUsageAttributes(usage))
-              },
               ...(signal ? { signal } : {}),
             })
             for await (const event of stream) {
               if (!firstOutput && ['text_delta', 'thinking_delta', 'toolcall_delta'].includes(event.type)) {
                 firstOutput = true
                 firstOutputAt = this.timer.now()
-                annotate({ ttft_ms: Math.max(0, this.timer.now() - started) })
               }
             }
             const response = batonMessage(await stream.result())
-            annotate(modelOutputAttributes(response))
             return response
           },
         )
@@ -467,7 +448,6 @@ export class ProjectRuntime {
             this.events.findLast((e) => e.kind === 'input')?.seq ?? this.boot.input_seq,
             call.arguments.query,
             undefined,
-            this.telemetry,
             {
               'gen_ai.agent.name': 'project',
               'gen_ai.conversation.id': this.boot.project.conversation.id,
@@ -633,8 +613,7 @@ export class ProjectRuntime {
           message = await this.traced(
             `chat ${requestModel.id}`,
             this.chatAttributes(requestModel, memoryMessages),
-            async (annotate) => {
-              const started = this.timer.now()
+            async () => {
               let firstOutput = false
               const stream = this.models.streamSimple(
                 requestModel,
@@ -642,8 +621,6 @@ export class ProjectRuntime {
                 {
                   ...options,
                   onProviderStreamEvent: async (event, providerModel) => {
-                    const usage = providerUsage(providerModel.api, event)
-                    if (Object.keys(usage).length) annotate(streamUsageAttributes(usage))
                     await options?.onProviderStreamEvent?.(event, providerModel)
                   },
                   maxTokens: outputTokens,
@@ -673,7 +650,6 @@ export class ProjectRuntime {
                 if (!firstOutput && ['text_delta', 'thinking_delta', 'toolcall_delta'].includes(event.type)) {
                   firstOutput = true
                   responseFirstOutputAt = this.timer.now()
-                  annotate({ ttft_ms: Math.max(0, this.timer.now() - started) })
                 }
                 if (event.type === 'text_delta') {
                   if (Buffer.byteLength(preview) < 32 * 1024 + 4)
@@ -685,7 +661,6 @@ export class ProjectRuntime {
                 }
               }
               const response = batonMessage(await stream.result())
-              annotate(modelOutputAttributes(response))
               return response
             },
           )

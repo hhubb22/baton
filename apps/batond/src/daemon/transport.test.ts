@@ -4,7 +4,7 @@ import { expect, it, vi } from 'vite-plus/test'
 import { connectWebSocket, webSocketText } from './transport.ts'
 import { MaxMessageBytes } from '@baton/protocol'
 
-it('drops telemetry when a business write is pending and rejects oversized frames', async () => {
+it('sends business frames and rejects oversized frames', async () => {
   const server = new WebSocketServer({ port: 0, host: '127.0.0.1' })
   await once(server, 'listening')
   const address = server.address()
@@ -14,13 +14,11 @@ it('drops telemetry when a business write is pending and rejects oversized frame
   const controller = new AbortController()
   const connection = await connectWebSocket(`ws://127.0.0.1:${address.port}`, { signal: controller.signal })
   try {
-    const business = connection.send({ kind: 'heartbeat' })
-    connection.tryTelemetry?.({ kind: 'error', message: 'drop-pending' })
-    await business
-    connection.tryTelemetry?.({ kind: 'error', message: 'x'.repeat(MaxMessageBytes) })
-    connection.tryTelemetry?.({ kind: 'error', message: 'accepted' })
-    await vi.waitFor(() => expect(received).toHaveLength(2))
-    expect(received).toEqual([{ kind: 'heartbeat' }, { kind: 'error', message: 'accepted' }])
+    await connection.send({ kind: 'heartbeat' })
+    await expect(connection.send({ kind: 'error', message: 'x'.repeat(MaxMessageBytes) })).rejects.toThrow(
+      '节点连接已断开',
+    )
+    await vi.waitFor(() => expect(received).toEqual([{ kind: 'heartbeat' }]))
   } finally {
     connection.close()
     server.clients.forEach((socket) => socket.terminate())

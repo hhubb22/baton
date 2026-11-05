@@ -2,13 +2,13 @@ import { createServer as createHTTPServer } from 'node:http'
 import { createServer as createHTTPSServer, type ServerOptions as TLSOptions } from 'node:https'
 import type { AddressInfo } from 'node:net'
 import { randomUUID } from 'node:crypto'
-import { Cause, Effect, Exit, Metric, Semaphore, Schema, Tracer } from 'effect'
+import { Cause, Effect, Exit, Metric, Semaphore, Schema } from 'effect'
 import * as Request from 'effect/http/HttpServerRequest'
 import type * as Scope from 'effect/Scope'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { NodeHttpServer } from '@effect/platform-node'
 import * as P from '@baton/protocol'
-import { withTraceSpan } from '@baton/telemetry'
+import { createLogger, describeError } from '@baton/logging'
 import * as Auth from './auth.ts'
 import * as Nodes from './nodes.ts'
 import * as Threads from './threads/index.ts'
@@ -30,12 +30,10 @@ import { isLoginRequest, LoginProtection } from './http/login-protection.ts'
 import { parseTrustedProxies } from './http/login-ip.ts'
 import { notifyThreadChanged } from './notifications.ts'
 import { claimNotificationBroadcasts } from './desktop-notifications.ts'
-import { makeMemoryWaitObserver, makeProjectWaitObserver, serverMetricsLoop } from './telemetry.ts'
-import { filterForward } from '@baton/telemetry/forward'
-import { makeTelemetryForwardClient, telemetryForwardEnabled } from './telemetry-forward-client.ts'
+
+const log = createLogger('baton-server')
 
 export interface ServerOptions {
-  readonly telemetryEnv?: NodeJS.ProcessEnv
   readonly host?: string
   readonly port?: number
   readonly allowedOrigins: ReadonlyArray<string>
@@ -51,7 +49,6 @@ export interface ServerOptions {
   readonly offlineMs?: number
   readonly controlBudgets?: Partial<ControlBudgets>
   readonly rpc?: GatewayOptions['rpc']
-  readonly telemetryAdmission?: GatewayOptions['telemetryAdmission']
 }
 export interface RunningServer {
   readonly host: string
@@ -81,20 +78,6 @@ export const startServer = (
       )
     })
     const scope = yield* Effect.scope
-    const tracer = yield* Tracer.Tracer
-    const telemetryEnv = options.telemetryEnv ?? process.env
-    const forwardTelemetry = makeTelemetryForwardClient(telemetryEnv)
-    const projectWaits = makeProjectWaitObserver()
-    const memoryWaits = makeMemoryWaitObserver()
-    yield* Effect.forkIn(serverMetricsLoop(projectWaits).pipe(Effect.withTracerEnabled(false)), scope)
-    yield* Effect.forkIn(
-      projectWaits.poll.pipe(Effect.andThen(Effect.sleep('1 second')), Effect.forever, Effect.withTracerEnabled(false)),
-      scope,
-    )
-    yield* Effect.forkIn(
-      memoryWaits.pipe(Effect.andThen(Effect.sleep('1 second')), Effect.forever, Effect.withTracerEnabled(false)),
-      scope,
-    )
     const controller = new AbortController()
     const controlGate = yield* Semaphore.make(4)
     const httpGate = yield* Semaphore.make(16)
@@ -111,9 +94,9 @@ export const startServer = (
       const error = Cause.squash(result.cause)
       throw error instanceof AppError ? error : new AppError(503, 'unavailable')
     }
-    // 定时轮询空转时不产生 span；实际处理任务时由 withTraceSpan 记录。
+    // 定时轮询空转不记录成功事件，失败时留下结构化异常。
     const poll = <A, E>(operation: ControlOperation, effect: Effect.Effect<A, E, SqlClient.SqlClient>) =>
-      run(operation, effect.pipe(Effect.withTracerEnabled(false)))
+      run(operation, effect)
     const authorizeBrowser = async (cookie: string) => {
       const session = await run('browser', Auth.lookupSession(cookieToken(cookie)))
       if (session.employee.must_change_password) throw new AppError(403, 'password_change_required')
@@ -160,23 +143,19 @@ export const startServer = (
                   conn_id: connId,
                 }
                 await run('authenticate', Nodes.claimConnection(source))
+                log.info('node.connected', {
+                  node_id: source.node_id,
+                  employee_id: source.employee_id,
+                  batond_version: version,
+                })
                 return source
               },
               validate: (source, background) =>
                 (background ? poll : run)('validate', Nodes.revalidateNodeSource(source, false)),
               heartbeat: (source) => run('heartbeat', Nodes.touchNode(source)),
-              disconnected: (source) => run('disconnect', Nodes.disconnectNode(source)),
-              telemetry: (source, body) => {
-                if (!telemetryForwardEnabled(telemetryEnv) || !forwardTelemetry.available()) return
-                try {
-                  const payload = filterForward(body.signal, body.payload, {
-                    employeeId: source.employee_id,
-                    nodeId: source.node_id,
-                  })
-                  if (payload) forwardTelemetry(body.signal, payload)
-                } catch {
-                  /* 丢弃格式错误的遥测。 */
-                }
+              disconnected: async (source) => {
+                await run('disconnect', Nodes.disconnectNode(source))
+                log.info('node.disconnected', { node_id: source.node_id, employee_id: source.employee_id })
               },
               handle: async (source, envelope) => {
                 const body = Schema.decodeUnknownSync(P.NodeToControlBody)(envelope.body)
@@ -190,12 +169,9 @@ export const startServer = (
                         capabilities: body.capabilities ?? [],
                       }),
                     )
+                    log.info('node.synced', { node_id: source.node_id, employee_id: source.employee_id })
                     gateway.notify(source.employee_id, { type: 'nodes.changed', node_id: source.node_id })
-                    return {
-                      type: 'node.sync_result',
-                      ok: true,
-                      ...(telemetryForwardEnabled(telemetryEnv) ? { telemetry: { forward: true as const } } : {}),
-                    }
+                    return { type: 'node.sync_result', ok: true }
                   case 'node.runtime_report': {
                     const version = await run('runtime_report', Nodes.saveRuntimeReport(source, body.report))
                     gateway.notify(source.employee_id, {
@@ -209,16 +185,9 @@ export const startServer = (
                     try {
                       const data = await run(
                         'project_request',
-                        withTraceSpan(
-                          Projects.runtimeRequest(source, body, (event) =>
-                            gateway.notify(source.employee_id, event),
-                          ).pipe(Effect.provideService(Executions.ExecutionOutputGateway, () => gateway)),
-                          'baton.project.request',
-                          body.trace,
-                          {
-                            attributes: { 'baton.project.run.id': body.run_id, 'baton.node.id': source.node_id },
-                          },
-                        ),
+                        Projects.runtimeRequest(source, body, (event) =>
+                          gateway.notify(source.employee_id, event),
+                        ).pipe(Effect.provideService(Executions.ExecutionOutputGateway, () => gateway)),
                       )
                       return Schema.decodeUnknownSync(P.ProjectRuntimeResult)({
                         type: 'project_runtime.result',
@@ -273,17 +242,12 @@ export const startServer = (
                   case 'thread.report': {
                     const ack = await run(
                       'report',
-                      withTraceSpan(
-                        Threads.processReport(source, body).pipe(
-                          Effect.tap(() =>
-                            notifyThreadChanged(source.employee_id, body.thread_id, (event) =>
-                              gateway.notify(source.employee_id, event),
-                            ),
+                      Threads.processReport(source, body).pipe(
+                        Effect.tap(() =>
+                          notifyThreadChanged(source.employee_id, body.thread_id, (event) =>
+                            gateway.notify(source.employee_id, event),
                           ),
                         ),
-                        'baton.report.receive',
-                        body.trace_context,
-                        { attributes: { 'baton.thread.id': body.thread_id, 'baton.node.id': source.node_id } },
                       ),
                     )
                     return { ...ack }
@@ -300,10 +264,8 @@ export const startServer = (
             },
             {
               allowedOrigins: options.allowedOrigins,
-              tracer,
               authenticationTimeoutMs: 2 * (budgets.authenticate.queueMs + budgets.authenticate.executionMs) + 1000,
               ...(options.rpc ? { rpc: options.rpc } : {}),
-              ...(options.telemetryAdmission ? { telemetryAdmission: options.telemetryAdmission } : {}),
               ...(options.heartbeatMs !== undefined ? { heartbeatMs: options.heartbeatMs } : {}),
               ...(options.offlineMs !== undefined ? { offlineMs: options.offlineMs } : {}),
             },
@@ -316,15 +278,6 @@ export const startServer = (
       loginProtection,
       trustedProxies: parseTrustedProxies(options.trustedProxyCidrs ?? ''),
       gateway: () => gateway,
-      forwardTelemetry: (signal, input, employeeId) => {
-        if (!forwardTelemetry.available()) return
-        try {
-          const payload = filterForward(signal, input, { employeeId })
-          if (payload) forwardTelemetry(signal, payload)
-        } catch {
-          /* 丢弃格式错误的遥测。 */
-        }
-      },
     })
     const handler = yield* NodeHttpServer.makeHandler(
       Effect.gen(function* () {
@@ -360,7 +313,8 @@ export const startServer = (
       try {
         const rows = await poll('dispatch', claimNotificationBroadcasts())
         for (const row of rows) gateway.notify(row.employee_id, row.event)
-      } catch {
+      } catch (error) {
+        log.error('background.failed', { operation: 'broadcast_notifications', ...describeError(error) })
         // The replay endpoint retains committed events through transport or database failures.
       } finally {
         broadcasting = false
@@ -377,7 +331,8 @@ export const startServer = (
         const executions = await poll('dispatch', Executions.claimCommands())
         for (const command of executions)
           await gateway.sendValidated(command.node_id, command.employee_id, command.message_id, command.body)
-      } catch {
+      } catch (error) {
+        log.error('background.failed', { operation: 'dispatch_commands', ...describeError(error) })
         // Persisted due times retain pending work while the database or transport is unavailable.
       } finally {
         dispatching = false
@@ -401,7 +356,8 @@ export const startServer = (
         }
         if (candidates.length < 32) placementCursor = ''
         await poll('schedule', Projects.scheduleMemoryJobs())
-      } catch {
+      } catch (error) {
+        log.error('background.failed', { operation: 'place_projects', ...describeError(error) })
         // Committed leases and persistent due times are revisited after recovery.
       } finally {
         placing = false
@@ -422,7 +378,8 @@ export const startServer = (
         const deliveries = await poll('dispatch', Projects.claimProjectCommands(kind))
         for (const delivery of deliveries)
           await gateway.sendValidated(delivery.node_id, delivery.employee_id, delivery.command.run_id, delivery.command)
-      } catch {
+      } catch (error) {
+        log.error('background.failed', { operation: 'dispatch_projects', ...describeError(error) })
         // Each command class retains its own retry progress and sending quota.
       } finally {
         sendingProjects.delete(kind)

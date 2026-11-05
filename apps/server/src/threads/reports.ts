@@ -295,7 +295,7 @@ export const processReport = (source: NodeSource, input: P.ThreadReport): DB<P.T
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const decoded = yield* decode(P.ThreadReport, input)
-      const { trace_context: _trace, ...r } = decoded
+      const r = decoded
       if (r.history_unavailable && !['thread.stopped', 'thread.unknown'].includes(r.kind))
         return yield* Effect.fail(failure('invalid_report', 422))
       yield* lockNodeSource(source)

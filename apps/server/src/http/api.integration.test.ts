@@ -9,7 +9,6 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
-import { gzipSync } from 'node:zlib'
 import { DownloadsResponse } from '@baton/protocol/http-api'
 import { downloadArchive, writeChecksum } from '../testing/downloads.ts'
 import { httpApplication, httpRouteTemplate } from './index.ts'
@@ -28,7 +27,6 @@ let token = ''
 let csrf = ''
 let nodeId = ''
 const notifications: Array<{ employeeId: string; event: P.BrowserEvent }> = []
-const forwarded: Array<{ signal: string; employeeId: string; payload: unknown }> = []
 let application: Effect.Success<ReturnType<typeof httpApplication>>
 let loginProtection = new LoginProtection()
 let heldStarted: (() => void) | undefined
@@ -43,16 +41,18 @@ const request = (path: string, method = 'GET', body?: unknown, headers: Record<s
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     }),
   )
-it('returns the request trace context on both successful and failed HTTP responses', async () => {
-  const traceparent = `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`
-  for (const [path, status] of [
-    ['/api/v1/downloads', 200],
-    ['/api/v1/route-does-not-exist', 401],
-  ] as const) {
-    const response = await request(path, 'GET', undefined, { traceparent })
-    expect(response.status).toBe(status)
-    expect(response.headers.get('traceresponse')?.split('-')[1]).toBe('a'.repeat(32))
-  }
+it('generates and echoes X-Request-Id and includes the same request_id in failures', async () => {
+  const generated = await request('/api/v1/route-does-not-exist')
+  expect(generated.status).toBe(401)
+  const requestId = generated.headers.get('x-request-id')
+  expect(requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+  expect(await generated.json()).toMatchObject({ request_id: requestId })
+  expect(generated.headers.get('x-baton-version')).toBeTruthy()
+  const provided = randomUUID()
+  const echoed = await request('/api/v1/route-does-not-exist', 'GET', undefined, { 'x-request-id': provided })
+  expect(echoed.headers.get('x-request-id')).toBe(provided)
+  const invalid = await request('/api/v1/route-does-not-exist', 'GET', undefined, { 'x-request-id': 'not-a-uuid' })
+  expect(invalid.headers.get('x-request-id')).not.toBe('not-a-uuid')
 })
 async function login(passwordValue: string, username = 'httpalice') {
   const response = await request('/api/v1/login', 'POST', { username, password: passwordValue })
@@ -144,7 +144,6 @@ beforeAll(async () => {
       allowedOrigins: [origin],
       signer,
       gateway: () => gateway,
-      forwardTelemetry: (signal, payload, employeeId) => forwarded.push({ signal, payload, employeeId }),
       webDirectory: join(directory, 'web'),
       downloads: { directory: join(directory, 'packages') },
     }).pipe(Effect.provideService(Scope.Scope, scope)),
@@ -299,66 +298,11 @@ it('preserves login, password, origin and CSRF gates before decoding endpoint re
   await login('http-replacement-password-456')
 })
 
-it('returns browser telemetry only to an authenticated session when configured', async () => {
+it('no longer exposes browser telemetry or replay endpoints', async () => {
   await login(readyPassword, 'httpready')
-  const previous = {
-    endpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
-    forward: process.env.BATON_TELEMETRY_FORWARD,
-    replay: process.env.BATON_WEB_SESSION_REPLAY,
-  }
-  try {
-    delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT
-    delete process.env.BATON_TELEMETRY_FORWARD
-    expect(await (await request('/api/v1/me')).json()).not.toHaveProperty('telemetry')
-    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'https://collector.example'
-    process.env.BATON_WEB_SESSION_REPLAY = 'masked'
-    expect(await (await request('/api/v1/me')).json()).toMatchObject({
-      telemetry: { session_replay: 'masked' },
-    })
-    expect((await request('/api/v1/me', 'GET', undefined, { cookie: '' })).status).toBe(401)
-  } finally {
-    for (const [key, value] of Object.entries({
-      OTEL_EXPORTER_OTLP_ENDPOINT: previous.endpoint,
-      BATON_TELEMETRY_FORWARD: previous.forward,
-      BATON_WEB_SESSION_REPLAY: previous.replay,
-    })) {
-      if (value === undefined) delete process.env[key]
-      else process.env[key] = value
-    }
-  }
-})
-
-it('requires origin and session for browser telemetry, and CSRF for traces', async () => {
-  await login(readyPassword, 'httpready')
-  const previous = process.env.OTEL_EXPORTER_OTLP_ENDPOINT
-  const previousForward = process.env.BATON_TELEMETRY_FORWARD
-  try {
-    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://127.0.0.1:4318'
-    const path = '/api/v1/telemetry/v1/traces'
-    expect((await request(path, 'POST', {}, { origin: 'https://untrusted.local' })).status).toBe(403)
-    expect((await request(path, 'POST', {}, { cookie: '' })).status).toBe(401)
-    expect((await request(path, 'POST', {}, { 'x-csrf-token': '' })).status).toBe(403)
-    expect((await request(path, 'POST', {})).status).toBe(200)
-    expect(forwarded.at(-1)?.signal).toBe('traces')
-    expect((await request('/api/v1/telemetry/v1/logs', 'POST', {}, { 'x-csrf-token': '' })).status).toBe(200)
-    expect((await request(path, 'POST', { large: 'x'.repeat(1024 * 1024) })).status).toBe(413)
-    const compressed = gzipSync(Buffer.alloc(1024 * 1024 + 1))
-    const oversizedReplay = await handle(
-      new Request('http://localhost/api/v1/telemetry/v1/logs', {
-        method: 'POST',
-        headers: { origin, cookie: token, 'content-type': 'application/x-protobuf', 'content-encoding': 'gzip' },
-        body: compressed,
-      }),
-    )
-    expect(oversizedReplay.status).toBe(413)
-    process.env.BATON_TELEMETRY_FORWARD = 'off'
-    expect((await request(path, 'POST', {})).status).toBe(404)
-  } finally {
-    if (previous === undefined) delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT
-    else process.env.OTEL_EXPORTER_OTLP_ENDPOINT = previous
-    if (previousForward === undefined) delete process.env.BATON_TELEMETRY_FORWARD
-    else process.env.BATON_TELEMETRY_FORWARD = previousForward
-  }
+  expect(await (await request('/api/v1/me')).json()).not.toHaveProperty('telemetry')
+  expect((await request('/api/v1/telemetry/v1/traces', 'POST', {})).status).toBe(404)
+  expect((await request('/api/v1/telemetry/v1/logs', 'POST', {})).status).toBe(404)
 })
 
 it('validates payloads, queries, paths, response shapes and available feature routes', async () => {
@@ -384,7 +328,16 @@ it('validates payloads, queries, paths, response shapes and available feature ro
   expect((await request('/api/v1/me/default-device', 'PUT', { node_id: nodeId })).status).toBe(200)
   const diagnostics = await request('/api/v1/diagnostics')
   expect(diagnostics.status).toBe(200)
-  expect(Schema.decodeUnknownSync(P.Diagnostics)(await diagnostics.json()).release).toEqual(P.releaseMetadata())
+  const diagnosticsBody = Schema.decodeUnknownSync(P.Diagnostics)(await diagnostics.json())
+  expect(diagnosticsBody.release).toEqual(P.releaseMetadata())
+  expect(diagnosticsBody).toMatchObject({
+    online_devices: 1,
+    active_runs: expect.any(Number),
+  })
+  expect(Array.isArray(diagnosticsBody.outbox)).toBe(true)
+  expect(Array.isArray(diagnosticsBody.thread_statuses)).toBe(true)
+  expect(Array.isArray(diagnosticsBody.memory_jobs)).toBe(true)
+  expect(JSON.stringify(diagnosticsBody)).not.toContain('content')
   expect((await request('/api/v1/threads')).status).toBe(200)
   for (const path of ['/api/v1/projects']) {
     const response = await request(path)

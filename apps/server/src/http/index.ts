@@ -1,6 +1,6 @@
 import { readFile, realpath } from 'node:fs/promises'
 import { resolve, relative, extname, isAbsolute, sep } from 'node:path'
-import { Cause, Effect, Exit, Layer, Option, Stream } from 'effect'
+import { Cause, Effect, Exit, Layer, Option, Schema } from 'effect'
 import { NodeHttpPlatform } from '@effect/platform-node'
 import { HttpRouter, HttpServer } from 'effect/http'
 import * as Incoming from 'effect/http/HttpIncomingMessage'
@@ -10,8 +10,8 @@ import * as Response from 'effect/http/HttpServerResponse'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { HttpApiBuilder } from 'effect/http-api'
 import { BatonHttpApi, httpOpenApi } from '@baton/protocol/http-api'
-import { Schema } from 'effect'
-import { captureTrace, traceFromHeaders, withTraceSpan } from '@baton/telemetry'
+import { BUILD } from '@baton/protocol/release.mjs'
+import { createLogger } from '@baton/logging'
 import { RuntimeMode, UUID } from '@baton/protocol'
 import { createDownloads } from '../downloads.ts'
 import * as Nodes from '../nodes.ts'
@@ -21,13 +21,13 @@ import { AppError } from '../errors.ts'
 import type { HTTPOptions } from './options.ts'
 import { httpHandlers } from './handlers.ts'
 import { authorizeBrowser, checkOrigin, HttpRequestId, httpFailure, httpSecurity, newRequestId } from './security.ts'
-import { telemetryForwardEnabled } from '../telemetry-forward-client.ts'
-import { decodeReplayProtobuf } from '@baton/telemetry/protobuf'
 import { isLoginRequest, LoginRateError } from './login-protection.ts'
 import { loginClientIp } from './login-ip.ts'
 import { LoginInput } from '@baton/protocol'
 import { DeviceLoginProtection, DeviceLoginRateError, isDeviceLoginCreateRequest } from './device-login-protection.ts'
 export { cookieToken } from './security.ts'
+
+const log = createLogger('baton-server')
 
 const json = (value: unknown, status = 200) =>
   Response.jsonUnsafe(value, { status, headers: { 'cache-control': 'no-store' } })
@@ -174,7 +174,8 @@ export const httpApplication = (options: HTTPOptions) =>
     return Effect.gen(function* () {
       const request = yield* Request.HttpServerRequest
       const path = new URL(request.url, 'http://localhost').pathname
-      const requestId = newRequestId()
+      const requestId = newRequestId(request.headers['x-request-id'])
+      const started = Date.now()
       const operation = Effect.gen(function* () {
         if (isDeviceLoginCreateRequest(request.method, request.url)) {
           const ip =
@@ -235,47 +236,6 @@ export const httpApplication = (options: HTTPOptions) =>
         }
         if (!path.startsWith('/api/')) return yield* staticResponse(options)
         yield* checkOrigin(options)
-        if (
-          request.method === 'POST' &&
-          (path === '/api/v1/telemetry/v1/traces' || path === '/api/v1/telemetry/v1/logs')
-        ) {
-          if (!telemetryForwardEnabled(options.telemetryEnv) || !options.forwardTelemetry) return yield* notFound()
-          const signal = path.endsWith('/traces') ? 'traces' : 'logs'
-          const session = yield* authorizeBrowser(false, signal === 'traces')
-          const chunks = yield* Stream.runFoldEffect(
-            request.stream,
-            () => ({ size: 0, chunks: [] as Uint8Array[] }),
-            (acc, chunk) => {
-              const size = acc.size + chunk.byteLength
-              return size > 1024 * 1024
-                ? Effect.fail(new AppError(413, 'payload_too_large'))
-                : Effect.succeed({ size, chunks: [...acc.chunks, chunk] })
-            },
-          )
-          const bytes = Buffer.concat(chunks.chunks)
-          const decoded = yield* Effect.try({
-            try: () => {
-              if (
-                signal === 'logs' &&
-                request.headers['content-encoding'] === 'gzip' &&
-                /^application\/x-protobuf(?:;|$)/i.test(request.headers['content-type'] ?? '')
-              )
-                return decodeReplayProtobuf(bytes)
-              if (!/^application\/json(?:;|$)/i.test(request.headers['content-type'] ?? ''))
-                throw new AppError(415, 'unsupported_media_type')
-              return JSON.parse(bytes.toString('utf8')) as unknown
-            },
-            catch: (error) =>
-              error instanceof AppError
-                ? error
-                : error instanceof RangeError ||
-                    (error instanceof Error && 'code' in error && error.code === 'ERR_BUFFER_TOO_LARGE')
-                  ? new AppError(413, 'payload_too_large')
-                  : new AppError(400, 'invalid_telemetry'),
-          })
-          options.forwardTelemetry(signal, decoded, session.employee.id)
-          return json({})
-        }
         if (path === '/api/v1/openapi.json' && request.method === 'GET') {
           yield* authorizeBrowser(false)
           return json(httpOpenApi())
@@ -308,47 +268,40 @@ export const httpApplication = (options: HTTPOptions) =>
           ),
           Effect.map((response) => Response.setHeader(response, 'cache-control', 'no-store')),
         )
-      })
-      let responseTrace: string | undefined
-      return yield* withTraceSpan(
-        Effect.gen(function* () {
-          responseTrace = (yield* captureTrace)?.traceparent
-          const result = yield* Effect.exit(operation)
-          if (Exit.isFailure(result)) {
-            if (!Cause.hasInterrupts(result.cause)) {
-              const failure = httpFailure(Cause.squash(result.cause), requestId)
-              yield* Effect.annotateCurrentSpan({
-                'http.response.status_code': failure.status,
-                'baton.error.code': failure.code,
-              })
-            }
-            return yield* Effect.failCause(result.cause)
-          }
-          yield* Effect.annotateCurrentSpan({ 'http.response.status_code': result.value.status })
-          return result.value
-        }),
-        'baton.http.request',
-        traceFromHeaders(request.headers),
-        {
-          kind: 'server',
-          attributes: { 'http.request.method': request.method, 'http.route': httpRouteTemplate(request.method, path) },
-        },
-      ).pipe(
-        Effect.catchCause((cause) => {
-          if (Cause.hasInterrupts(cause)) return Effect.failCause(cause)
-          const error = Cause.squash(cause)
-          const { status, ...body } = httpFailure(error, requestId)
-          const response = json(body, status)
-          return Effect.succeed(
-            error instanceof LoginRateError || error instanceof DeviceLoginRateError
-              ? Response.setHeader(response, 'retry-after', String(error.retryAfter))
-              : response,
-          )
-        }),
-        Effect.map((response) =>
-          responseTrace ? Response.setHeader(response, 'traceresponse', responseTrace) : response,
-        ),
-        Effect.provideService(HttpRequestId, requestId),
+      }).pipe(Effect.provideService(HttpRequestId, requestId))
+      const result = yield* Effect.exit(operation)
+      let response: Response.HttpServerResponse
+      let errorCode: string | undefined
+      if (Exit.isSuccess(result)) response = result.value
+      else {
+        if (Cause.hasInterrupts(result.cause)) return yield* Effect.failCause(result.cause)
+        const error = Cause.squash(result.cause)
+        const { status, code, ...body } = httpFailure(error, requestId)
+        errorCode = code
+        const failure = json({ code, ...body }, status)
+        response =
+          error instanceof LoginRateError || error instanceof DeviceLoginRateError
+            ? Response.setHeader(failure, 'retry-after', String(error.retryAfter))
+            : failure
+      }
+      response = Response.setHeader(
+        Response.setHeader(response, 'x-request-id', requestId),
+        'x-baton-version',
+        BUILD.version,
       )
+      if (path.startsWith('/api/')) {
+        const fields = {
+          request_id: requestId,
+          method: request.method,
+          route: httpRouteTemplate(request.method, path),
+          status: response.status,
+          duration_ms: Date.now() - started,
+          ...(errorCode ? { error_code: errorCode } : {}),
+        }
+        if (response.status >= 500) log.error('http.request', fields)
+        else if (response.status >= 400) log.warn('http.request', fields)
+        else log.info('http.request', fields)
+      }
+      return response
     })
   })

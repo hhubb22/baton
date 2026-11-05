@@ -3,8 +3,6 @@ import type { Models } from '@earendil-works/pi-ai'
 import { runtimeModels } from './auth.js'
 import { embed, EmbeddingError } from './embeddings.js'
 import { RuntimeError, type RPC } from './protocol.js'
-import { providerUsage, type RuntimeTelemetry } from './usage.js'
-import { modelInputAttributes, modelOutputAttributes, streamUsageAttributes } from './genai.js'
 import type { ProjectTranscript } from './transcript.js'
 
 const Output = Schema.Struct({
@@ -21,7 +19,6 @@ export async function runMemory(
   maxOutputTokens = 32000,
   parent?: AbortSignal,
   providedModels?: Models,
-  telemetry?: RuntimeTelemetry,
   transcript?: ProjectTranscript,
 ): Promise<void> {
   const boot = await rpc.call({ operation: 'memory_bootstrap' })
@@ -51,8 +48,7 @@ export async function runMemory(
       system: instruction,
       messages,
     })
-    const produce = async (annotate: (attributes: Record<string, unknown>) => void) => {
-      const started = performance.now()
+    const produce = async () => {
       let firstOutput = false
       const stream = models.streamSimple(
         model,
@@ -61,38 +57,18 @@ export async function runMemory(
           maxTokens: Math.min(maxOutputTokens, model.maxTokens),
           maxRetries: 0,
           signal,
-          onProviderStreamEvent: (event, providerModel) => {
-            const usage = providerUsage(providerModel.api, event)
-            if (Object.keys(usage).length) annotate(streamUsageAttributes(usage))
-          },
         },
       )
       for await (const event of stream) {
         if (!firstOutput && ['text_delta', 'thinking_delta', 'toolcall_delta'].includes(event.type)) {
           firstOutput = true
           firstOutputAt = Date.now()
-          annotate({ ttft_ms: Math.max(0, performance.now() - started) })
         }
       }
       const response = await stream.result()
-      annotate(modelOutputAttributes(response))
       return response
     }
-    const response = telemetry
-      ? await telemetry.span(
-          `chat ${model.id}`,
-          {
-            'gen_ai.operation.name': 'chat',
-            'gen_ai.agent.name': 'memory',
-            'gen_ai.conversation.id': boot.job_id,
-            'gen_ai.provider.name': model.provider,
-            'gen_ai.request.model': model.id,
-            ...modelInputAttributes(messages),
-            'baton.usage.reported': false,
-          },
-          produce,
-        )
-      : await produce(() => {})
+    const response = await produce()
     transcript?.write('llm.response', {
       call,
       purpose: 'memory_extract',
@@ -132,7 +108,6 @@ export async function runMemory(
             pending.memory_embedding,
             entry.text,
             signal,
-            telemetry,
             {
               'gen_ai.agent.name': 'memory',
               'gen_ai.conversation.id': boot.job_id,

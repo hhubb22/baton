@@ -1,15 +1,11 @@
 import { randomUUID } from 'node:crypto'
-import { createServer } from 'node:http'
-import { telemetryLayer } from '@baton/telemetry'
-import type { TraceData } from 'effect/observability/OtlpTracer'
-import { createDatabaseRuntime } from '@baton/server/database'
 import { mkdtemp, readFile, realpath, rm, writeFile, chmod } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Effect, Exit, Scope, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
-import { expect, test, vi } from 'vite-plus/test'
+import { expect, test } from 'vite-plus/test'
 import * as P from '@baton/protocol'
 import { startServer } from '@baton/server/server'
 import { openTestDatabase, seedNodeIdentity } from '@baton/server/testing/database'
@@ -24,40 +20,6 @@ import { replay } from './testing/replay-worker.ts'
 
 test('HTTP → TS center → batond → in-process Thread state machine survives reconnects without resending input', async () => {
   const database = await openTestDatabase()
-  const captured: Array<{
-    service: string
-    name: string
-    traceId: string
-    spanId: string
-    parentSpanId: string | undefined
-    attributes: Array<{ key: string; value: unknown }>
-  }> = []
-  const rawExports: string[] = []
-  const collector = createServer((request, response) => {
-    let body = ''
-    request.on('data', (chunk) => {
-      body += String(chunk)
-    })
-    request.on('end', () => {
-      rawExports.push(body)
-      const data = JSON.parse(body) as TraceData
-      for (const resource of data.resourceSpans) {
-        const service =
-          resource.resource.attributes.find((attribute) => attribute.key === 'service.name')?.value.stringValue ?? ''
-        for (const scope of resource.scopeSpans) for (const span of scope.spans) captured.push({ ...span, service })
-      }
-      response.writeHead(200).end('{}')
-    })
-  })
-  await new Promise<void>((resolve) => collector.listen(0, '127.0.0.1', resolve))
-  const collectorAddress = collector.address() as { port: number }
-  vi.stubEnv('OTEL_EXPORTER_OTLP_TRACES_ENDPOINT', `http://127.0.0.1:${collectorAddress.port}/v1/traces`)
-  vi.stubEnv('OTEL_TRACES_EXPORTER', 'otlp')
-  vi.stubEnv('OTEL_BSP_SCHEDULE_DELAY', '20')
-  const tracedRuntime = createDatabaseRuntime(
-    { url: database.url, schema: database.schema },
-    telemetryLayer('baton-server'),
-  )
   const directory = await realpath(await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'btr-')))
   await chmod(directory, 0o700)
   const nodeDirectory = join(directory, 'node')
@@ -80,7 +42,7 @@ test('HTTP → TS center → batond → in-process Thread state machine survives
   const start = async () => {
     await database.run(Nodes.resetConnections())
     serverScope = await Effect.runPromise(Scope.make())
-    running = await tracedRuntime.runPromise(
+    running = await database.runtime.runPromise(
       startServer({
         port,
         allowedOrigins: [origin],
@@ -96,7 +58,7 @@ test('HTTP → TS center → batond → in-process Thread state machine survives
   }
   const stopCenter = async () => {
     if (serverScope) {
-      await tracedRuntime.runPromise(Scope.close(serverScope, Exit.void))
+      await database.runtime.runPromise(Scope.close(serverScope, Exit.void))
       serverScope = undefined
     }
   }
@@ -124,7 +86,6 @@ test('HTTP → TS center → batond → in-process Thread state machine survives
             'content-type': 'application/json',
             Cookie: token,
             'X-CSRF-Token': csrf,
-            traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`,
           },
           ...(data !== undefined ? { body: JSON.stringify(data) } : {}),
         })
@@ -220,7 +181,7 @@ test('HTTP → TS center → batond → in-process Thread state machine survives
               }
             },
           }),
-        ).pipe(Effect.provide(telemetryLayer('batond'))),
+        ),
         { signal: daemonController.signal },
       )
     }
@@ -326,19 +287,7 @@ test('HTTP → TS center → batond → in-process Thread state machine survives
       .split('\n')
       .map((line) => JSON.parse(line) as { text: string })
     expect(submissions.map((entry) => entry.text)).toEqual(['first', 'hold', 'last'])
-    expect(captured.some((span) => span.service === 'batond' && span.name === 'baton.worker.dispatch')).toBe(true)
-    expect(captured.some((span) => span.attributes.some((attribute) => attribute.key === 'db.system.name'))).toBe(true)
-    const exports = rawExports.join('')
-    expect(exports).not.toContain('db.query.text')
-    expect(exports).not.toContain('db.statement')
-    expect(exports).not.toContain('INSERT INTO')
-    expect(
-      captured.some((span) =>
-        span.attributes.some((attribute) => attribute.key === 'db.client.connection.wait_time_ms'),
-      ),
-    ).toBe(true)
-    expect(exports).not.toContain(initialPassword)
-    expect(exports).not.toContain('working:hold')
+    expect(await readFile(join(directory, 'submissions.jsonl'), 'utf8')).not.toContain(initialPassword)
     expect(droppedReceipt).toBe(true)
     expect(droppedReplyAck).toBe(true)
     expect((await alice(`/threads/${threadId}/archive`, 'POST', {})).status).toBe(202)
@@ -359,11 +308,7 @@ test('HTTP → TS center → batond → in-process Thread state machine survives
     await stopDaemon()
     await host.close()
     await stopCenter()
-    await tracedRuntime.dispose()
     await database.close()
-    vi.unstubAllEnvs()
-    collector.closeAllConnections()
-    await new Promise<void>((resolve) => collector.close(() => resolve()))
     await rm(directory, { recursive: true, force: true })
   }
 }, 40_000)

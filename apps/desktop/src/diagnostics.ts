@@ -1,18 +1,14 @@
-import { open } from 'node:fs/promises'
-
 export type DesktopDiagnostics = {
   clientVersion: string
   batondVersion: string
   platform: string
   processState: string
-  lastExit: { at: string; reason: string } | null
+  deviceId?: string
+  lastExit: { at: string; reason: string; code?: string } | null
   canRestart: boolean
 }
 
 const REDACTED = '[REDACTED]'
-const LOG_LINES = 200
-const READ_LIMIT = 256 * 1024
-const READ_CHUNK = 16 * 1024
 // 整行隐藏凭据和配置，避免只替换字段名后漏出嵌套值。
 const privateLine =
   /setup|enroll|register|registration|credential|token|secret|password|passwd|authorization|cookie|api[-_ ]?key|access[-_ ]?key|private[-_ ]?key|deployment|config|coordinator_url|ca_pem|client[-_ ]?key|bearer\s|basic\s|\bsk-[\w-]+|\beyJ[\w-]+\.[\w-]+/i
@@ -62,63 +58,22 @@ function redact(text: string, continuation: boolean): string {
     .join('\n')
 }
 
-function lastLines(text: string): string {
-  const lines = text.replace(/\r\n?/g, '\n').split('\n')
-  if (lines.at(-1) === '') lines.pop()
-  return lines.slice(-LOG_LINES).join('\n')
-}
-
-export function diagnosticSummary(info: DesktopDiagnostics, log: string): string {
+/** 复制摘要只包含标识、版本和错误码，不复制日志或业务正文。 */
+export function diagnosticSummary(info: DesktopDiagnostics): string {
   const safe = (value: string) => redactDiagnostics(value)
   return [
+    `时间： ${new Date().toISOString()}`,
     `客户端版本： ${safe(info.clientVersion)}`,
-    `batond 版本： ${safe(info.batondVersion)}`,
-    `平台： ${safe(info.platform)}`,
-    `设备状态： ${safe(info.processState)}`,
-    `最近退出： ${info.lastExit ? safe(info.lastExit.at) : '无'}`,
-    ...(info.lastExit ? [`退出原因： ${safe(info.lastExit.reason)}`] : []),
-    `可以重启： ${info.canRestart ? '是' : '否'}`,
-    '',
-    '最近 batond 日志（最多 200 行）：',
-    // 先脱敏再截行，保留多行私有内容的上下文。
-    lastLines(redactDiagnostics(log)) || '（日志不可用）',
+    `服务端版本： ${safe(info.batondVersion)}`,
+    ...(info.deviceId
+      ? [
+          `设备 ID： ${
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(info.deviceId)
+              ? info.deviceId
+              : safe(info.deviceId)
+          }`,
+        ]
+      : []),
+    ...(info.lastExit?.code ? [`错误码： ${safe(info.lastExit.code)}`] : []),
   ].join('\n')
-}
-
-/** 只读取当前日志尾部，最多 256 KiB；截断处到下一条明确日志之间的内容按私有内容隐藏。 */
-export async function readLogTail(path: string): Promise<string> {
-  let handle
-  try {
-    handle = await open(path, 'r')
-    const info = await handle.stat()
-    // Windows 允许以读方式打开目录，POSIX 会抛 EISDIR；显式拒绝，避免把目录当成空日志。
-    if (info.isDirectory())
-      throw Object.assign(new Error(`Cannot read a directory as a log: ${path}`), { code: 'EISDIR' })
-    const size = info.size
-    const chunks: Buffer[] = []
-    let position = size
-    let bytesRead = 0
-    let newlines = 0
-    while (position > 0 && bytesRead < READ_LIMIT && newlines <= LOG_LINES) {
-      const length = Math.min(READ_CHUNK, position, READ_LIMIT - bytesRead)
-      position -= length
-      const buffer = Buffer.alloc(length)
-      const result = await handle.read({ buffer, offset: 0, length, position })
-      const chunk = buffer.subarray(0, result.bytesRead)
-      chunks.unshift(chunk)
-      bytesRead += length
-      for (const byte of chunk) if (byte === 10) newlines++
-    }
-    let tail = Buffer.concat(chunks).toString('utf8')
-    if (position > 0) {
-      const firstNewline = tail.indexOf('\n')
-      tail = firstNewline < 0 ? '' : tail.slice(firstNewline + 1)
-    }
-    return tail ? lastLines(redact(tail, position > 0)) : ''
-  } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return ''
-    throw error
-  } finally {
-    await handle?.close()
-  }
 }

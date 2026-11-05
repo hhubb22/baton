@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@baton/protocol": "workspace:*",
-    "@baton/telemetry": "workspace:*",
+    "@baton/logging": "workspace:*",
     "@effect/platform-node": "catalog:",
     "@effect/sql-pg": "catalog:",
     "@orama/orama": "3.1.18",

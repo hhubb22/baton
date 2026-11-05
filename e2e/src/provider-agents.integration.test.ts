@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import { createServer } from 'node:http'
 import { chmod, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,9 +7,6 @@ import { build } from 'esbuild'
 import { Effect, Exit, Schema, Scope } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, test } from 'vite-plus/test'
-import { telemetryEnvironment, telemetryLayer } from '@baton/telemetry'
-import { createDatabaseRuntime } from '@baton/server/database'
-import type { TraceData } from 'effect/observability/OtlpTracer'
 import * as P from '@baton/protocol'
 import { startServer } from '@baton/server/server'
 import { openTestDatabase, seedNodeIdentity } from '@baton/server/testing/database'
@@ -19,7 +15,6 @@ import * as Nodes from '@baton/server/nodes'
 import { saveDeviceIdentity } from '@baton/batond/daemon/identity'
 import { runDaemon } from '@baton/batond/daemon/daemon'
 import { connectWebSocket } from '@baton/batond/daemon/transport'
-import { startTelemetryRelay } from '@baton/batond/daemon/telemetry-relay'
 import { initializeBrowseRoots } from '@baton/batond/devices/roots'
 import { InProcessWorkerHost } from '@baton/batond/daemon/in-process-host'
 import * as Cursor from '@baton/batond/testing/cursor/transcripts'
@@ -36,8 +31,6 @@ interface ProviderThreadOptions {
   version: string
   prepareTranscripts?: (directory: string) => Promise<string | void>
   thinking?: P.ThinkingSelection
-  trace?: string
-  telemetryEnv?: NodeJS.ProcessEnv
 }
 
 interface ProviderThreadContext {
@@ -45,8 +38,6 @@ interface ProviderThreadContext {
   threadId: string
   nodeId: string
   employeeId: string
-  syncResults: unknown[]
-  traceDiagnostics: { reportAcks: number; batondBatchAttempts: number; batondTraceBatchAttempts: number }
   firstMessageId: string
   threadPath: string
   request: (path: string, method?: string, data?: unknown) => Promise<{ status: number; body: unknown }>
@@ -94,7 +85,7 @@ const cases: ReadonlyArray<
 ]
 
 async function withProviderThread(
-  { agentType, model, version, prepareTranscripts, thinking, trace, telemetryEnv }: ProviderThreadOptions,
+  { agentType, model, version, prepareTranscripts, thinking }: ProviderThreadOptions,
   run: (context: ProviderThreadContext) => Promise<void>,
 ) {
   const database = await openTestDatabase()
@@ -102,32 +93,14 @@ async function withProviderThread(
   await chmod(directory, 0o700)
   const nodeDirectory = join(directory, 'node')
   const bundle = join(directory, 'provider-worker.mjs')
-  const relay = telemetryEnv ? await startTelemetryRelay() : undefined
   const host = new InProcessWorkerHost(nodeDirectory, {
     agentCommand: { executable: process.execPath, args: [bundle] },
     watchdogCommand: { executable: process.execPath, args: [bundle, 'watchdog'] },
   })
   const controller = new AbortController()
   const scope = await Effect.runPromise(Scope.make())
-  const syncResults: unknown[] = []
-  const traceDiagnostics = {
-    reportAcks: 0,
-    batondBatchAttempts: 0,
-    batondTraceBatchAttempts: 0,
-    agentHostBatchAttempts: 0,
-    agentTurnBatchAttempts: 0,
-    agentTurnTraceIds: [] as string[],
-    workerTurnBatchAttempts: 0,
-    sendFailures: 0,
-  }
   let daemon: Promise<unknown> | undefined
   let threadId: string | undefined
-  const tracedRuntime = trace
-    ? createDatabaseRuntime(
-        { url: database.url, schema: database.schema },
-        telemetryLayer('baton-server', telemetryEnv),
-      )
-    : undefined
   try {
     if (agentType === 'cursor') {
       // Cursor host 从 bundle 旁加载已安装的 SDK 及其原生资源。
@@ -231,7 +204,7 @@ async function withProviderThread(
     }
     const origin = 'https://baton.local'
     const signer = Nodes.CredentialSigner.generate()
-    const running = await (tracedRuntime ?? database.runtime).runPromise(
+    const running = await database.runtime.runPromise(
       startServer({
         port: 0,
         allowedOrigins: [origin],
@@ -240,7 +213,6 @@ async function withProviderThread(
         heartbeatMs: 1000,
         offlineMs: 5000,
         webDirectory: directory,
-        ...(telemetryEnv ? { telemetryEnv, telemetryAdmission: () => true } : {}),
       }).pipe(Effect.provideService(Scope.Scope, scope)),
     )
     const base = `http://127.0.0.1:${running.port}`
@@ -254,9 +226,6 @@ async function withProviderThread(
           'content-type': 'application/json',
           Cookie: cookie,
           'X-CSRF-Token': csrf,
-          ...(trace && path === '/threads' && method === 'POST'
-            ? { traceparent: `00-${trace}-${'b'.repeat(16)}-01` }
-            : {}),
         },
         ...(data === undefined ? {} : { body: JSON.stringify(data) }),
       })
@@ -276,34 +245,6 @@ async function withProviderThread(
       (await request('/me/password', 'POST', { current_password: initialPassword, new_password: password })).status,
     ).toBe(204)
     expect((await request('/login', 'POST', { username: `replay${agentType}`, password })).status).toBe(200)
-    if (trace && telemetryEnv) {
-      const me = await request('/me')
-      expect(me.body).toMatchObject({ telemetry: {} })
-      expect(JSON.stringify(me.body)).not.toContain('local-test-key')
-      const now = String(BigInt(Date.now()) * 1_000_000n)
-      const result = await request('/telemetry/v1/traces', 'POST', {
-        resourceSpans: [
-          {
-            resource: { attributes: [{ key: 'service.name', value: { stringValue: 'baton-web' } }] },
-            scopeSpans: [
-              {
-                spans: [
-                  {
-                    traceId: trace,
-                    spanId: 'b'.repeat(16),
-                    name: 'baton.web.request',
-                    startTimeUnixNano: now,
-                    endTimeUnixNano: now,
-                    attributes: [],
-                  },
-                ],
-              },
-            ],
-          },
-        ],
-      })
-      expect(result.status).toBe(200)
-    }
     const me = await request('/me')
     expect(me.status).toBe(200)
     const employeeId = (me.body as { employee: { id: string } }).employee.id
@@ -349,79 +290,12 @@ async function withProviderThread(
           dataDirectory: nodeDirectory,
           identity,
           host,
-          ...(relay ? { telemetryRelay: relay } : {}),
           probe: async () => capability,
           heartbeatMs: 1000,
           pollIntervalMs: 25,
           probeIntervalMs: 60_000,
-          transport: async (_url, options) => {
-            const connection = await connectWebSocket(`ws://127.0.0.1:${running.port}/v1/node`, options)
-            return {
-              ...connection,
-              tryTelemetry: (frame) => {
-                const encoded = JSON.stringify(frame)
-                if (encoded.includes('"stringValue":"batond"')) {
-                  traceDiagnostics.batondBatchAttempts++
-                  if (trace && encoded.includes(trace)) traceDiagnostics.batondTraceBatchAttempts++
-                }
-                if (encoded.includes('baton-agent-host')) traceDiagnostics.agentHostBatchAttempts++
-                if (encoded.includes('"name":"baton.agent.turn"')) {
-                  traceDiagnostics.agentTurnBatchAttempts++
-                  const body = JSON.parse(encoded).envelope?.body?.payload as TraceData | undefined
-                  for (const resource of body?.resourceSpans ?? [])
-                    for (const scope of resource.scopeSpans)
-                      for (const span of scope.spans)
-                        if (span.name === 'baton.agent.turn') traceDiagnostics.agentTurnTraceIds.push(span.traceId)
-                }
-                if (encoded.includes('"name":"baton.turn"')) traceDiagnostics.workerTurnBatchAttempts++
-                // 追踪集成测试验证传播链路；传输拥塞丢弃由 transport 单测覆盖。
-                if (trace)
-                  void connection.send(frame).catch(() => {
-                    traceDiagnostics.sendFailures++
-                  })
-                else connection.tryTelemetry?.(frame)
-              },
-              frames: {
-                async *[Symbol.asyncIterator]() {
-                  for await (const frame of connection.frames) {
-                    if (
-                      frame.kind === 'envelope' &&
-                      frame.envelope &&
-                      typeof frame.envelope === 'object' &&
-                      'body' in frame.envelope
-                    ) {
-                      const body = frame.envelope.body
-                      if (body && typeof body === 'object' && 'type' in body && body.type === 'node.sync_result')
-                        syncResults.push(body)
-                      if (
-                        body &&
-                        typeof body === 'object' &&
-                        'type' in body &&
-                        body.type === 'thread.report_result' &&
-                        'ok' in body &&
-                        body.ok === true
-                      )
-                        traceDiagnostics.reportAcks++
-                    }
-                    yield frame
-                  }
-                },
-              },
-            }
-          },
+          transport: async (_url, options) => connectWebSocket(`ws://127.0.0.1:${running.port}/v1/node`, options),
         }),
-      ).pipe(
-        Effect.provide(
-          telemetryLayer('batond', {
-            ...process.env,
-            ...telemetryEnvironment(relay),
-            BATON_TELEMETRY_NODE_ID: identity.node_id,
-            OTEL_BSP_SCHEDULE_DELAY: '30',
-            OTEL_BSP_MAX_EXPORT_BATCH_SIZE: '64',
-            OTEL_LOGS_EXPORTER: 'none',
-            OTEL_METRICS_EXPORTER: 'none',
-          }),
-        ),
       ),
       { signal: controller.signal },
     )
@@ -479,8 +353,6 @@ async function withProviderThread(
       threadId,
       nodeId: identity.node_id,
       employeeId: identity.employee_id,
-      syncResults,
-      traceDiagnostics,
       firstMessageId,
       threadPath,
       request,
@@ -493,107 +365,11 @@ async function withProviderThread(
     controller.abort()
     await daemon
     await host.close()
-    await (tracedRuntime ?? database.runtime).runPromise(Scope.close(scope, Exit.void))
-    await tracedRuntime?.dispose()
-    await relay?.close()
+    await database.runtime.runPromise(Scope.close(scope, Exit.void))
     await database.close()
     await rm(directory, { recursive: true, force: true })
   }
 }
-
-test('exports one trace from HTTP through the Thread state machine and Pi agent-host', async () => {
-  const trace = 'a'.repeat(32)
-  const spans: Array<TraceData['resourceSpans'][number]['scopeSpans'][number]['spans'][number] & { service: string }> =
-    []
-  const authorization: Array<string | undefined> = []
-  const resources: Array<{
-    service: string
-    attributes: TraceData['resourceSpans'][number]['resource']['attributes']
-  }> = []
-  const collector = createServer((request, response) => {
-    authorization.push(request.headers.authorization)
-    let body = ''
-    request.on('data', (chunk) => {
-      body += String(chunk)
-    })
-    request.on('end', () => {
-      const data = JSON.parse(body) as TraceData
-      for (const resource of data.resourceSpans) {
-        const service =
-          resource.resource.attributes.find((item) => item.key === 'service.name')?.value.stringValue ?? ''
-        resources.push({ service, attributes: resource.resource.attributes })
-        for (const scope of resource.scopeSpans) for (const span of scope.spans) spans.push({ ...span, service })
-      }
-      response.writeHead(200).end('{}')
-    })
-  })
-  await new Promise<void>((resolve) => collector.listen(0, '127.0.0.1', resolve))
-  const address = collector.address() as { port: number }
-  const telemetryEnv = {
-    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `http://127.0.0.1:${address.port}/v1/traces`,
-    OTEL_EXPORTER_OTLP_HEADERS: 'authorization=local-test-key',
-    OTEL_LOGS_EXPORTER: 'none',
-    OTEL_METRICS_EXPORTER: 'none',
-    OTEL_BSP_SCHEDULE_DELAY: '30',
-  }
-  try {
-    await withProviderThread(
-      { ...cases[1]!, trace, telemetryEnv },
-      async ({ replies, nodeId, employeeId, syncResults, traceDiagnostics }) => {
-        expect(syncResults).toContainEqual({ type: 'node.sync_result', ok: true, telemetry: { forward: true } })
-        expect(JSON.stringify(syncResults)).not.toContain('local-test-key')
-        await expect.poll(async () => (await replies()).length, { timeout: 15000 }).toBe(1)
-        expect(spans.some((span) => span.service === 'baton-web' && span.traceId === trace)).toBe(true)
-        expect(
-          spans.some(
-            (span) =>
-              span.service === 'baton-server' &&
-              span.name === 'baton.http.request' &&
-              span.traceId === trace &&
-              span.parentSpanId === 'b'.repeat(16),
-          ),
-        ).toBe(true)
-        for (const resource of resources.filter((entry) => ['batond'].includes(entry.service))) {
-          expect(resource.attributes).toContainEqual({ key: 'baton.node.id', value: { stringValue: nodeId } })
-          expect(resource.attributes).toContainEqual({ key: 'baton.employee.id', value: { stringValue: employeeId } })
-          expect(resource.attributes).toContainEqual({ key: 'user.id', value: { stringValue: employeeId } })
-        }
-        expect(authorization.every((value) => value === 'local-test-key')).toBe(true)
-        await expect
-          .poll(
-            () =>
-              spans.some(
-                (span) =>
-                  span.service === 'baton-server' && span.name === 'baton.report.receive' && span.traceId === trace,
-              ),
-            { timeout: 10000 },
-          )
-          .toBe(true)
-        try {
-          await expect
-            .poll(
-              () => spans.filter((span) => span.traceId === trace).map(({ service, name }) => ({ service, name })),
-              {
-                timeout: 10000,
-              },
-            )
-            .toContainEqual({ service: 'batond', name: 'baton.report' })
-        } catch (error) {
-          throw new Error(`Report trace diagnostics: ${JSON.stringify(traceDiagnostics)}`, { cause: error })
-        }
-        const http = spans.find(
-          (span) => span.service === 'baton-server' && span.name === 'baton.http.request' && span.traceId === trace,
-        )!
-        expect(http.attributes.find((attribute) => attribute.key === 'baton.employee.id')?.value.stringValue).toMatch(
-          /^[0-9a-f-]{36}$/,
-        )
-      },
-    )
-  } finally {
-    collector.closeAllConnections()
-    await new Promise<void>((resolve) => collector.close(() => resolve()))
-  }
-}, 45000)
 
 test('Codex thinking selection travels from HTTP through the Thread state machine to the native turn', async () => {
   const thinking = { id: 'reasoningEffort' as const, value: 'high' }

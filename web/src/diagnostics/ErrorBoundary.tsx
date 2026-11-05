@@ -1,17 +1,12 @@
-import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { Component, type ReactNode } from 'react'
 import { DiagnosticCopy } from './DiagnosticCopy'
 import { Button } from '../ui/Button'
-import { reportCaughtException } from './runtime'
 
 export class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false }
 
   static getDerivedStateFromError() {
     return { failed: true }
-  }
-
-  componentDidCatch(error: Error, _info: ErrorInfo) {
-    reportCaughtException(error)
   }
 
   render() {

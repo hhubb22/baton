@@ -11,7 +11,6 @@ export const webSocketText = (data: RawData): string =>
 export interface DaemonConnection {
   readonly frames: AsyncIterable<NodeFrame>
   send(frame: Frame): Promise<void>
-  tryTelemetry?(frame: Frame): void
   close(): void
 }
 export interface DaemonTransport {
@@ -96,19 +95,6 @@ export const connectWebSocket: DaemonTransport = (url, options) =>
               else sent()
             })
           }),
-        tryTelemetry: (frame) => {
-          if (ended || socket.readyState !== WebSocket.OPEN || pendingWrites || socket.bufferedAmount) return
-          const text = JSON.stringify(frame)
-          if (Buffer.byteLength(text) > MaxMessageBytes) return
-          pendingWrites++
-          try {
-            socket.send(text, () => {
-              pendingWrites--
-            })
-          } catch {
-            pendingWrites--
-          }
-        },
         close: () => {
           socket.terminate()
           end()

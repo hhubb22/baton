@@ -1,6 +1,5 @@
 import type { Message } from '@earendil-works/pi-ai'
 import { Schema } from 'effect'
-import { TraceContext } from '@baton/protocol/trace'
 export interface Event {
   seq: number
   kind: 'input' | 'assistant' | 'tool_result' | 'compaction'
@@ -19,7 +18,6 @@ const embeddingConfigSchema = Schema.Struct({
   config_id: Schema.String,
 })
 export interface Bootstrap {
-  trace?: typeof TraceContext.Type
   project_id?: string
   project: {
     memory_embedding: MemoryEmbeddingConfig | null
@@ -61,7 +59,6 @@ export interface MemoryContext {
   algorithm: string
 }
 export interface Request<O extends Operation = Operation> {
-  trace?: typeof TraceContext.Type
   operation: O
   last_seq?: number
   after_seq?: number
@@ -85,7 +82,6 @@ const eventOfKind = <K extends Event['kind']>(kind: K) =>
     kind: Schema.Literal(kind),
   })
 const bootstrapSchema = Schema.Struct({
-  trace: Schema.optionalKey(TraceContext),
   project_id: Schema.optionalKey(Schema.String),
   project: Schema.Struct({
     memory_embedding: Schema.NullOr(embeddingConfigSchema),
@@ -129,7 +125,6 @@ const recordSchema = Schema.Record(Schema.String, Schema.Unknown)
 const resultSchemas = {
   bootstrap: bootstrapSchema,
   memory_bootstrap: Schema.Struct({
-    trace: Schema.optionalKey(TraceContext),
     project_id: Schema.optionalKey(Schema.String),
     job_id: Schema.String,
     kind: Schema.Literals(['consolidation', 'embedding']),

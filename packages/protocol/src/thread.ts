@@ -1,6 +1,5 @@
 import { Schema } from 'effect'
 import { RuntimeMode } from '@t3tools/contracts'
-import { TraceContext } from './trace.ts'
 import { FullOutputPage, FullOutputReference } from './full-output.ts'
 import { TranscriptPage } from './transcript.ts'
 import { ThreadQuestion, ThreadAnswerInput, ThreadQuestionAnswer } from './thread-question.ts'
@@ -185,7 +184,6 @@ export const ThreadCommand = Schema.Struct({
   project_id: Schema.optionalKey(UUID),
   origin_conversation_id: Schema.optionalKey(UUID),
   origin_tool_call_id: Schema.optionalKey(ClientMessageID),
-  trace_context: Schema.optionalKey(TraceContext),
   type: Schema.Literal('thread.command'),
   thread_id: UUID,
   action: Schema.Literals(['open', 'message', 'withdraw', 'stop', 'resume', 'settings', 'answer', 'check_activity']),
@@ -307,7 +305,6 @@ export type ThreadTurnItem = typeof ThreadTurnItem.Type
 
 export const ThreadReport = Schema.Struct({
   type: Schema.Literal('thread.report'),
-  trace_context: Schema.optionalKey(TraceContext),
   thread_id: UUID,
   event_id: UUID,
   worker_seq: PositiveInteger,

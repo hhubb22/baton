@@ -3,8 +3,7 @@ import { IPCError } from '../daemon/ipc.ts'
 import { join } from 'node:path'
 import { rm, open } from 'node:fs/promises'
 import { constants } from 'node:fs'
-import { Context, Effect, Schema, Predicate } from 'effect'
-import { waitEvent } from '@baton/telemetry'
+import { Effect, Schema, Predicate } from 'effect'
 import { ProjectRunCommand, ProjectRuntimeRequest, ProjectRuntimeResult } from '@baton/protocol'
 import { readProjectRuntimeConfig } from '../devices/config.ts'
 import { ensurePrivateDirectory, openPrivateFile } from '../platform/private.ts'
@@ -66,7 +65,6 @@ class Manager implements ProjectManager {
     private readonly options: ProjectManagerOptions,
     private readonly ledger: ProjectLedger,
     private readonly watchdog?: ProcessWatchdog,
-    private readonly telemetry?: Context.Context<never>,
   ) {
     this.clock = new LeaseClock(options.clock)
     this.renewMs = options.timing?.renewMs ?? 20000
@@ -192,7 +190,7 @@ class Manager implements ProjectManager {
         if (!run.renewing && now - run.lastAttempt >= this.renewMs) {
           run.renewing = true
           run.lastAttempt = now
-          this.track(this.renew(run, now))
+          this.track(this.renew(run))
             .finally(() => {
               run.renewing = false
             })
@@ -203,15 +201,8 @@ class Manager implements ProjectManager {
       }
     }
   }
-  private async renew(run: Run, started: number) {
-    const attributes = {
-      'baton.project.run.id': run.command.run_id,
-      ...(run.command.project_id ? { 'baton.project.id': run.command.project_id } : {}),
-    }
-    if (this.telemetry)
-      await Effect.runPromiseWith(this.telemetry)(waitEvent('start', 'lease', attributes, run.command.trace)).catch(
-        () => {},
-      )
+  private async renew(run: Run) {
+    const started = this.clock.now()
     try {
       this.lease(run)
       if (!run.owned || !(await identityMatches(run.owned.record))) throw new Error('runtime_lost')
@@ -231,15 +222,6 @@ class Manager implements ProjectManager {
       else if (['lease_lost', 'claim_lost'].includes(result.code ?? '')) this.stop(run)
     } catch {
       this.stop(run)
-    } finally {
-      try {
-        if (this.telemetry)
-          await Effect.runPromiseWith(this.telemetry)(
-            waitEvent('end', 'lease', attributes, run.command.trace, Math.max(0, this.clock.now() - started)),
-          )
-      } catch {
-        // Telemetry must not change lease handling.
-      }
     }
   }
   leaseWaitAge() {
@@ -261,8 +243,7 @@ class Manager implements ProjectManager {
     if (this.options.excludedRunIds?.has(command.run_id))
       throw new IPCError('binding_mismatch', 'Project Run 属于已解除的设备绑定')
     const queued = this.serial.then(async () => {
-      const { trace: _trace, ...content } = command
-      const id = createHash('sha256').update(JSON.stringify(content)).digest('hex')
+      const id = createHash('sha256').update(JSON.stringify(command)).digest('hex')
       await safePromise(this.ledger.enqueue(id, command))
       if (command.type === 'project_run_wake') this.wake(command)
       else await this.reserve(command)
@@ -416,7 +397,6 @@ class Manager implements ProjectManager {
           BATON_PROJECT_RUN_KIND: run.command.type === 'project_memory_start' ? 'memory' : 'foreground',
           ...(run.command.project_id ? { BATON_PROJECT_ID: run.command.project_id } : {}),
           ...(run.command.memory_kind ? { BATON_PROJECT_MEMORY_KIND: run.command.memory_kind } : {}),
-          ...(this.options.nodeId ? { BATON_TELEMETRY_NODE_ID: this.options.nodeId } : {}),
         },
         (child) => {
           stdio = serveRuntime(
@@ -429,7 +409,6 @@ class Manager implements ProjectManager {
             run.cancel.signal,
             (request, result) => {
               if (result.ok && (request.operation === 'finish' || request.operation === 'report_failure')) {
-                // Allow the Runtime to close its telemetry exporter before reclaiming a stalled process.
                 const timer = setTimeout(() => this.stop(run), 5000)
                 timer.unref()
                 void run.owned?.exited.finally(() => clearTimeout(timer))
@@ -571,7 +550,6 @@ class Manager implements ProjectManager {
             ...data.value,
             ...(request.operation === 'bootstrap' ? { local_wait_protocol: 1 } : {}),
             ...(run.command.project_id ? { project_id: run.command.project_id } : {}),
-            ...(run.command.trace ? { trace: run.command.trace } : {}),
           },
         })
       }
@@ -715,7 +693,6 @@ class Manager implements ProjectManager {
 }
 
 export const makeProjectManager = Effect.fn('Project.makeProjectManager')(function* (options: ProjectManagerOptions) {
-  const telemetry = yield* Effect.context<never>()
   yield* Effect.tryPromise(() => ensurePrivateDirectory(options.dataDir))
   const filename = join(options.dataDir, 'project-runtime.db')
   // 创建数据库文件后再连接，沿用节点私有目录与文件权限。
@@ -739,7 +716,7 @@ export const makeProjectManager = Effect.fn('Project.makeProjectManager')(functi
           (watchdog) => Effect.promise(() => watchdog.close()).pipe(Effect.orDie),
         )
   const manager = yield* Effect.acquireRelease(
-    Effect.sync(() => new Manager(options, ledger, watchdog, telemetry)),
+    Effect.sync(() => new Manager(options, ledger, watchdog)),
     (manager) => Effect.promise(() => manager.close()).pipe(Effect.orDie),
   )
   yield* Effect.tryPromise(() => manager.recover())

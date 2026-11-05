@@ -89,6 +89,25 @@ export type OKResponse = typeof OKResponse.Type
 
 export const Diagnostics = Schema.Struct({
   release: ReleaseMetadata,
+  online_devices: NonNegativeInteger,
+  outbox: Schema.Array(
+    Schema.Struct({
+      action: Schema.Literals(['open', 'message', 'withdraw', 'stop', 'resume', 'settings', 'answer']),
+      pending: NonNegativeInteger,
+      oldest_unacked_seconds: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)),
+    }),
+  ),
+  active_runs: NonNegativeInteger,
+  thread_statuses: Schema.Array(Schema.Struct({ status: ThreadStatus, count: NonNegativeInteger })),
+  memory_jobs: Schema.Array(
+    Schema.Struct({
+      state: Schema.Literals(['pending', 'claimed', 'running', 'completed', 'cancelled']),
+      waiting_reason: Schema.NullOr(Text),
+      backoff: Schema.Boolean,
+      count: NonNegativeInteger,
+      oldest_seconds: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)),
+    }),
+  ),
   nodes: NonNegativeInteger,
   browsers: NonNegativeInteger,
   pending_rpc: NonNegativeInteger,
@@ -98,7 +117,6 @@ export const Diagnostics = Schema.Struct({
   sent_bytes: NonNegativeInteger,
   queued_control_messages: NonNegativeInteger,
   queued_control_bytes: NonNegativeInteger,
-  thread_statuses: Schema.Array(Schema.Struct({ status: ThreadStatus, count: NonNegativeInteger })),
 })
 export type Diagnostics = typeof Diagnostics.Type
 

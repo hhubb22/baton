@@ -55,7 +55,7 @@ node tools/check-package.mjs bin/package
 
 `check-package.mjs [安装目录=bin]` 将完整安装包复制到临时目录，检查布局和包内链接，以空 PATH、临时 HOME 和包外工作目录运行。检查包括帮助、SEA 平台与版本、发布元数据及各子进程版本/诊断一致性、四个 Agent 模块和原生扩展、Project Runtime 与 memory 模式 stdio 握手、后台请求取消、私有文件与订阅探测，以及移走 `node_modules` 后的明确失败。各项结果输出为 JSON，任一失败时非零退出。
 
-检查还使用当前环境中的 `OTEL_EXPORTER_OTLP_*_ENDPOINT` 和 `OTEL_EXPORTER_OTLP_*_HEADERS` 值扫描安装包及已有的网页构建产物，包括解码后的 header 值；报告只列出配置名，不输出配置值。未提供这些值时报告未扫描，网页产物不存在时扫描目录数为 1。检查子进程使用隔离环境，不继承这些配置。
+检查还扫描安装包及已有的网页构建产物，遇到已删除的外部遥测导出、配置开关或回放库标记时失败，报告只列出标记名。扫描目录不存在时直接跳过，`externalTelemetry` 只表示未发现外部遥测。检查子进程使用隔离环境，不继承开发机的遥测配置。
 
 Cursor 检查按执行环境分别验证：`agent-host --probe` 由 SEA 加载 SDK 及原生模块；SQLite store 检查由隔离的 Node 子进程运行 `verify/cursor-package.mjs`，通过以搬迁安装包为基准的 `createRequire` 加载 `@cursor/sdk/sqlite`，打开并关闭临时 store；ripgrep 和 sandbox helper 的 `--help` 直接执行安装包内的程序。SQLite 子进程检查使用运行工具的 Node，需要 Node 26。检查禁用网络请求，不调用模型；sandbox 的 `--help` 只验证程序能加载。
 
