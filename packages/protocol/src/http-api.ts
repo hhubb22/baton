@@ -16,7 +16,7 @@ import * as D from './device.ts'
 import * as A from './auth.ts'
 import * as C from './common.ts'
 import { SessionResponse } from './auth.ts'
-import { EnrollmentResponse, DefaultDeviceResponse } from './device.ts'
+import { DefaultDeviceResponse } from './device.ts'
 import { Diagnostics } from './common.ts'
 import * as Q from './http.ts'
 import { ThreadAnswerInput } from './thread-question.ts'
@@ -24,7 +24,7 @@ import { ReleaseMetadata } from './release.ts'
 import { UUID, NonNegativeInteger } from './common.ts'
 
 export { SessionResponse } from './auth.ts'
-export { EnrollmentResponse, DefaultDeviceResponse } from './device.ts'
+export { DefaultDeviceResponse } from './device.ts'
 export { Diagnostics } from './common.ts'
 export const DownloadItem = Schema.Struct({
   kind: Schema.Literals(['cli', 'desktop']),
@@ -119,12 +119,6 @@ const Public = HttpApiGroup.make('public')
       payload: A.LoginInput,
       success: HttpApiSchema.WithHeaders(SessionResponse, cookie),
     }),
-    Endpoint.post('registerNode', '/api/v1/nodes/register', { payload: D.RegisterNodeInput, success: D.NodeIdentity }),
-    Endpoint.post('reauthNode', '/api/v1/nodes/:nodeId/reauth', {
-      params: nodeParams,
-      payload: D.ReauthNodeInput,
-      success: D.NodeIdentity,
-    }),
   )
   .middleware(PublicRequest)
 
@@ -167,19 +161,6 @@ const Account = HttpApiGroup.make('account')
 
 const Nodes = HttpApiGroup.make('nodes')
   .add(
-    Endpoint.post('issueEnrollment', '/api/v1/node-enrollments', {
-      payload: EmptyInput,
-      success: EnrollmentResponse.pipe(HttpApiSchema.status(201)),
-    }),
-    Endpoint.post('issueReauthEnrollment', '/api/v1/nodes/:nodeId/reauth-enrollments', {
-      params: nodeParams,
-      payload: EmptyInput,
-      success: EnrollmentResponse.pipe(HttpApiSchema.status(201)),
-    }),
-    Endpoint.get('getEnrollment', '/api/v1/node-enrollments/:enrollmentId', {
-      params: { enrollmentId: UUID },
-      success: D.EnrollmentView,
-    }),
     Endpoint.get('list', '/api/v1/nodes', { success: D.NodesResponse }),
     Endpoint.get('get', '/api/v1/nodes/:nodeId', { params: nodeParams, success: D.NodeStatus }),
     Endpoint.post('requestUpdate', '/api/v1/nodes/:nodeId/update', {

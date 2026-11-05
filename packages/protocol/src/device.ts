@@ -97,23 +97,6 @@ export const DefaultDevice = Schema.Struct({
 })
 export type DefaultDevice = typeof DefaultDevice.Type
 
-export const EnrollmentResponse = Schema.Struct({
-  enrollment_id: Text,
-  enrollment_token: Text,
-  expires_at: Timestamp,
-  expires_in_ms: Integer,
-})
-export type EnrollmentResponse = typeof EnrollmentResponse.Type
-
-export const EnrollmentView = Schema.Struct({
-  enrollment_id: Text,
-  state: Text,
-  device_id: Schema.NullOr(Text),
-  expires_at: Timestamp,
-  expires_in_ms: Integer,
-})
-export type EnrollmentView = typeof EnrollmentView.Type
-
 export const FileEntry = Schema.Struct({
   name: Text,
   kind: Text,
@@ -562,22 +545,6 @@ export const ProjectExecResult = Schema.Struct({
   exec: Schema.optionalKey(Schema.NullOr(RuntimeExec)),
 })
 export type ProjectExecResult = typeof ProjectExecResult.Type
-
-export const RegisterNodeInput = Schema.Struct({
-  enrollment_token: Text,
-  display_name: summary(1024).check(Schema.isBetweenCodePoints(1, 80), Schema.isTrimmed()),
-  system: Schema.Literals(['macos', 'linux', 'windows']),
-  role: Schema.optionalKey(Text),
-  capabilities: Schema.Array(RootID).check(Schema.isMaxLength(32), Schema.isUnique()),
-})
-export type RegisterNodeInput = typeof RegisterNodeInput.Type
-
-export const ReauthNodeInput = Schema.Struct({
-  operation_id: UUID,
-  enrollment_token: boundedText(200).check(Schema.isPattern(/^[A-Za-z0-9_-]{20,200}$/)),
-  previous_token: boundedText(4096),
-})
-export type ReauthNodeInput = typeof ReauthNodeInput.Type
 
 export const Revocation = Schema.Struct({
   kind: Schema.Literals(['credential', 'node']),

@@ -31,7 +31,6 @@ export const keys = {
   downloads: ['downloads'] as const,
   devices: ['devices'] as const,
   // 设置码状态随设备接入变化，所以放在 devices 主题下。
-  enrollment: (id: ID) => ['devices', 'enrollment', id] as const,
   // 文件和目录内容由设备按需返回。
   folders: (deviceId: ID, path: string | null) => ['devices', 'folders', deviceId, path] as const,
   deviceFolders: (deviceId: ID) => ['devices', 'folders', deviceId] as const,
@@ -230,16 +229,6 @@ export function useDeviceFolders(deviceId: ID, connected: boolean) {
     queryFn: () => client.listDeviceFolders(deviceId),
     enabled: connected,
     refetchOnMount: 'always',
-  })
-}
-
-export function useEnrollment(id: ID | null) {
-  const client = useClient()
-  return useQuery({
-    queryKey: keys.enrollment(id ?? ''),
-    queryFn: () => client.getEnrollment(id!),
-    enabled: id !== null,
-    refetchInterval: 2000,
   })
 }
 
@@ -665,9 +654,4 @@ export function useSetCommandAccess() {
 export function useRemoveDevice() {
   const client = useClient()
   return useMutation({ mutationFn: (deviceId: ID) => client.removeDevice(deviceId) })
-}
-
-export function useCreateEnrollment() {
-  const client = useClient()
-  return useMutation({ mutationFn: (nodeId?: ID) => client.createEnrollment(nodeId) })
 }

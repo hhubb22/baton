@@ -13,7 +13,7 @@ import * as Threads from './threads/index.ts'
 import * as Projects from './project/projects.ts'
 import { getProjectMemory, writeProjectMemory } from './project/memory/index.ts'
 import { finalizeRestore } from './restore.ts'
-import { withTestDatabase } from './testing/database.ts'
+import { seedNodeIdentity, withTestDatabase } from './testing/database.ts'
 
 it('RL-A08 preserves restored history and memory, requires new authorization and never redispatches uncertain work', () =>
   withTestDatabase(async ({ run }) => {
@@ -25,11 +25,11 @@ it('RL-A08 preserves restored history and memory, requires new authorization and
       const employee = await run(Auth.createEmployee('restore', 'Restore', password))
       await run(Auth.changePassword(employee.id, password, `${password}-ready`))
       const session = await run(Auth.login(employee.username, `${password}-ready`))
-      const enrollment = await run(Nodes.issueEnrollment(employee.id))
       const sync = { display_name: 'Restored workstation', system: 'linux', capabilities: [] }
-      const identity = await run(
-        Nodes.registerNode({ ...sync, enrollment_token: String(enrollment.enrollment_token) }, signer),
-      )
+      const { identity } = await seedNodeIdentity(run, signer, {
+        employeeId: employee.id,
+        displayName: sync.display_name,
+      })
       const source = {
         node_id: identity.node_id,
         employee_id: employee.id,
@@ -151,7 +151,6 @@ it('RL-A08 preserves restored history and memory, requires new authorization and
       await run(Threads.resume(employee.id, thread.id))
       await run(Threads.stop(employee.id, thread.id))
       const history = await run(Threads.timeline(employee.id, thread.id))
-      const unusedEnrollment = await run(Nodes.issueEnrollment(employee.id))
       const pendingLogin = await run(
         DeviceAuth.createSession({ display_name: 'Pending', system: 'linux' }, 'https://baton.local'),
       )
@@ -239,9 +238,6 @@ it('RL-A08 preserves restored history and memory, requires new authorization and
       await run(Nodes.authenticateNode(identity.credential.token, signer))
       expect(await run(DeviceAuth.token(pendingLogin, signer))).toEqual({ status: 'expired' })
       expect(await run(DeviceAuth.token(consumedLogin, signer))).toEqual({ status: 'expired' })
-      await expect(
-        run(Nodes.registerNode({ ...sync, enrollment_token: String(unusedEnrollment.enrollment_token) }, signer)),
-      ).rejects.toMatchObject({ code: 'enrollment_used' })
       const freshSession = await run(Auth.login(employee.username, `${password}-ready`))
       await run(Auth.lookupSession(freshSession.token))
       const restored = identity

@@ -112,7 +112,6 @@ async function main() {
     const heartbeatMs = duration('BATON_HEARTBEAT_INTERVAL', 10_000, 100, 120_000)
     const offlineMs = duration('BATON_OFFLINE_AFTER', 30_000, 200, 600_000)
     const sessionTTLSeconds = duration('BATON_SESSION_TTL', 43_200_000, 300_000, 604_800_000) / 1000
-    const enrollmentTTLSeconds = duration('BATON_ENROLLMENT_TTL', 600_000, 60_000, 86_400_000) / 1000
     if (offlineMs <= heartbeatMs) throw new AppError(400, 'invalid_configuration', '离线期限需要大于心跳间隔')
     const budgets = controlConfiguration()
     const downloads = downloadsConfiguration()
@@ -131,7 +130,6 @@ async function main() {
           heartbeatMs,
           offlineMs,
           sessionTTLSeconds,
-          enrollmentTTLSeconds,
           webDirectory: process.env.BATON_WEB_DIR || join(dirname(fileURLToPath(import.meta.url)), 'web'),
           ...(tls ? { tls } : {}),
         })

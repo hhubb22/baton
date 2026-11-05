@@ -28,7 +28,7 @@ import {
   useSetDefaultDevice,
 } from '../data/queries'
 import type { Device, ID } from '../data/types'
-import { desktopStatusLabel, desktopStatusReason, needsDesktopReauth, useDesktopStatus } from '../data/desktop'
+import { desktopStatusLabel, desktopStatusReason, useDesktopStatus } from '../data/desktop'
 import { text } from '../theme/text'
 import { semantic } from '../theme/semantic.stylex'
 import { radius, space } from '../theme/tokens.stylex'
@@ -219,7 +219,6 @@ function DeviceDetails({
   onAgents,
   onAssistant,
   onDefault,
-  onReconnect,
   onDisconnect,
 }: {
   device: Device
@@ -228,7 +227,6 @@ function DeviceDetails({
   onAgents: () => void
   onAssistant: () => void
   onDefault: () => void
-  onReconnect?: () => void
   onDisconnect: () => void
 }) {
   const client = useClient()
@@ -263,12 +261,7 @@ function DeviceDetails({
       )}
       {updateState === 'accepted' && !device.updateRequest && <span role="status">等待设备更新</span>}
       {updateState === 'failed' && <span role="alert">无法更新，请重试。</span>}
-      {onReconnect && device.credentialState === 'idle_expired' && (
-        <span {...stylex.props(text.small, styles.attention)}>需要登录</span>
-      )}
-      {device.connection === 'offline' && (!onReconnect || device.credentialState !== 'idle_expired') && (
-        <span {...stylex.props(text.small, text.muted)}>新对话将等待设备就绪。</span>
-      )}
+      {device.connection === 'offline' && <span {...stylex.props(text.small, text.muted)}>新对话将等待设备就绪。</span>}
       <div {...stylex.props(styles.actions)}>
         {connected && (
           <>
@@ -297,11 +290,6 @@ function DeviceDetails({
               : availableVersion
                 ? `更新到 ${availableVersion.version}`
                 : '更新设备'}
-          </Button>
-        )}
-        {onReconnect && device.credentialState === 'idle_expired' && (
-          <Button small onClick={onReconnect}>
-            重新连接设备
           </Button>
         )}
         {!isDefault && (
@@ -371,14 +359,7 @@ export function DevicesPage() {
 
   const list = devices.data ?? []
   const local = desktop.data
-  const localReauth = local && needsDesktopReauth(local, list)
-  const connectLabel = inDesktop
-    ? local && (!local.registered || localReauth)
-      ? local.registered
-        ? '重新连接此电脑'
-        : '连接此电脑'
-      : null
-    : '连接设备'
+  const connectLabel = inDesktop ? (local?.state === 'unbound' ? '连接这台电脑' : null) : '连接设备'
   const defaultId = session.data?.defaultDeviceId ?? null
   // 最后联系时间按分钟显示，每分钟刷新一次。
   const now = useNow(60_000)
@@ -486,7 +467,6 @@ export function DevicesPage() {
                   onAgents={() => setAgentsDeviceId(device.id)}
                   onAssistant={() => setAssistantDeviceId(device.id)}
                   onDefault={() => chooseDefault(device)}
-                  onReconnect={inDesktop ? () => setEnrolling(device) : undefined}
                   onDisconnect={() => startDisconnect(device)}
                 />
               )}

@@ -3,16 +3,15 @@ import { createReadStream } from 'node:fs'
 import type { Readable } from 'node:stream'
 import { Effect, Option } from 'effect'
 import { telemetryEnvironment, telemetryLayer } from '@baton/telemetry'
-import { defaultDataDirectory, isMissing, loadIdentity, reauthNode, registerNode } from './identity.ts'
+import { defaultDataDirectory, isMissing, loadIdentity } from './identity.ts'
 import { initializeBrowseRoots } from '../devices/roots.ts'
 import { runDaemon } from './daemon.ts'
-import { loadDeployment } from './deployment.ts'
 import { startTelemetryRelay } from './telemetry-relay.ts'
 
 export async function runDaemonCLI(
-  action: 'up' | 'register' | 'reauth' | 'run' | 'serve' | 'identity',
+  action: 'run' | 'serve' | 'identity',
   args: string[],
-  dependencies: { installationDirectory?: string; stdin?: Readable } = {},
+  dependencies: { stdin?: Readable } = {},
 ): Promise<void> {
   const { values } = (() => {
     try {
@@ -20,18 +19,14 @@ export async function runDaemonCLI(
         args,
         options: {
           'data-dir': { type: 'string', default: defaultDataDirectory() },
-          coordinator: { type: 'string' },
           relay: { type: 'string' },
-          'enrollment-file': { type: 'string' },
-          'display-name': { type: 'string' },
-          'ca-file': { type: 'string' },
           'control-timeout-seconds': { type: 'string' },
           workspace: { type: 'string' },
           ...(['run', 'serve'].includes(action) ? { 'exit-with-stdin': { type: 'boolean' as const } } : {}),
         },
       })
     } catch {
-      throw new Error('节点命令参数无效；注册凭据仅支持环境变量或私有文件')
+      throw new Error('节点命令参数无效')
     }
   })()
   const controlTimeoutSeconds = Number(values['control-timeout-seconds'] ?? 370)
@@ -74,23 +69,6 @@ export async function runDaemonCLI(
     if (stdin.readableEnded) stop()
   }
   try {
-    if (action === 'reauth') {
-      const identity = await reauthNode({
-        dataDirectory,
-        signal: controller.signal,
-        ...(values['enrollment-file'] ? { enrollmentFile: values['enrollment-file'] } : {}),
-        ...(values['ca-file'] ? { caFile: values['ca-file'] } : {}),
-      })
-      console.log(
-        JSON.stringify({
-          node_id: identity.node_id,
-          employee_id: identity.employee_id,
-          display_name: identity.display_name,
-          system: identity.system,
-        }),
-      )
-      return
-    }
     await initializeBrowseRoots(dataDirectory, values.workspace)
     let identity: Awaited<ReturnType<typeof loadIdentity>> | undefined
     try {
@@ -98,33 +76,6 @@ export async function runDaemonCLI(
     } catch (error) {
       if (!isMissing(error)) throw error
     }
-    if (identity && action === 'register') throw new Error('节点身份已存在，请直接运行 up 或 run')
-    if (!identity && action !== 'run' && action !== 'serve') {
-      const deployment = await loadDeployment(dependencies.installationDirectory)
-      const coordinator = values.coordinator ?? deployment?.coordinator_url
-      if (!coordinator) throw new Error('首次注册需要 --coordinator https://中心地址')
-      identity = await registerNode({
-        dataDirectory,
-        coordinatorURL: coordinator,
-        signal: controller.signal,
-        ...(values['enrollment-file'] ? { enrollmentFile: values['enrollment-file'] } : {}),
-        ...(values['display-name'] ? { displayName: values['display-name'] } : {}),
-        ...(values['ca-file']
-          ? { caFile: values['ca-file'] }
-          : deployment?.ca_pem !== undefined
-            ? { caPem: deployment.ca_pem }
-            : {}),
-      })
-      console.log(
-        JSON.stringify({
-          node_id: identity.node_id,
-          employee_id: identity.employee_id,
-          display_name: identity.display_name,
-          system: identity.system,
-        }),
-      )
-    }
-    if (action === 'register') return
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
@@ -145,7 +96,6 @@ export async function runDaemonCLI(
             ...(local ? { telemetryRelay: local } : {}),
             controlTimeoutSeconds,
             ...(values.relay ? { relayURL: values.relay } : {}),
-            ...(values['ca-file'] ? { caFile: values['ca-file'] } : {}),
           }).pipe(
             Effect.provide(
               telemetryLayer('batond', {

@@ -4,11 +4,11 @@ import { join } from 'node:path'
 import { Effect } from 'effect'
 import { afterEach, expect, it, vi } from 'vite-plus/test'
 import type { NodeIdentity, WorkerOpenConfig } from '@baton/protocol'
-import { reportBatondError, runBatondCLI } from '../cli.ts'
 import { updateBrowseRoots } from '../devices/roots.ts'
 import { writePrivateFileAtomic } from '../platform/private.ts'
 import { makePrivateTempDirectory } from '../testing/private.ts'
-import { desktopDirectory, DesktopDirectoryError } from './desktop-directory.ts'
+import { resolveThreadDirectory } from './desktop-directory.ts'
+import { resolveThreadDirectoryResponse } from './control-daemon.ts'
 import { initializeWorkerDirectory } from './host.ts'
 import { contentHash, makeNodeLedger } from './ledger.ts'
 
@@ -76,7 +76,7 @@ async function fixture(ledger = true) {
   return { path, data, root, cwd, outside, identity, config, save }
 }
 
-it('prints only public identity and the canonical authorized directory without starting processes or changing the ledger', async () => {
+it('returns only public identity and the canonical authorized directory without starting processes or changing the ledger', async () => {
   const f = await fixture()
   const link = join(f.root, 'link')
   await symlink(f.cwd, link, 'junction')
@@ -84,19 +84,16 @@ it('prints only public identity and the canonical authorized directory without s
   const before = await readFile(join(f.data, 'node.db'))
   // SQLite 的只读 WAL 连接可创建 -wal/-shm，业务文件与数据库内容保持不变。
   const files = (await readdir(f.data)).filter((name) => !['node.db-wal', 'node.db-shm'].includes(name))
-  const output = vi.spyOn(console, 'log').mockImplementation(() => undefined)
-  await runBatondCLI(['desktop-directory', ...args])
-  expect(output).toHaveBeenCalledExactlyOnceWith(
-    JSON.stringify({
-      node_id: f.identity.node_id,
-      employee_id: f.identity.employee_id,
-      coordinator_url: f.identity.coordinator_url,
-      working_directory: await realpath(f.cwd),
-    }),
-  )
+  const saved = await resolveThreadDirectory(f.data, args[1]!)
+  expect(saved).toEqual({
+    node_id: f.identity.node_id,
+    employee_id: f.identity.employee_id,
+    coordinator_url: f.identity.coordinator_url,
+    working_directory: await realpath(f.cwd),
+  })
   expect(await readFile(join(f.data, 'node.db'))).toEqual(before)
   expect((await readdir(f.data)).filter((name) => !['node.db-wal', 'node.db-shm'].includes(name))).toEqual(files)
-  expect(JSON.stringify(output.mock.calls)).not.toContain(f.identity.credential.token)
+  expect(JSON.stringify(saved)).not.toContain(f.identity.credential.token)
 })
 
 it('rejects unknown and local-only Threads even when a local open file names an authorized directory', async () => {
@@ -108,102 +105,81 @@ it('rejects unknown and local-only Threads even when a local open file names an 
     JSON.stringify({ open_config: { ...f.config, thread_id: thread } }),
   )
   for (const id of [thread, randomUUID()])
-    await expect(desktopDirectory(['--thread-id', id, '--data-dir', f.data])).rejects.toMatchObject({
+    await expect(resolveThreadDirectory(f.data, id)).rejects.toMatchObject({
       code: 'thread_unknown',
     })
   const foreign = await f.save(f.cwd, randomUUID())
-  await expect(desktopDirectory(foreign)).rejects.toMatchObject({ code: 'thread_unknown' })
+  await expect(resolveThreadDirectory(f.data, foreign[1]!)).rejects.toMatchObject({ code: 'thread_unknown' })
 })
 
 it('does not create a missing ledger or missing data directory', async () => {
   const f = await fixture(false)
   const files = await readdir(f.data)
-  await expect(desktopDirectory(['--thread-id', randomUUID(), '--data-dir', f.data])).rejects.toMatchObject({
+  await expect(resolveThreadDirectory(f.data, randomUUID())).rejects.toMatchObject({
     code: 'ledger_unavailable',
   })
   expect(await readdir(f.data)).toEqual(files)
   const missing = join(f.path, 'missing')
-  await expect(desktopDirectory(['--thread-id', randomUUID(), '--data-dir', missing])).rejects.toMatchObject({
-    code: 'invalid_arguments',
+  await expect(resolveThreadDirectory(missing, randomUUID())).rejects.toMatchObject({
+    code: 'identity_unavailable',
   })
   await expect(readdir(missing)).rejects.toMatchObject({ code: 'ENOENT' })
-})
-
-it('rejects invalid UUIDs and caller-supplied directories with safe structured errors', async () => {
-  const f = await fixture()
-  const output = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-  const previous = process.exitCode
-  try {
-    for (const args of [
-      ['--thread-id', '../offline-secret', '--data-dir', f.data],
-      ['--thread-id', randomUUID()],
-      ['--data-dir', f.data],
-      ['--thread-id', randomUUID(), '--data-dir', f.data, '--cwd', 'offline-secret'],
-      ['--thread-id', randomUUID(), '--data-dir', f.data, '--working-directory', 'offline-secret'],
-    ]) {
-      const error = await runBatondCLI(['desktop-directory', ...args]).catch((error: unknown) => error)
-      reportBatondError(error, 'desktop-directory')
-      const result = JSON.parse(String(output.mock.calls.at(-1)?.[0]))
-      expect(result).toMatchObject({ ok: false, code: 'invalid_arguments', message: expect.any(String) })
-      expect(result.message).not.toContain('offline-secret')
-      expect(process.exitCode).toBe(1)
-    }
-  } finally {
-    process.exitCode = previous
-  }
 })
 
 it('reports deleted directories as directory_missing and denies files and paths outside current roots', async () => {
   const f = await fixture()
   const missing = await f.save(join(f.cwd, 'missing'))
-  await expect(desktopDirectory(missing)).rejects.toMatchObject({ code: 'directory_missing' })
+  await expect(resolveThreadDirectory(f.data, missing[1]!)).rejects.toMatchObject({ code: 'directory_missing' })
   const file = join(f.cwd, 'file')
   await writeFile(file, '')
-  await expect(desktopDirectory(await f.save(file))).rejects.toMatchObject({ code: 'path_denied' })
-  await expect(desktopDirectory(await f.save(f.outside))).rejects.toMatchObject({ code: 'path_denied' })
+  await expect(resolveThreadDirectory(f.data, (await f.save(file))[1]!)).rejects.toMatchObject({ code: 'path_denied' })
+  await expect(resolveThreadDirectory(f.data, (await f.save(f.outside))[1]!)).rejects.toMatchObject({
+    code: 'path_denied',
+  })
   const args = await f.save(f.cwd)
   await updateBrowseRoots(f.data, { action: 'remove', path: 'work' })
-  await expect(desktopDirectory(args)).rejects.toMatchObject({ code: 'path_denied' })
+  await expect(resolveThreadDirectory(f.data, args[1]!)).rejects.toMatchObject({ code: 'path_denied' })
+})
+
+it('control-daemon returns the authorized directory and rejects a path outside browse roots', async () => {
+  const f = await fixture()
+  const inside = await f.save(f.cwd)
+  await expect(resolveThreadDirectoryResponse(f.data, inside[1]!)).resolves.toMatchObject({
+    ok: true,
+    node_id: f.identity.node_id,
+    employee_id: f.identity.employee_id,
+    coordinator_url: f.identity.coordinator_url,
+    directory: await realpath(f.cwd),
+  })
+  const outside = await f.save(f.outside)
+  await expect(resolveThreadDirectoryResponse(f.data, outside[1]!)).resolves.toMatchObject({
+    ok: false,
+    code: 'path_denied',
+  })
 })
 
 it('denies symlink escapes and an authorized root replaced by a symlink', async () => {
   const f = await fixture()
   const link = join(f.root, 'escape')
   await symlink(f.outside, link, 'junction')
-  await expect(desktopDirectory(await f.save(link))).rejects.toMatchObject({ code: 'path_denied' })
+  await expect(resolveThreadDirectory(f.data, (await f.save(link))[1]!)).rejects.toMatchObject({ code: 'path_denied' })
   const args = await f.save(f.cwd)
   await mkdir(join(f.outside, 'repo'))
   await rename(f.root, join(f.path, 'original-work'))
   await symlink(f.outside, f.root, 'junction')
-  await expect(desktopDirectory(args)).rejects.toMatchObject({ code: 'path_denied' })
+  await expect(resolveThreadDirectory(f.data, args[1]!)).rejects.toMatchObject({ code: 'path_denied' })
 })
 
 it('sanitizes unreadable identity and corrupt ledger errors', async () => {
   const f = await fixture(false)
   await writeFile(join(f.data, 'node.db'), 'offline-secret-corrupt-ledger')
-  const args = ['--thread-id', randomUUID(), '--data-dir', f.data]
-  await expect(desktopDirectory(args)).rejects.toMatchObject({
+  await expect(resolveThreadDirectory(f.data, randomUUID())).rejects.toMatchObject({
     code: 'ledger_unavailable',
     message: '无法读取已有节点账本',
   })
   await writePrivateFileAtomic(join(f.data, 'identity.json'), 'offline-secret-corrupt-identity')
-  await expect(desktopDirectory(args)).rejects.toMatchObject({
+  await expect(resolveThreadDirectory(f.data, randomUUID())).rejects.toMatchObject({
     code: 'identity_unavailable',
     message: '无法读取已注册的节点身份',
   })
 })
-
-it.each(['directory_missing', 'path_denied', 'thread_unknown'] as const)(
-  'preserves %s through reportBatondError',
-  (code) => {
-    const output = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    const previous = process.exitCode
-    try {
-      reportBatondError(new DesktopDirectoryError(code, '无法查询工作目录'), 'desktop-directory')
-      expect(output).toHaveBeenCalledExactlyOnceWith(JSON.stringify({ ok: false, code, message: '无法查询工作目录' }))
-      expect(process.exitCode).toBe(1)
-    } finally {
-      process.exitCode = previous
-    }
-  },
-)

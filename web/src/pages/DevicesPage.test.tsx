@@ -251,56 +251,68 @@ function desktopPage(initial = createDesktopBridge()) {
   }
 }
 
-it('offers local setup and tracks desktop updates, including external ownership and rejection reasons', async () => {
+it('tracks desktop status and shows the rejection reason', async () => {
   const f = desktopPage()
   const view = f.show()
-  await screen.findByRole('button', { name: '连接此电脑' })
+  await screen.findByRole('button', { name: '连接这台电脑' })
   expect(screen.queryByRole('button', { name: '连接设备' })).not.toBeInTheDocument()
   await act(async () => f.desktop.publish(registeredDesktop))
   await waitFor(() => expect(screen.getByRole('region', { name: '此电脑' })).toHaveTextContent('在线'))
-  expect(screen.queryByRole('button', { name: '连接此电脑' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '连接这台电脑' })).not.toBeInTheDocument()
   await act(async () =>
-    f.desktop.publish({ ...registeredDesktop, state: 'external', connection_state: 'rejected', code: 'needs_reauth' }),
-  )
-  await waitFor(() => expect(screen.getByRole('region', { name: '此电脑' })).toHaveTextContent('由外部服务管理'))
-  expect(screen.getByText('此电脑的登录已过期。')).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: '重新连接此电脑' })).toBeInTheDocument()
-  await act(async () =>
-    f.desktop.publish({ ...registeredDesktop, state: 'rejected', code: 'node_version_incompatible' }),
+    f.desktop.publish({
+      ...registeredDesktop,
+      state: 'rejected',
+      rejection: {
+        code: 'node_version_incompatible',
+        message: '请从 Baton 下载最新的桌面客户端。',
+        at: new Date().toISOString(),
+      },
+    }),
   )
   await waitFor(() => expect(screen.getByRole('region', { name: '此电脑' })).toHaveTextContent('连接被拒绝'))
   expect(screen.getByText('请从 Baton 下载最新的桌面客户端。')).toBeInTheDocument()
-  await act(async () => f.desktop.publish({ ...registeredDesktop, state: 'rejected', message: 'Certificate expired.' }))
+  await act(async () =>
+    f.desktop.publish({
+      ...registeredDesktop,
+      state: 'rejected',
+      rejection: { code: 'unauthorized', message: 'Certificate expired.', at: new Date().toISOString() },
+    }),
+  )
   expect(await screen.findByText('Certificate expired.')).toBeInTheDocument()
   view.unmount()
   expect(f.desktop.listeners.size).toBe(0)
 })
 
-it('reauthenticates the local idle-expired device using the current account API and bridge identity', async () => {
-  const f = desktopPage(createDesktopBridge(registeredDesktop))
-  const list = await f.client.listDevices()
-  vi.spyOn(f.client, 'listDevices').mockResolvedValue(
-    list.map((device) => (device.id === 'dev-mac' ? { ...device, credentialState: 'idle_expired' } : device)),
-  )
-  const create = vi.spyOn(f.client, 'createEnrollment')
-  f.desktop.bridge.reauth.mockResolvedValue(registeredDesktop)
+it('connects this computer with a device login code', async () => {
+  const f = desktopPage()
+  const approve = vi.spyOn(f.client, 'approveDeviceLoginSession')
   f.show()
-  await f.user.click(await screen.findByRole('button', { name: '重新连接此电脑' }))
-  await f.user.click(await screen.findByRole('button', { name: '重新连接' }))
-  await waitFor(() => expect(f.desktop.bridge.reauth).toHaveBeenCalledTimes(1))
-  expect(create).toHaveBeenCalledWith('dev-mac')
-  const issued = await create.mock.results[0]!.value
-  expect(document.body).not.toHaveTextContent(issued.code)
-  expect(f.desktop.bridge.enroll).not.toHaveBeenCalled()
+  await f.user.click(await screen.findByRole('button', { name: '连接这台电脑' }))
+  const dialog = await screen.findByRole('dialog', { name: '连接这台电脑' })
+  expect(await within(dialog).findByText('ABCD-EFGH')).toBeInTheDocument()
+  expect(await within(dialog).findByText('Build server')).toBeInTheDocument()
+  expect(within(dialog).getByText('Linux')).toBeInTheDocument()
+  expect(f.desktop.bridge.startLogin).toHaveBeenCalledWith({})
+  expect(within(dialog).getByText('10 分钟内有效')).toBeInTheDocument()
+  expect(document.body).not.toHaveTextContent('device_code')
+  await f.user.click(within(dialog).getByRole('button', { name: '允许登录' }))
+  await waitFor(() => expect(approve).toHaveBeenCalledWith('device-login-session', 'ABCD-EFGH'))
+  expect(within(dialog).getByText('已允许登录，正在完成连接。可以关闭此窗口。')).toBeInTheDocument()
+  await act(async () => f.desktop.publish(registeredDesktop))
+  await waitFor(() => expect(within(dialog).getByRole('status')).toHaveTextContent('此电脑已连接。'))
+  expect(document.body).not.toHaveTextContent('device_code')
 })
 
-it('opens local setup with an editable, empty device name', async () => {
+it('cancels a pending device login when the dialog closes', async () => {
   const f = desktopPage()
   f.show()
-  await f.user.click(await screen.findByRole('button', { name: '连接此电脑' }))
-  expect(await screen.findByRole('dialog', { name: '连接此电脑' })).toBeInTheDocument()
-  expect(screen.getByLabelText('设备名称')).toHaveValue('')
-  expect(screen.queryByLabelText('在终端运行')).not.toBeInTheDocument()
+  await f.user.click(await screen.findByRole('button', { name: '连接这台电脑' }))
+  const dialog = await screen.findByRole('dialog', { name: '连接这台电脑' })
+  await within(dialog).findByText('ABCD-EFGH')
+  await f.user.click(within(dialog).getByRole('button', { name: '取消' }))
+  await waitFor(() => expect(f.desktop.bridge.cancelLogin).toHaveBeenCalledTimes(1))
+  expect(screen.queryByRole('dialog', { name: '连接这台电脑' })).not.toBeInTheDocument()
 })
 
 it('retries failed status reads and ignores an older initial read after a status notification', async () => {
@@ -317,7 +329,7 @@ it('retries failed status reads and ignores an older initial read after a status
   )
   await f.user.click(screen.getByRole('button', { name: '重试' }))
   await act(async () => f.desktop.publish(registeredDesktop))
-  await act(async () => finish({ registered: false, state: 'unregistered' }))
+  await act(async () => finish({ registered: false, state: 'unbound' }))
   await waitFor(() => expect(screen.getByRole('region', { name: '此电脑' })).toHaveTextContent('在线'))
   expect(screen.queryByRole('button', { name: '连接此电脑' })).not.toBeInTheDocument()
 })

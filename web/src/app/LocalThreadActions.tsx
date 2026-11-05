@@ -18,7 +18,7 @@ export function LocalThreadActions({ thread }: { thread: Pick<Thread, 'id' | 'de
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   if (!bridge?.openLocal || !status?.registered) return null
-  const revealLabel = /windows|win32/i.test(status.system) ? '在文件资源管理器中显示' : '在 Finder 中显示'
+  const revealLabel = /windows|win32/i.test(status.platform ?? '') ? '在文件资源管理器中显示' : '在 Finder 中显示'
   const open = async (action: 'reveal' | 'editor') => {
     if (pending) return
     setError(null)

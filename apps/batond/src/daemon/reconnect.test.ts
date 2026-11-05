@@ -18,7 +18,6 @@ import type { ProjectManager } from '../project/types.ts'
 import { makeNodeLedger } from './ledger.ts'
 import { reportBatondError } from '../cli.ts'
 import { acquireProcessLock } from '../platform/lock.ts'
-import { DeploymentInvalid } from './deployment.ts'
 import { NeedsReauthentication } from './daemon.ts'
 import { startTelemetryRelay } from './telemetry-relay.ts'
 
@@ -1039,9 +1038,11 @@ it.each(['invalid_node_credential', 'node_source_rejected', 'credential_revoked'
     )
     expect(daemon.failure()).toBeUndefined()
     expect(connections).toBe(1)
-    const status = await readFile(join(path, 'daemon-status.json'), 'utf8')
-    expect(JSON.parse(status)).toMatchObject({ pid: process.pid, state: 'rejected', code })
-    expect(status).not.toContain(id.credential.token)
+    await vi.waitFor(async () => {
+      const status = await readFile(join(path, 'daemon-status.json'), 'utf8')
+      expect(JSON.parse(status)).toMatchObject({ pid: process.pid, state: 'rejected', code })
+      expect(status).not.toContain(id.credential.token)
+    })
     expect(await controlClient.shutdown()).toEqual({ ok: true })
     await daemon.running
   },
@@ -1126,7 +1127,6 @@ it('maps daemon lock contention and deployment/authentication failures to public
     for (const [error, code, exit] of [
       [daemon.failure(), 'daemon_running', 1],
       [new NeedsReauthentication(), 'credential_revoked', 1],
-      [new DeploymentInvalid(), 'deployment_invalid', 1],
     ] as const) {
       reportBatondError(error, 'run')
       expect(JSON.parse(String(output.mock.lastCall?.[0]))).toMatchObject({ code })

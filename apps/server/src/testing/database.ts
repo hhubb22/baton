@@ -9,6 +9,8 @@ import { spawnSync } from 'node:child_process'
 import type * as P from '@baton/protocol'
 import { createDatabaseRuntime, migrateDatabase } from '../database.ts'
 import type { NodeSource } from '../errors.ts'
+import * as DeviceAuth from '../device-auth.ts'
+import type { CredentialSigner, NodeIdentity } from '../nodes.ts'
 
 const defaultURL = 'postgres://postgres:baton@127.0.0.1:5432/baton_test?sslmode=disable'
 let localPostgres: Promise<void> | undefined
@@ -159,4 +161,37 @@ export async function seedNode(run: TestDatabase['run'], overrides: SeedNodeOver
     }),
   )
   return { employeeId, nodeId, credentialId, source }
+}
+
+export interface SeedNodeIdentityOverrides {
+  readonly employeeId?: string
+  readonly displayName?: string
+  readonly system?: 'macos' | 'linux' | 'windows'
+}
+
+/** Creates a real device-login identity so integration tests use the only device setup path. */
+export async function seedNodeIdentity(
+  run: TestDatabase['run'],
+  signer: CredentialSigner,
+  overrides: SeedNodeIdentityOverrides = {},
+) {
+  const employeeId = overrides.employeeId ?? randomUUID()
+  await run(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`INSERT INTO employees(id,username,display_name,auth_source,external_subject,must_change_password,created_at,updated_at) VALUES(${employeeId},${'u' + employeeId.replaceAll('-', '')},'Employee','test',${employeeId},false,now(),now()) ON CONFLICT (id) DO NOTHING`
+    }),
+  )
+  const session = await run(
+    DeviceAuth.createSession(
+      { display_name: overrides.displayName ?? 'Device', system: overrides.system ?? 'linux' },
+      'https://center.test',
+    ),
+  )
+  await run(DeviceAuth.approveSession(employeeId, session.session_id, session.user_code))
+  const result = await run(
+    DeviceAuth.token({ session_id: session.session_id, device_code: session.device_code }, signer),
+  )
+  if (result.status !== 'approved') throw new Error('device login did not issue an identity')
+  return { employeeId, identity: result.identity as NodeIdentity }
 }

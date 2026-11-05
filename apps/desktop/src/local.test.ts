@@ -11,6 +11,7 @@ const employee = '22222222-2222-4222-8222-222222222222'
 const thread = '33333333-3333-4333-8333-333333333333'
 const other = '44444444-4444-4444-8444-444444444444'
 const identity = { node_id: node, employee_id: employee, coordinator_url: 'https://center.test' }
+const savedIdentity = { ...identity, state: 'online' as const, registered: true }
 const info = {
   clientVersion: '1',
   batondVersion: '1',
@@ -36,15 +37,17 @@ function fixture(path = '/missing-folder') {
 }
 
 it('requires the authenticated center employee to own the local identity', () => {
-  const saved = { ...identity, registered: true as const, display_name: 'Local', system: 'macos' }
+  const saved = { ...savedIdentity, display_name: 'Local' }
   expect(localAccount(saved, identity.coordinator_url, employee)).toEqual(identity)
   expect(() => localAccount(saved, identity.coordinator_url, other)).toThrow('Sign in')
   expect(() => localAccount(saved, 'https://other.test', employee)).toThrow('Sign in')
-  expect(() => localAccount({ registered: false }, identity.coordinator_url, employee)).toThrow('请先连接')
+  expect(() => localAccount({ state: 'unbound', registered: false }, identity.coordinator_url, employee)).toThrow(
+    '请先连接',
+  )
 })
 
 it('declares all three versioned local capabilities', () => {
-  for (const name of ['open-local', 'pick-directory', 'diagnostics', 'model-connection-key'])
+  for (const name of ['open-local', 'pick-directory', 'diagnostics', 'model-connection-key', 'device-login'])
     expect(desktopCapabilities).toContainEqual({ name, version: 1 })
 })
 

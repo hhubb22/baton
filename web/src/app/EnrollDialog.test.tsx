@@ -8,8 +8,6 @@ import { EnrollDialog } from './EnrollDialog'
 
 function setup(scenario: ScenarioId = 'downloads') {
   const client = createMockClient(scenario, { latency: { read: 0, save: 0, device: 0, run: 8000 } })
-  const create = vi.spyOn(client, 'createEnrollment')
-  const poll = vi.spyOn(client, 'getEnrollment')
   const renderDialog = async () => {
     render(
       <ClientProvider client={client}>
@@ -18,7 +16,7 @@ function setup(scenario: ScenarioId = 'downloads') {
     )
     await screen.findByLabelText('在终端运行')
   }
-  return { client, create, poll, renderDialog }
+  return { client, renderDialog }
 }
 
 describe('device setup downloads', () => {
@@ -42,11 +40,9 @@ describe('device setup downloads', () => {
     expect(screen.getByLabelText('在终端运行').textContent).toBe(
       `tar xzf '${file}' && cd 'baton-v0.1.0-${target}' &&\n./batond login --coordinator '${window.location.origin}' &&\n./batond service install`,
     )
-    expect(document.body.textContent).not.toMatch(/ENROLLMENT_TOKEN|register|reauth|--ca-file|--cacert|curl -k/)
+    expect(document.body.textContent).not.toMatch(/ENROLLMENT_TOKEN|register|--ca-file|--cacert|curl -k/)
     expect(screen.queryByLabelText('设置码')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('设备名称')).not.toBeInTheDocument()
-    expect(f.create).not.toHaveBeenCalled()
-    expect(f.poll).not.toHaveBeenCalled()
     if (os === 'macOS')
       expect(screen.getByRole('link', { name: '下载桌面客户端 · arm64' })).toHaveAttribute(
         'href',
@@ -78,7 +74,6 @@ describe('device setup downloads', () => {
     expect(screen.getByText(/安装桌面客户端/)).toBeInTheDocument()
     expect(screen.queryByLabelText('在终端运行')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('在终端下载')).not.toBeInTheDocument()
-    expect(f.create).not.toHaveBeenCalled()
   })
 
   it('shows login commands for an existing CLI when downloads are disabled', async () => {
@@ -106,7 +101,7 @@ describe('device setup downloads', () => {
     expect(screen.getByText('暂无适用于 Windows 的桌面客户端下载。')).toBeInTheDocument()
   })
 
-  it('retries a failed download query without issuing a setup code', async () => {
+  it('retries a failed download query without starting device login', async () => {
     const user = userEvent.setup()
     const f = setup()
     vi.spyOn(f.client, 'getDownloads').mockRejectedValueOnce(new Error('unavailable'))
@@ -119,6 +114,5 @@ describe('device setup downloads', () => {
     expect(screen.queryByLabelText('在终端运行')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '重试' }))
     await waitFor(() => expect(screen.getByLabelText('在终端运行')).toHaveTextContent('./batond login'))
-    expect(f.create).not.toHaveBeenCalled()
   })
 })

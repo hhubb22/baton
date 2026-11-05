@@ -93,9 +93,9 @@ Linux 需要有效的 `XDG_RUNTIME_DIR` 和 systemd 用户实例；`status` 还�
 
 ### 桌面客户端
 
-`apps/desktop` 提供 macOS arm64 和 Windows x64 客户端，内置 batond。首次启动显示本地说明页，收到 `baton://connect` 接入链接后显示中心地址与 CA 指纹，经确认才保存并打开中心页面。已有同一中心的 CLI 身份直接沿用，已有外部 daemon 时显示由外部服务运行。
+`apps/desktop` 提供 macOS arm64 和 Windows x64 客户端，内置 batond。首次启动显示本地说明页，从中心页面通过 `baton://connect?url=<HTTPS 源>` 接入链接传入中心地址，经确认后保存到 `userData/coordinator.json` 并打开中心页面；链接不包含证书或秘密，已有其他中心的设备身份时拒绝替换。
 
-客户端关闭窗口后留在托盘，默认登录启动，可从托盘关闭该选项或退出。数据目录与 CLI 共用 `~/.baton/data`，替换应用保留身份与配置。Devices 页面的「Open in desktop app」生成接入链接；客户端桥接、构建和验证范围见 [桌面客户端文档](apps/desktop/README.md)，DMG/NSIS 打包见 [工具说明](tools/README.md#桌面客户端)。
+客户端通过本地控制通道查询按需拉起的 batond，不自己监管子进程。Devices 页面在本机未绑定时显示「连接这台电脑」，点击后在窗口内展示设备短码，员工确认即完成绑定。关闭窗口后留在托盘，默认登录启动，可从托盘关闭该选项或退出。退出时若未安装 CLI 用户服务，先通知 batond 正常停止再退出；已安装用户服务时只退出客户端。数据目录与 CLI 共用 `~/.baton/data`，替换应用保留身份与配置。网页的「在桌面客户端打开」生成接入链接；客户端桥接、构建和验证范围见 [桌面客户端文档](apps/desktop/README.md)，DMG/NSIS 打包见 [工具说明](tools/README.md#桌面客户端)。
 
 ### 设备升级
 
@@ -143,7 +143,6 @@ node apps/batond/dist/batond.cjs project-runtime connection-key <连接 ID> < ke
 | `BATON_WEB_DIR` | 中心 | 网页目录，默认 bundle 旁的 `web/` |
 | `BATON_DOWNLOADS_DIR` | 中心 | 发布安装包与同名 `.sha256` 所在目录；未配置时不提供下载 |
 | `BATON_SESSION_TTL` | 中心 | 浏览器会话期限，默认 `12h`，范围 5 分钟至 7 天 |
-| `BATON_ENROLLMENT_TTL` | 中心 | 一次性注册凭据期限，默认 `10m`，范围 1 分钟至 24 小时 |
 | `BATON_HEARTBEAT_INTERVAL` | 中心 | 连接检查间隔，默认 `10s`，范围 100 ms 至 2 分钟 |
 | `BATON_OFFLINE_AFTER` | 中心 | 设备离线期限，默认 `30s`，范围 200 ms 至 10 分钟，须大于心跳间隔 |
 | `BATON_PROJECT_RUNTIME_DATA_DIR` | 节点 / Runtime | 模型凭据目录，默认 `~/.baton/data/credentials` |

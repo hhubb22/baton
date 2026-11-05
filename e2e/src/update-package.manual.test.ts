@@ -12,10 +12,12 @@ import { expect, test } from 'vite-plus/test'
 import * as Auth from '@baton/server/auth'
 import * as Nodes from '@baton/server/nodes'
 import { startServer } from '@baton/server/server'
-import { openTestDatabase } from '@baton/server/testing/database'
+import { openTestDatabase, seedNodeIdentity } from '@baton/server/testing/database'
 import { identityMatches } from '@baton/batond/platform/identity'
+import { saveDeviceIdentity } from '@baton/batond/daemon/identity'
+import { initializeBrowseRoots } from '@baton/batond/devices/roots'
 import { updatePayloadBytes, type UpdatePayload } from '@baton/protocol/update-manifest'
-import type { NodeStatus, EnrollmentResponse } from '@baton/protocol'
+import type { NodeStatus } from '@baton/protocol'
 
 const execute = promisify(execFile)
 
@@ -35,14 +37,6 @@ test('signed SEA package updates through local HTTPS and PostgreSQL with the sam
     assets = join(directory, 'assets'),
     home = join(directory, 'home')
   await Promise.all([mkdir(data, { mode: 0o700 }), mkdir(assets), mkdir(home)])
-  const environment = {
-    HOME: home,
-    PATH: '/usr/bin:/bin',
-    LANG: 'en_US.UTF-8',
-    ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-  }
-  const run = (file: string, args: string[]) =>
-    execute(file, args, { env: environment, timeout: 60000, maxBuffer: 2 * 1024 * 1024 })
   const pair = generateKeyPairSync('ed25519')
   const archiveName = `baton-${newRelease.version}-${newRelease.platform}-${newRelease.arch}.tar.gz`
   await execute('tar', ['-czf', join(assets, archiveName), '-C', resolve(target, '..'), basename(target)], {
@@ -81,6 +75,16 @@ test('signed SEA package updates through local HTTPS and PostgreSQL with the sam
   )
   const key = join(directory, 'tls.key'),
     cert = join(directory, 'tls.pem')
+
+  const environment = {
+    HOME: home,
+    PATH: '/usr/bin:/bin',
+    LANG: 'en_US.UTF-8',
+    NODE_EXTRA_CA_CERTS: cert,
+    ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+  }
+  const run = (file: string, args: string[]) =>
+    execute(file, args, { env: environment, timeout: 60000, maxBuffer: 2 * 1024 * 1024 })
   await execute('openssl', [
     'req',
     '-x509',
@@ -106,11 +110,12 @@ test('signed SEA package updates through local HTTPS and PostgreSQL with the sam
   let proxy: ReturnType<typeof createServer> | undefined
   try {
     const origin = 'https://baton.local'
+    const signer = Nodes.CredentialSigner.generate()
     const server = await database.run(
       startServer({
         port: 0,
         allowedOrigins: [origin],
-        signer: Nodes.CredentialSigner.generate(),
+        signer,
         dispatchMs: 20,
         heartbeatMs: 1000,
         offlineMs: 5000,
@@ -170,23 +175,14 @@ test('signed SEA package updates through local HTTPS and PostgreSQL with the sam
     await browser('/login', 'POST', { username: 'packagealice', password })
     await browser('/me/password', 'POST', { current_password: password, new_password: `${password}-changed` })
     await browser('/login', 'POST', { username: 'packagealice', password: `${password}-changed` })
-    const enrollment = await browser<EnrollmentResponse>('/node-enrollments', 'POST', {})
-    const enrollmentFile = join(directory, 'enrollment')
-    await writeFile(enrollmentFile, enrollment.enrollment_token, { mode: 0o600 })
-    const registered = await run(join(source, binary), [
-      'register',
-      '--data-dir',
-      data,
-      '--coordinator',
-      `https://127.0.0.1:${address.port}`,
-      '--ca-file',
-      cert,
-      '--enrollment-file',
-      enrollmentFile,
-      '--workspace',
-      directory,
-    ])
-    const nodeId = JSON.parse(registered.stdout).node_id as string
+    const me = await browser<{ employee: { id: string } }>('/me')
+    const issued = await seedNodeIdentity(database.run, signer, {
+      employeeId: me.employee.id,
+      displayName: 'Package workstation',
+    })
+    await saveDeviceIdentity(data, issued.identity, `https://127.0.0.1:${address.port}`)
+    await initializeBrowseRoots(data, directory)
+    const nodeId = issued.identity.node_id
     await run(join(source, binary), ['update', 'bootstrap', '--data-dir', data])
     const launcher = join(data, 'installation', 'launcher', binary)
     const child = spawn(launcher, ['dispatch', '--data-dir', data, '--', 'run', '--data-dir', data], {

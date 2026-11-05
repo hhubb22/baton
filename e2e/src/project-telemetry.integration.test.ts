@@ -12,10 +12,10 @@ import * as P from '@baton/protocol'
 import { telemetryEnvironment, telemetryLayer } from '@baton/telemetry'
 import { createDatabaseRuntime } from '@baton/server/database'
 import { startServer } from '@baton/server/server'
-import { openTestDatabase } from '@baton/server/testing/database'
+import { openTestDatabase, seedNodeIdentity } from '@baton/server/testing/database'
 import * as Auth from '@baton/server/auth'
 import * as Nodes from '@baton/server/nodes'
-import { registerNode } from '@baton/batond/daemon/identity'
+import { saveDeviceIdentity } from '@baton/batond/daemon/identity'
 import { runDaemon } from '@baton/batond/daemon/daemon'
 import { connectWebSocket } from '@baton/batond/daemon/transport'
 import { startTelemetryRelay } from '@baton/batond/daemon/telemetry-relay'
@@ -68,11 +68,12 @@ test('exports the center placement and real Project Runtime model call in one tr
   let daemon: Promise<unknown> | undefined
   const trace = 'c'.repeat(32)
   try {
+    const signer = Nodes.CredentialSigner.generate()
     const running = await runtime.runPromise(
       startServer({
         port: 0,
         allowedOrigins: ['https://baton.local'],
-        signer: Nodes.CredentialSigner.generate(),
+        signer,
         telemetryEnv,
         dispatchMs: 20,
         projectDispatchMs: 20,
@@ -109,22 +110,12 @@ test('exports the center placement and real Project Runtime model call in one tr
       new_password: 'local-updated-password-456',
     })
     await request('/login', 'POST', { username: 'tracing', password: 'local-updated-password-456' })
-    const enrollment = await request<P.EnrollmentResponse>('/node-enrollments', 'POST', {})
-    const enrollmentFile = join(directory, 'enrollment')
-    await writeFile(enrollmentFile, enrollment.body.enrollment_token, { mode: 0o600 })
-    const identity = await registerNode({
-      dataDirectory: nodeDirectory,
-      coordinatorURL: `https://127.0.0.1:${running.port}`,
-      enrollmentFile,
-      transport: async (_url, input) =>
-        (
-          await fetch(`${base}/api/v1/nodes/register`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(input),
-          })
-        ).json(),
+    const me = await request<{ employee: { id: string } }>('/me')
+    const issued = await seedNodeIdentity(database.run, signer, {
+      employeeId: me.body.employee.id,
+      displayName: 'Tracing node',
     })
+    const identity = await saveDeviceIdentity(nodeDirectory, issued.identity, `https://127.0.0.1:${running.port}`)
     await writeFile(join(nodeDirectory, 'project-runtime.json'), JSON.stringify({ maxModelCalls: 1 }), { mode: 0o600 })
     const entry = new URL(import.meta.resolve('@baton/project-agent-runtime/testing/tracing-worker'))
     const loader = createRequire(entry).resolve('tsx')

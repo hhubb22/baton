@@ -12,7 +12,6 @@ import { link, lstat, mkdir, open, unlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
   RuntimeReport,
-  ReauthNodeInput,
   NodeUpgradeStateRequest,
   type NodeUpgradeState,
   type NodeUpgradeStateResult,
@@ -20,10 +19,9 @@ import {
 import { Effect, Schema } from 'effect'
 import { waitEvent } from '@baton/telemetry'
 import * as SqlClient from 'effect/sql/SqlClient'
-import { digest, hasControlCharacters, newSecret } from './auth.ts'
+import { hasControlCharacters } from './auth.ts'
 import { type DatabaseEffect, dbError } from './database.ts'
 import { AppError, type NodeSource } from './errors.ts'
-import { digest as requestDigest } from './json.ts'
 import { recordDeviceRejection } from './desktop-notifications.ts'
 
 export interface NodeClaims {
@@ -34,13 +32,11 @@ export interface NodeClaims {
   readonly credential_version?: number
 }
 
-export interface RegisterInput {
-  readonly enrollment_token: string
+export interface SyncInput {
   readonly display_name: string
   readonly system: string
   readonly capabilities: readonly string[] | null
 }
-export type SyncInput = Omit<RegisterInput, 'enrollment_token'>
 
 export interface NodeIdentity extends SyncInput {
   readonly node_id: string
@@ -251,245 +247,6 @@ function validateSource(source: NodeSource): void {
   )
     throw rejectedSource()
 }
-
-export const issueEnrollment = (employeeId: string, ttlSeconds = 600): DatabaseEffect<Record<string, unknown>> =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    if (!Number.isInteger(ttlSeconds) || ttlSeconds < 1 || ttlSeconds > 86400) {
-      return yield* Effect.fail(new AppError(400, 'invalid_ttl', '注册凭据有效期无效'))
-    }
-    const id = randomUUID(),
-      token = newSecret()
-    const rows = yield* sql<{ expires_at: Date; expires_in_ms: number }>`INSERT INTO node_enrollments
-      (id, employee_id, token_hash, created_at, expires_at)
-      VALUES (${id}::uuid, ${employeeId}::uuid, ${digest(token)}, now(), clock_timestamp()+${ttlSeconds}*interval '1 second')
-      RETURNING expires_at, GREATEST(0, EXTRACT(epoch FROM expires_at-clock_timestamp())*1000)::float8 AS expires_in_ms`
-    return {
-      enrollment_id: id,
-      enrollment_token: token,
-      expires_at: rows[0].expires_at.toISOString(),
-      expires_in_ms: Math.floor(rows[0].expires_in_ms),
-    }
-  }).pipe(Effect.mapError(dbError))
-
-export const issueReauthEnrollment = (employeeId: string, nodeId: string): DatabaseEffect<Record<string, unknown>> =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    return yield* sql.withTransaction(
-      Effect.gen(function* () {
-        const nodes =
-          yield* sql`SELECT id FROM nodes WHERE id=${nodeId}::uuid AND employee_id=${employeeId}::uuid AND revoked_at IS NULL FOR UPDATE`
-        if (!nodes.length) return yield* Effect.fail(forbidden())
-        const enrollment = yield* issueEnrollment(employeeId)
-        yield* sql`UPDATE node_enrollments SET target_node_id=${nodeId}::uuid WHERE id=${enrollment.enrollment_id as string}::uuid`
-        return enrollment
-      }),
-    )
-  }).pipe(Effect.mapError(dbError))
-
-export const reauthenticateNode = (
-  nodeId: string,
-  input: typeof ReauthNodeInput.Type,
-  signer: CredentialSigner,
-): DatabaseEffect<NodeIdentity> =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    const request = yield* Effect.try({
-      try: () => Schema.decodeUnknownSync(ReauthNodeInput)(input),
-      catch: () => new AppError(400, 'invalid_request'),
-    })
-    const previous = yield* Effect.try({ try: () => signer.verify(request.previous_token), catch: dbError })
-    if (previous.node_id !== nodeId) return yield* Effect.fail(forbidden())
-    const hash = requestDigest({ node_id: nodeId, ...request })
-    return yield* sql.withTransaction(
-      Effect.gen(function* () {
-        const [node] = yield* sql<{
-          employee_id: string
-          display_name: string
-          system_name: string
-          capabilities: string[]
-          registration_seq: number
-          registered_at: Date
-          credential_version: number
-        }>`SELECT employee_id::text,display_name,system_name,capabilities,registration_seq::float8,registered_at,credential_version FROM nodes WHERE id=${nodeId}::uuid AND employee_id=${previous.employee_id}::uuid AND revoked_at IS NULL FOR UPDATE`
-        if (!node) return yield* Effect.fail(forbidden())
-        const [current] = yield* sql<{
-          id: string
-        }>`SELECT id::text FROM node_credentials WHERE node_id=${nodeId}::uuid AND version=${node.credential_version} AND revoked_at IS NULL FOR UPDATE`
-        if (!current) return yield* Effect.fail(rejectedSource())
-        const [presence] = yield* sql<{
-          online: boolean
-        }>`SELECT online FROM node_presence WHERE node_id=${nodeId}::uuid FOR UPDATE`
-        if (presence?.online)
-          return yield* Effect.fail(new AppError(409, 'incarnation_conflict', '请先停止原设备的 batond，再重新认证'))
-        const [enrollment] = yield* sql<{
-          id: string
-          employee_id: string
-          target_node_id: string | null
-          used_at: Date | null
-          expired: boolean
-          operation_id: string | null
-          request_hash: Uint8Array | null
-          issued_credential_id: string | null
-        }>`SELECT id::text,employee_id::text,target_node_id::text,used_at,expires_at<=clock_timestamp() AS expired,operation_id::text,request_hash,issued_credential_id::text FROM node_enrollments WHERE token_hash=${digest(request.enrollment_token)} FOR UPDATE`
-        if (!enrollment || enrollment.employee_id !== previous.employee_id || enrollment.target_node_id !== nodeId)
-          return yield* Effect.fail(new AppError(401, 'invalid_enrollment', '重新认证凭据与原设备不匹配'))
-        if (enrollment.used_at) {
-          if (
-            enrollment.operation_id !== request.operation_id ||
-            !enrollment.request_hash ||
-            !Buffer.from(enrollment.request_hash).equals(hash)
-          )
-            return yield* Effect.fail(new AppError(409, 'reauth_conflict', '重新认证操作与原请求不一致'))
-          if (enrollment.issued_credential_id !== current.id) return yield* Effect.fail(rejectedSource())
-        } else {
-          if (current.id !== previous.credential_id) return yield* Effect.fail(rejectedSource())
-          const duplicate = yield* sql`SELECT id FROM node_enrollments WHERE operation_id=${request.operation_id}::uuid`
-          if (duplicate.length) return yield* Effect.fail(new AppError(409, 'reauth_conflict'))
-          const consumed =
-            yield* sql`UPDATE node_enrollments SET used_at=clock_timestamp(),device_id=${nodeId}::uuid,operation_id=${request.operation_id}::uuid,request_hash=${hash},previous_credential_id=${previous.credential_id}::uuid,issued_credential_id=${randomUUID()}::uuid WHERE id=${enrollment.id}::uuid AND expires_at>clock_timestamp() RETURNING issued_credential_id`
-          if (enrollment.expired || !consumed.length)
-            return yield* Effect.fail(new AppError(401, 'enrollment_expired', '重新认证凭据已过期'))
-          yield* sql`UPDATE node_credentials SET revoked_at=clock_timestamp() WHERE id=${current.id}::uuid`
-          yield* sql`UPDATE nodes SET credential_version=credential_version+1 WHERE id=${nodeId}::uuid`
-          yield* sql`INSERT INTO node_credentials(id,node_id,employee_id,version,created_at,last_business_at,expires_at)
-          SELECT e.issued_credential_id,n.id,n.employee_id,n.credential_version,e.used_at,e.used_at,NULL FROM nodes n JOIN node_enrollments e ON e.id=${enrollment.id}::uuid WHERE n.id=${nodeId}::uuid`
-          yield* sql`UPDATE node_presence SET online=false,synced=false WHERE node_id=${nodeId}::uuid`
-        }
-        const [credential] = yield* sql<{
-          id: string
-          version: number
-          created_at: Date
-        }>`SELECT c.id::text,c.version,c.created_at FROM node_credentials c JOIN node_enrollments e ON e.issued_credential_id=c.id WHERE e.id=${enrollment.id}::uuid`
-        const issuedAt = Math.floor(credential.created_at.getTime() / 1000)
-        const token = signer.sign({
-          node_id: nodeId,
-          employee_id: node.employee_id,
-          credential_id: credential.id,
-          credential_version: credential.version,
-          issued_at: issuedAt,
-        })
-        return {
-          node_id: nodeId,
-          employee_id: node.employee_id,
-          display_name: node.display_name,
-          system: node.system_name,
-          capabilities: node.capabilities,
-          role: 'pc' as const,
-          registration_seq: node.registration_seq,
-          registered_at: node.registered_at.toISOString(),
-          credential: {
-            id: credential.id,
-            version: credential.version,
-            token,
-            expires_at: null,
-          },
-          signing_public_key: signer.signingPublicKey,
-        }
-      }),
-    )
-  }).pipe(
-    Effect.catchTag('SqlError', (error) =>
-      Effect.fail(
-        error.reason._tag === 'UniqueViolation' && error.reason.constraint === 'node_enrollments_operation_id_key'
-          ? new AppError(409, 'reauth_conflict', '重新认证操作与原请求不一致')
-          : dbError(error),
-      ),
-    ),
-    Effect.mapError(dbError),
-  )
-
-export const getEnrollment = (employeeId: string, enrollmentId: string): DatabaseEffect<Record<string, unknown>> =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    if (!uuidPattern.test(enrollmentId)) return yield* Effect.fail(new AppError(404, 'not_found', '找不到注册凭据'))
-    const rows = yield* sql<{
-      id: string
-      device_id: string | null
-      expires_at: Date
-      used: boolean
-      expired: boolean
-      connected: boolean
-      expires_in_ms: number
-    }>`
-      SELECT e.id::text, e.device_id::text, e.expires_at, e.used_at IS NOT NULL AS used,
-        e.expires_at<=clock_timestamp() AS expired, COALESCE(p.online AND p.synced AND n.revoked_at IS NULL,false) AS connected,
-        GREATEST(0, EXTRACT(epoch FROM e.expires_at-clock_timestamp())*1000)::float8 AS expires_in_ms
-      FROM node_enrollments e LEFT JOIN nodes n ON n.id=e.device_id AND n.employee_id=e.employee_id
-      LEFT JOIN node_presence p ON p.node_id=n.id AND p.employee_id=n.employee_id
-      WHERE e.id=${enrollmentId}::uuid AND e.employee_id=${employeeId}::uuid`
-    if (!rows[0]) return yield* Effect.fail(new AppError(404, 'not_found', '找不到注册凭据'))
-    const row = rows[0]
-    return {
-      enrollment_id: row.id,
-      device_id: row.device_id,
-      state: row.used ? (row.connected ? 'connected' : 'used') : row.expired ? 'expired' : 'pending',
-      expires_at: row.expires_at.toISOString(),
-      expires_in_ms: Math.floor(row.expires_in_ms),
-    }
-  }).pipe(Effect.mapError(dbError))
-
-export const registerNode = (input: RegisterInput, signer: CredentialSigner): DatabaseEffect<NodeIdentity> =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    yield* Effect.try({ try: () => validateNode(input), catch: dbError })
-    if (!/^[A-Za-z0-9_-]{20,200}$/.test(input.enrollment_token)) {
-      return yield* Effect.fail(new AppError(401, 'invalid_enrollment', '注册凭据无效'))
-    }
-    return yield* sql.withTransaction(
-      Effect.gen(function* () {
-        const consumed = yield* sql<{ employee_id: string }>`UPDATE node_enrollments SET used_at=clock_timestamp()
-        WHERE token_hash=${digest(input.enrollment_token)} AND target_node_id IS NULL AND used_at IS NULL AND expires_at>clock_timestamp() RETURNING employee_id::text`
-        if (!consumed[0]) {
-          const reason = yield* sql<{ used: boolean; expired: boolean }>`SELECT used_at IS NOT NULL AS used,
-          expires_at<=clock_timestamp() AS expired FROM node_enrollments WHERE token_hash=${digest(input.enrollment_token)}`
-          const code = reason[0]?.used
-            ? 'enrollment_used'
-            : reason[0]?.expired
-              ? 'enrollment_expired'
-              : 'invalid_enrollment'
-          return yield* Effect.fail(new AppError(401, code, '注册凭据无效、已使用或已过期'))
-        }
-        const employeeId = consumed[0].employee_id,
-          nodeId = randomUUID(),
-          credentialId = randomUUID()
-        yield* sql`INSERT INTO employee_settings (employee_id, updated_at) VALUES (${employeeId}::uuid, now()) ON CONFLICT DO NOTHING`
-        yield* sql`SELECT employee_id FROM employee_settings WHERE employee_id=${employeeId}::uuid FOR UPDATE`
-        const nodes = yield* sql<{ registration_seq: number; registered_at: Date }>`INSERT INTO nodes
-        (id, employee_id, display_name, system_name, capabilities, registration_seq, registered_at, credential_version)
-        VALUES (${nodeId}::uuid, ${employeeId}::uuid, ${input.display_name}, ${input.system},
-          ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(input.capabilities ?? [])}::jsonb)), nextval('node_registration_seq'), now(), 1)
-        RETURNING registration_seq::float8, registered_at`
-        yield* sql`INSERT INTO node_credentials (id, node_id, employee_id, version, created_at, expires_at)
-        VALUES (${credentialId}::uuid, ${nodeId}::uuid, ${employeeId}::uuid, 1, now(), NULL)`
-        const token = yield* Effect.try({
-          try: () =>
-            signer.sign({
-              node_id: nodeId,
-              employee_id: employeeId,
-              credential_id: credentialId,
-              credential_version: 1,
-            }),
-          catch: dbError,
-        })
-        yield* sql`UPDATE node_enrollments SET device_id=${nodeId}::uuid WHERE token_hash=${digest(input.enrollment_token)}`
-        yield* sql`UPDATE employee_settings SET default_device_node_id=(SELECT id FROM nodes WHERE employee_id=${employeeId}::uuid
-        AND revoked_at IS NULL ORDER BY registration_seq LIMIT 1), updated_at=now() WHERE employee_id=${employeeId}::uuid AND default_device_node_id IS NULL`
-        return {
-          node_id: nodeId,
-          employee_id: employeeId,
-          display_name: input.display_name,
-          system: input.system,
-          capabilities: [...(input.capabilities ?? [])],
-          role: 'pc' as const,
-          registration_seq: nodes[0].registration_seq,
-          registered_at: nodes[0].registered_at.toISOString(),
-          credential: { id: credentialId, version: 1, token, expires_at: null },
-          signing_public_key: signer.signingPublicKey,
-        }
-      }),
-    )
-  }).pipe(Effect.mapError(dbError))
 
 export const authenticateNode = (token: string, signer: CredentialSigner): DatabaseEffect<NodeClaims> =>
   Effect.gen(function* () {

@@ -1,145 +1,66 @@
-import { readFile, readdir } from 'node:fs/promises'
-import { join } from 'node:path'
-import { Schema } from 'effect'
-import { readProcessIdentity } from '@baton/batond/platform/identity'
+import type { ControlResponse, PendingLogin } from '@baton/batond/daemon/control'
 
-export const PublicIdentity = Schema.Union([
-  Schema.Struct({ registered: Schema.Literal(false) }),
-  Schema.Struct({
-    registered: Schema.Literal(true),
-    coordinator_url: Schema.String,
-    node_id: Schema.String,
-    employee_id: Schema.optionalKey(Schema.String),
-    display_name: Schema.String,
-    system: Schema.String,
-  }),
-])
-export type PublicIdentity = typeof PublicIdentity.Type
+export type DesktopState = NonNullable<ControlResponse['state']> | 'stopped'
 
-export const DaemonStatus = Schema.Struct({
-  pid: Schema.Int.check(Schema.isGreaterThan(0)),
-  batond_version: Schema.optionalKey(Schema.String),
-  state: Schema.Literals(['connecting', 'online', 'rejected', 'stopping']),
-  code: Schema.optional(Schema.String),
-  message: Schema.optional(Schema.String),
-  updated_at: Schema.String,
-})
-export type DaemonStatus = typeof DaemonStatus.Type
-export interface SupervisorState {
-  state: 'stopped' | 'connecting' | 'restarting' | 'rejected' | 'external' | 'stopping'
+export interface LoginStart {
+  session_id: string
+  user_code: string
+  verification_uri: string
+  verification_uri_complete: string
+  expires_at: string
+  expires_in_seconds: number
+}
+
+export type StartLoginResult =
+  | { status: 'pending'; login: LoginStart }
+  | { status: 'already_bound'; device: DesktopStatus }
+
+export interface DesktopStatus {
+  state: DesktopState
+  registered: boolean
   pid?: number
-  code?: string
-  message?: string
-}
-export type DesktopStatus = PublicIdentity & {
-  state: SupervisorState['state'] | 'unregistered' | 'online'
-  connection_state?: DaemonStatus['state']
-  code?: string | undefined
-  message?: string | undefined
+  batond_version?: string
+  protocol_version?: number
+  platform?: string
+  coordinator_url?: string
+  node_id?: string
+  employee_id?: string
+  display_name?: string
+  rejection?: { code: string; message: string; at: string }
+  pending_login?: PendingLogin
+  last_error?: { code: string; message: string; at: string }
+  service_installed?: boolean
 }
 
-export async function managedDaemonPid(
-  directory: string,
-  launcherPid: number | undefined,
-  inspect = readProcessIdentity,
-  readStatus = readDaemonStatus,
-): Promise<number | undefined> {
-  if (launcherPid === undefined) return undefined
-  try {
-    const record = Schema.decodeUnknownSync(
-      Schema.Struct({
-        launcher_pid: Schema.Int,
-        launcher_creation_time: Schema.String,
-        daemon_pid: Schema.Int,
-        daemon_creation_time: Schema.String,
-      }),
-    )(JSON.parse(await readFile(join(directory, 'launcher-child.json'), 'utf8')))
-    if (record.launcher_pid !== launcherPid) return undefined
-    const [launcher, daemon, status] = await Promise.all([
-      inspect(record.launcher_pid),
-      inspect(record.daemon_pid),
-      readStatus(directory),
-    ])
-    if (
-      launcher?.creationTime !== record.launcher_creation_time ||
-      daemon?.creationTime !== record.daemon_creation_time
-    )
-      return undefined
-    return status?.pid === record.daemon_pid ? record.daemon_pid : undefined
-  } catch {
-    return undefined
+// 控制通道返回的是设备公开状态；桌面不读取账本或凭据文件。
+export function desktopStatus(response: ControlResponse): DesktopStatus {
+  const state = response.state ?? 'unbound'
+  return {
+    state,
+    registered: response.node_id !== undefined,
+    ...(response.pid !== undefined ? { pid: response.pid } : {}),
+    ...(response.batond_version !== undefined ? { batond_version: response.batond_version } : {}),
+    ...(response.protocol_version !== undefined ? { protocol_version: response.protocol_version } : {}),
+    ...(response.platform !== undefined ? { platform: response.platform } : {}),
+    ...(response.coordinator_url !== undefined ? { coordinator_url: response.coordinator_url } : {}),
+    ...(response.node_id !== undefined ? { node_id: response.node_id } : {}),
+    ...(response.employee_id !== undefined ? { employee_id: response.employee_id } : {}),
+    ...(response.display_name !== undefined ? { display_name: response.display_name } : {}),
+    ...(response.rejection !== undefined ? { rejection: response.rejection } : {}),
+    ...(response.pending_login !== undefined ? { pending_login: response.pending_login } : {}),
+    ...(response.last_error !== undefined ? { last_error: response.last_error } : {}),
+    ...(response.service_installed !== undefined ? { service_installed: response.service_installed } : {}),
   }
 }
 
-export function mergeStatus(
-  identity: PublicIdentity,
-  supervisor: SupervisorState,
-  daemon?: DaemonStatus,
-): DesktopStatus {
-  if (!identity.registered && supervisor.state !== 'rejected') return { ...identity, state: 'unregistered' }
-  if (supervisor.state === 'external')
-    return {
-      ...identity,
-      state: 'external',
-      ...(daemon ? { connection_state: daemon.state, code: daemon.code, message: daemon.message } : {}),
-    }
-  if (supervisor.state === 'connecting' && daemon && daemon.pid === supervisor.pid)
-    return {
-      ...identity,
-      state: daemon.state,
-      code: daemon.code,
-      message: daemon.message,
-    }
-  return { ...identity, state: supervisor.state, code: supervisor.code, message: supervisor.message }
-}
-
-export async function readDaemonRejection(
-  directory: string,
-  expectedPid: number | undefined,
-  startedAt = 0,
-): Promise<DaemonStatus | undefined> {
-  if (expectedPid === undefined) return undefined
-  try {
-    const status = Schema.decodeUnknownSync(DaemonStatus)(
-      JSON.parse(await readFile(join(directory, 'daemon-status.json'), 'utf8')),
-    )
-    return status.pid === expectedPid &&
-      Date.parse(status.updated_at) >= startedAt &&
-      status.state === 'rejected' &&
-      ['needs_reauth', 'node_version_incompatible'].includes(status.code ?? '')
-      ? status
-      : undefined
-  } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code !== 'ENOENT') throw error
-    return undefined
+export function stoppedStatus(message = '无法读取本机设备状态，请检查日志'): DesktopStatus {
+  return {
+    state: 'stopped',
+    registered: false,
+    last_error: { code: 'status_unavailable', message, at: new Date().toISOString() },
   }
 }
 
-export async function readDaemonStatus(
-  directory: string,
-  alive: (pid: number) => boolean = (pid) => {
-    try {
-      process.kill(pid, 0)
-      return true
-    } catch (error) {
-      return error instanceof Error && 'code' in error && error.code === 'EPERM'
-    }
-  },
-): Promise<DaemonStatus | undefined> {
-  try {
-    const status = Schema.decodeUnknownSync(DaemonStatus)(
-      JSON.parse(await readFile(join(directory, 'daemon-status.json'), 'utf8')),
-    )
-    const lock = join(directory, 'daemon.lock')
-    const entries = await readdir(lock)
-    if (entries.length !== 1 || !/^[\da-f-]{36}\.json$/.test(entries[0]!)) return undefined
-    const record = Schema.decodeUnknownSync(Schema.Struct({ pid: Schema.Int, token: Schema.String }))(
-      JSON.parse(await readFile(join(lock, entries[0]!), 'utf8')),
-    )
-    if (`${record.token}.json` !== entries[0] || status.pid !== record.pid || !alive(status.pid)) return undefined
-    return status
-  } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code !== 'ENOENT') throw error
-    return undefined
-  }
+export function desktopStatusReason(status: DesktopStatus): string | undefined {
+  return status.rejection?.message ?? status.last_error?.message
 }

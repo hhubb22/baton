@@ -1032,10 +1032,9 @@ describe('devices', () => {
     if (phase === 'failed') expect(screen.getByText('0.9.2 · 更新失败')).toBeInTheDocument()
   })
 
-  it('opens device setup without issuing an enrollment secret', async () => {
+  it('opens device setup without starting a device login', async () => {
     const user = userEvent.setup()
-    const { client } = renderApp('/devices', 'empty')
-    const create = vi.spyOn(client, 'createEnrollment')
+    renderApp('/devices', 'empty')
     await user.click(await screen.findByRole('button', { name: '连接设备' }))
     const dialog = await screen.findByRole('dialog', { name: '连接设备' })
     await within(dialog).findByLabelText('在终端运行')
@@ -1045,7 +1044,6 @@ describe('devices', () => {
     )
     expect(within(dialog).getByLabelText('在终端运行')).toHaveTextContent('./batond service install')
     expect(within(dialog).queryByLabelText('设置码')).not.toBeInTheDocument()
-    expect(create).not.toHaveBeenCalled()
     await user.click(within(dialog).getByRole('button', { name: '关闭' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(screen.getByRole('heading', { name: '你的设备' })).toHaveFocus()

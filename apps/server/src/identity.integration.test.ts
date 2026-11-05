@@ -9,7 +9,7 @@ import { createDatabaseRuntime, migrateDatabase } from './database.ts'
 import * as Auth from './auth.ts'
 import * as Nodes from './nodes.ts'
 import type { NodeSource } from './errors.ts'
-import { openTestDatabase, type TestDatabase } from './testing/database.ts'
+import { openTestDatabase, seedNodeIdentity, type TestDatabase } from './testing/database.ts'
 
 let database: TestDatabase
 let schema: string
@@ -25,18 +25,7 @@ const query = <A extends object>(text: string, params: readonly unknown[] = []) 
   })
 
 async function register(employee: Auth.Employee, displayName = 'Test workstation'): Promise<Nodes.NodeIdentity> {
-  const enrollment = await run(Nodes.issueEnrollment(employee.id))
-  return run(
-    Nodes.registerNode(
-      {
-        enrollment_token: enrollment.enrollment_token as string,
-        display_name: displayName,
-        system: 'macos',
-        capabilities: [],
-      },
-      signer,
-    ),
-  )
+  return (await seedNodeIdentity(run, signer, { employeeId: employee.id, displayName, system: 'macos' })).identity
 }
 function source(identity: Nodes.NodeIdentity, incarnation = randomUUID()): NodeSource {
   return {
@@ -86,6 +75,7 @@ describe('identity storage on local PostgreSQL', () => {
       '0018_executions.sql',
       '0019_node_updates.sql',
       '0020_device_login.sql',
+      '0021_drop_node_enrollments.sql',
     ])
     const names = await run(query<{ current: string }>('SELECT current_schema() AS current'))
     expect(names[0].current).toBe(schema)
@@ -178,6 +168,11 @@ describe('identity storage on local PostgreSQL', () => {
       await writeFile(join(directory, '0019_node_updates.sql'), nodeUpdates)
       const deviceLogin = await readFile(new URL('../../../migrations/0020_device_login.sql', import.meta.url), 'utf8')
       await writeFile(join(directory, '0020_device_login.sql'), deviceLogin)
+      const dropEnrollments = await readFile(
+        new URL('../../../migrations/0021_drop_node_enrollments.sql', import.meta.url),
+        'utf8',
+      )
+      await writeFile(join(directory, '0021_drop_node_enrollments.sql'), dropEnrollments)
       const checksums = await run(
         query<{ version: string; checksum: string }>(
           'SELECT version, checksum FROM schema_migrations ORDER BY version',
@@ -323,22 +318,8 @@ describe('identity storage on local PostgreSQL', () => {
     expect((await run(Auth.login(employee.username, reset.password))).employee.id).toBe(employee.id)
   })
 
-  it('consumes enrollment once under concurrent registration and isolates employee objects and defaults', async () => {
-    const enrollment = await run(Nodes.issueEnrollment(alice.id))
-    const id = enrollment.enrollment_id as string
-    await expect(run(Nodes.getEnrollment(bob.id, id))).rejects.toMatchObject({ status: 404 })
-    const input = {
-      enrollment_token: enrollment.enrollment_token as string,
-      display_name: 'Concurrent registration',
-      system: 'macos',
-      capabilities: [],
-    }
-    const attempts = await Promise.allSettled(Array.from({ length: 6 }, () => run(Nodes.registerNode(input, signer))))
-    const succeeded = attempts.filter((result) => result.status === 'fulfilled')
-    expect(succeeded).toHaveLength(1)
-    for (const attempt of attempts)
-      if (attempt.status === 'rejected') expect(attempt.reason).toMatchObject({ code: 'enrollment_used' })
-    const identity = (succeeded[0] as PromiseFulfilledResult<Nodes.NodeIdentity>).value
+  it('issues an authenticated identity and isolates employee objects and defaults', async () => {
+    const identity = await register(alice)
     const claims = await run(Nodes.authenticateNode(identity.credential.token, signer))
     expect(claims.employee_id).toBe(alice.id)
     expect(identity.signing_public_key).toBe(signer.signingPublicKey)
@@ -357,16 +338,6 @@ describe('identity storage on local PostgreSQL', () => {
     await register(alice, 'Later registration')
     expect(((await run(Nodes.listNodes(alice.id))).default_device as { node_id: string }).node_id).toBe(originalDefault)
     await run(Nodes.setDefaultDevice(alice.id, identity.node_id))
-    const expired = await run(Nodes.issueEnrollment(alice.id))
-    await run(
-      query(
-        "UPDATE node_enrollments SET created_at=now()-interval '2 seconds',expires_at=now()-interval '1 second' WHERE id=$1::uuid",
-        [expired.enrollment_id],
-      ),
-    )
-    await expect(
-      run(Nodes.registerNode({ ...input, enrollment_token: expired.enrollment_token as string }, signer)),
-    ).rejects.toMatchObject({ code: 'enrollment_expired' })
   })
 
   it('guards connection incarnation, sync readiness, late disconnects, report versions and revocation', async () => {

@@ -1,5 +1,6 @@
 import { Menu, Tray, nativeImage } from 'electron'
 import type { DesktopStatus } from './status.ts'
+import { desktopStatusReason } from './status.ts'
 import { emptyActivity, type Activity } from './notifications.ts'
 import { trayLabels, trayPixels, traySummary } from './tray-model.ts'
 
@@ -39,7 +40,7 @@ export function createTray(actions: {
   return {
     update(status: DesktopStatus, activity: Activity = emptyActivity, notificationsDisabled: boolean | null = null) {
       const label = trayLabels[status.state]
-      const reason = status.message ?? status.code
+      const reason = desktopStatusReason(status)
       const name = status.registered ? status.display_name : 'Baton'
       const summary = traySummary(activity)
       tray.setImage(image(activity.waiting > 0))
@@ -81,9 +82,7 @@ export function createTray(actions: {
           { type: 'separator' },
           { label: '打开 Baton', click: actions.open },
           { label: actions.updateLabel(), click: actions.update },
-          ...(status.state === 'external' || !actions.restartAvailable()
-            ? []
-            : [{ label: '重启设备服务', click: actions.restart }]),
+          ...(!actions.restartAvailable() ? [] : [{ label: '重启设备服务', click: actions.restart }]),
           { label: '打开日志文件夹', click: actions.logs },
           { label: '退出 Baton', click: actions.quit },
         ]),

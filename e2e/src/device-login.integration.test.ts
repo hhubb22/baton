@@ -16,7 +16,7 @@ import { loadIdentity } from '@baton/batond/daemon/identity'
 
 test('device-code approval binds a resident daemon through HTTP and authenticated local control', async () => {
   const database = await openTestDatabase()
-  const directory = await mkdtemp(join(tmpdir(), 'baton-device-login-'))
+  const directory = await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'baton-device-login-'))
   const dataDirectory = join(directory, 'node')
   const origin = 'https://baton.local'
   const serverScope = await Effect.runPromise(Scope.make())

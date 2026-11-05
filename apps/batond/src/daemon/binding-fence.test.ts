@@ -18,7 +18,7 @@ import { makeExecutionService } from '../execution/service.ts'
 import { syncingExecutionReports } from './upgrade-execution.ts'
 import { FullOutputStore } from '../worker/full-output.ts'
 import { makeProjectLedger } from '../project/ledger.ts'
-import { loadIdentity, registerNode, saveDeviceIdentity } from './identity.ts'
+import { loadIdentity, saveDeviceIdentity } from './identity.ts'
 
 it('logout fences retained queues, reports and execution outputs from a replacement binding', async () => {
   const directory = await makePrivateTempDirectory('baton-rebind-')
@@ -298,103 +298,90 @@ it('logout fences retained queues, reports and execution outputs from a replacem
   }
 })
 
-it.each(['device-login', 'registration'])(
-  '%s fences retained execution and Project work when identity was lost',
-  async (flow) => {
-    const directory = await makePrivateTempDirectory('baton-lost-identity-')
-    const executionId = randomUUID(),
-      projectRun = randomUUID(),
-      generation = randomUUID()
-    const identity: NodeIdentity = {
-      node_id: randomUUID(),
-      employee_id: randomUUID(),
-      coordinator_url: 'https://replacement.invalid',
-      display_name: 'Replacement device',
-      system: 'linux',
-      role: '',
-      capabilities: [],
-      registration_seq: 1,
-      registered_at: new Date().toISOString(),
-      credential: { id: randomUUID(), token: 'new-secret', version: 1, expires_at: null },
-    }
-    try {
-      await ensurePrivateDirectory(join(directory, 'executions'))
-      const paths = executionPaths(directory, executionId)
-      await ensurePrivateDirectory(paths.directory)
-      await Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const execution = yield* openExecutionLedger(paths.ledger)
-            yield* execution.save({
-              intent: false,
-              command: {
-                type: 'execution.command',
-                action: 'start',
-                execution_id: executionId,
-                storage_generation: generation,
-                command: 'old queued command',
-              },
-              reports: [
-                {
-                  acked: false,
-                  report: {
-                    type: 'execution.report',
-                    execution_id: executionId,
-                    storage_generation: generation,
-                    event_id: randomUUID(),
-                    seq: 1,
-                    status: 'pending',
-                  },
+it('device login fences retained execution and Project work when identity was lost', async () => {
+  const directory = await makePrivateTempDirectory('baton-lost-identity-')
+  const executionId = randomUUID(),
+    projectRun = randomUUID(),
+    generation = randomUUID()
+  const identity: NodeIdentity = {
+    node_id: randomUUID(),
+    employee_id: randomUUID(),
+    coordinator_url: 'https://replacement.invalid',
+    display_name: 'Replacement device',
+    system: 'linux',
+    role: '',
+    capabilities: [],
+    registration_seq: 1,
+    registered_at: new Date().toISOString(),
+    credential: { id: randomUUID(), token: 'new-secret', version: 1, expires_at: null },
+  }
+  try {
+    await ensurePrivateDirectory(join(directory, 'executions'))
+    const paths = executionPaths(directory, executionId)
+    await ensurePrivateDirectory(paths.directory)
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const execution = yield* openExecutionLedger(paths.ledger)
+          yield* execution.save({
+            intent: false,
+            command: {
+              type: 'execution.command',
+              action: 'start',
+              execution_id: executionId,
+              storage_generation: generation,
+              command: 'old queued command',
+            },
+            reports: [
+              {
+                acked: false,
+                report: {
+                  type: 'execution.report',
+                  execution_id: executionId,
+                  storage_generation: generation,
+                  event_id: randomUUID(),
+                  seq: 1,
+                  status: 'pending',
                 },
-              ],
-            })
-            const project = yield* makeProjectLedger(join(directory, 'project-runtime.db'))
-            yield* project.enqueue('lost-binding-command', {
-              type: 'project_run_start',
-              run_id: projectRun,
-              lease_epoch: 1,
-            })
-          }),
-        ),
-      )
-      await expect(readFile(join(directory, 'identity.json'))).rejects.toMatchObject({ code: 'ENOENT' })
-      const enrollmentFile = join(directory, 'enrollment')
-      await writePrivateFileAtomic(enrollmentFile, 'offline-enrollment-token')
-      const saved =
-        flow === 'device-login'
-          ? await saveDeviceIdentity(directory, identity, identity.coordinator_url!)
-          : await registerNode({
-              dataDirectory: directory,
-              coordinatorURL: identity.coordinator_url!,
-              enrollmentFile,
-              transport: async () => identity,
-            })
-      expect(saved).toEqual(identity)
-      expect(await loadIdentity(directory)).toEqual(identity)
-      const fence = await loadBindingFence(directory)
-      expect(fence.execution_ids).toEqual([executionId])
-      expect(fence.project_run_ids).toEqual([projectRun])
-      expect(fence.node_ids).not.toContain(identity.node_id)
-      const executions = makeExecutionService({ dataDirectory: directory, excludedIds: new Set(fence.execution_ids) })
-      await executions.recover()
-      expect(await executions.collectReports()).toEqual([])
-      await Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const current = yield* makeProjectLedger(
-              join(directory, 'project-runtime.db'),
-              new Set(fence.project_run_ids),
-            )
-            expect(yield* current.pending()).toEqual([])
-            const retained = yield* makeProjectLedger(join(directory, 'project-runtime.db'))
-            expect(yield* retained.pending()).toHaveLength(1)
-          }),
-        ),
-      )
-      expect(readExecutionState(paths.ledger)?.command?.command).toBe('old queued command')
-      expect(readExecutionState(paths.ledger)?.reports[0]?.acked).toBe(false)
-    } finally {
-      await rm(directory, { recursive: true, force: true })
-    }
-  },
-)
+              },
+            ],
+          })
+          const project = yield* makeProjectLedger(join(directory, 'project-runtime.db'))
+          yield* project.enqueue('lost-binding-command', {
+            type: 'project_run_start',
+            run_id: projectRun,
+            lease_epoch: 1,
+          })
+        }),
+      ),
+    )
+    await expect(readFile(join(directory, 'identity.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+    const saved = await saveDeviceIdentity(directory, identity, identity.coordinator_url!)
+    expect(saved).toEqual(identity)
+    expect(await loadIdentity(directory)).toEqual(identity)
+    const fence = await loadBindingFence(directory)
+    expect(fence.execution_ids).toEqual([executionId])
+    expect(fence.project_run_ids).toEqual([projectRun])
+    expect(fence.node_ids).not.toContain(identity.node_id)
+    const executions = makeExecutionService({ dataDirectory: directory, excludedIds: new Set(fence.execution_ids) })
+    await executions.recover()
+    expect(await executions.collectReports()).toEqual([])
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const current = yield* makeProjectLedger(
+            join(directory, 'project-runtime.db'),
+            new Set(fence.project_run_ids),
+          )
+          expect(yield* current.pending()).toEqual([])
+          const retained = yield* makeProjectLedger(join(directory, 'project-runtime.db'))
+          expect(yield* retained.pending()).toHaveLength(1)
+        }),
+      ),
+    )
+    expect(readExecutionState(paths.ledger)?.command?.command).toBe('old queued command')
+    expect(readExecutionState(paths.ledger)?.reports[0]?.acked).toBe(false)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})

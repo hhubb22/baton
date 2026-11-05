@@ -1,10 +1,10 @@
 # 设备接入技术设计
 
-Status: partially implemented
+Status: implemented
 Owner: Asa
 Basis: [设备接入行为规格](PRODUCT.md) DS-01～DS-17；调查提交 `9c003f8`。
 
-设备码认证、长效可吊销凭据、CLI 本地控制通道与按需拉起、网页确认页和用户服务接管已实现。桌面客户端仍使用现有接入桥接与进程监管，尚未迁移至本地控制通道；Thread 和 Execution 继续使用独立 Worker。原生 launchd、systemd 用户会话、Windows 命名管道及桌面接入需在目标系统验证。
+设备码认证、长效可吊销凭据、CLI 本地控制通道与按需拉起、网页确认页、用户服务接管和桌面客户端接入均已实现。Thread 和 Execution 继续使用独立 Worker。原生 launchd、systemd 用户会话、Windows 命名管道、桌面托盘与安装覆盖需在目标系统验证。
 
 ## 全景与架构
 
@@ -93,7 +93,7 @@ CLI 与桌面客户端共用 `ControlClient`：
 
 1. 读取 `control.token` 并请求控制端点；成功则直接返回。
 2. 令牌缺失或连接返回 `ENOENT` / `ECONNREFUSED` 时，获取短期文件锁 `<data-dir>/autostart.lock`，串行化并发拉起。
-3. 持锁重测一次控制端点；仍不可达则以分离后台模式启动 `batond serve --data-dir <dir>`（`detached: true`、`stdio` 重定向至 `<data-dir>/logs/batond.log` 并按 10 MiB 轮转、`windowsHide: true`、`unref()`）。
+3. 持锁重测一次控制端点；仍不可达则以分离后台模式启动 `batond serve --data-dir <dir>`（`detached: true`、`stdio` 重定向至 `<data-dir>/logs/batond.log` 并按 10 MiB 轮转、`windowsHide: true`、`unref()`）。`serve` 只用于按需后台拉起，不跟随 stdin；用户服务使用 `run`，stdin 结束时正常退出。
 4. 以 50ms→200ms 退避轮询控制端点 `status` 直至就绪（上限 POSIX 5 秒、Windows 10 秒），释放 `autostart.lock` 后发送原请求。
 
 ### 3.3 控制通道方法与 CLI 路由
@@ -151,9 +151,9 @@ CLI 子命令分派（`apps/batond/src/cli.ts`）：
 
 | Requirement | Setup and observation | Failure condition | Where | Status |
 |---|---|---|---|---|
-| DS-01～DS-03 | 配置临时下载目录（含合法包、版本不符包、摘要损坏包），匿名请求 `/api/v1/downloads` 与 `/downloads/<file>`，切换 `Host` | 需要登录；坏包进入清单；未列出文件可下载；`connect_url` 含证书参数或匹配非允许源 | `apps/server` 单元 + 集成 | planned |
-| DS-04～DS-07 | 发起设备码会话，覆盖未确认轮询、确认换取凭据、响应丢失幂等重试、过期、拒绝、同中心重登与跨中心/已吊销防覆盖 | `device_code` 泄漏到员工查询或日志；过期或拒绝后仍签发凭据；重试产生重复设备；静默覆盖异中心身份 | `apps/server` 集成 + `apps/batond` 单元 | planned |
-| DS-08、DS-09 | 停止 `batond` 后并发从 CLI 与桌面客户端发起 `status`；模拟中心返回 `credential_revoked` 与 `node_version_incompatible` | 并发拉起产生双实例错误；错误控制令牌通过认证；终止类拒绝后 `batond` 仍死循环重连或退出丢失原因 | `apps/batond` 单元 + `e2e` | planned |
-| DS-10、DS-11 | 用替身执行器验证 `launchd` / `systemd --user` 安装、已有后台 `batond` 平滑停机接管、命令失败回滚、`linger` 提示与卸载保留数据 | 服务定义含无效参数；未停止旧后台进程导致锁冲突；失败残留半写入文件；卸载删除数据目录 | `apps/batond` 单元 | planned |
-| DS-12～DS-15 | 网页测试覆盖浏览器添加设备弹窗、`/device-login` 确认页及桌面模式一键绑定；桌面端单测覆盖 `baton://connect` 校验与跨中心保护 | 弹窗仍生成口令或 `curl -k`；非 HTTPS 源被保存；子框架或外部源可调用桥接；已绑定设备被静默换源 | `web` 单元 + `apps/desktop` 单元 | planned |
-| DS-16、DS-17 | 桌面端单测验证关窗隐藏、自启配置，以及 `service_installed` 为 `false` / `true` 时的退出控制通道行为；真机验证原生托盘与安装覆盖 | 未安装服务退出客户端后 `batond` 仍残留运行；已安装服务退出客户端时误停后台服务 | `apps/desktop` 单元 + macOS / Windows 手动验证 | planned |
+| DS-01～DS-03 | 配置临时下载目录（含合法包、版本不符包、摘要损坏包），匿名请求 `/api/v1/downloads` 与 `/downloads/<file>`，切换 `Host` | 需要登录；坏包进入清单；未列出文件可下载；`connect_url` 含证书参数或匹配非允许源 | `apps/server` 单元 + 集成 | automated |
+| DS-04～DS-07 | 发起设备码会话，覆盖未确认轮询、确认换取凭据、响应丢失幂等重试、过期、拒绝、同中心重登与跨中心/已吊销防覆盖 | `device_code` 泄漏到员工查询或日志；过期或拒绝后仍签发凭据；重试产生重复设备；静默覆盖异中心身份 | `apps/server` 集成 + `apps/batond` 单元 | automated |
+| DS-08、DS-09 | 停止 `batond` 后并发从 CLI 与桌面客户端发起 `status`；模拟中心返回 `credential_revoked` 与 `node_version_incompatible` | 并发拉起产生双实例错误；错误控制令牌通过认证；终止类拒绝后 `batond` 仍死循环重连或退出丢失原因 | `apps/batond` 单元 + `e2e` | automated |
+| DS-10、DS-11 | 用替身执行器验证 `launchd` / `systemd --user` 安装、已有后台 `batond` 平滑停机接管、命令失败回滚、`linger` 提示与卸载保留数据 | 服务定义含无效参数；未停止旧后台进程导致锁冲突；失败残留半写入文件；卸载删除数据目录 | `apps/batond` 单元 | automated |
+| DS-12～DS-15 | 网页测试覆盖浏览器添加设备弹窗、`/device-login` 确认页及桌面模式一键绑定；桌面端单测覆盖 `baton://connect` 校验与跨中心保护 | 弹窗仍生成口令或 `curl -k`；非 HTTPS 源被保存；子框架或外部源可调用桥接；已绑定设备被静默换源 | `web` 单元 + `apps/desktop` 单元 | automated |
+| DS-16、DS-17 | 桌面端单测验证关窗隐藏、自启配置，以及 `service_installed` 为 `false` / `true` 时的退出控制通道行为；真机验证原生托盘与安装覆盖 | 未安装服务退出客户端后 `batond` 仍残留运行；已安装服务退出客户端时误停后台服务 | `apps/desktop` 单元 + macOS / Windows 手动验证 | automated + manual pending |

@@ -1,110 +1,47 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { expect, it } from 'vite-plus/test'
-import { managedDaemonPid, mergeStatus, readDaemonStatus, readDaemonRejection, type PublicIdentity } from './status.ts'
-import { assertIdentityOrigin, authorizeBridge } from './bridge.ts'
+import { canExposeBridge } from './bridge.ts'
+import { desktopStatus, desktopStatusReason, stoppedStatus } from './status.ts'
 
-const identity: PublicIdentity = {
-  registered: true,
-  coordinator_url: 'https://center.test',
-  node_id: 'node',
-  display_name: 'Local',
-  system: 'macos',
-}
-const online = { pid: 42, state: 'online' as const, updated_at: '2026-10-27T00:00:00Z' }
-it('只认可 launcher 与 daemon 的进程身份和状态均匹配的记录', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'desktop-launcher-'))
-  try {
-    await writeFile(
-      join(directory, 'launcher-child.json'),
-      JSON.stringify({
-        launcher_pid: 41,
-        launcher_creation_time: 'launcher-start',
-        daemon_pid: 42,
-        daemon_creation_time: 'daemon-start',
-      }),
-    )
-    const inspect = async (pid: number) => ({ pid, creationTime: pid === 41 ? 'launcher-start' : 'daemon-start' })
-    expect(await managedDaemonPid(directory, 41, inspect, async () => online)).toBe(42)
-    expect(await managedDaemonPid(directory, 43, inspect, async () => online)).toBeUndefined()
-    expect(
-      await managedDaemonPid(
-        directory,
-        41,
-        async (pid: number) => ({ pid, creationTime: 'reused' }),
-        async () => online,
-      ),
-    ).toBeUndefined()
-    expect(await managedDaemonPid(directory, 41, inspect, async () => ({ ...online, pid: 44 }))).toBeUndefined()
-  } finally {
-    await rm(directory, { recursive: true, force: true })
-  }
-})
-it('合并当前进程的连接状态，拒绝状态不会被旧文件覆盖', () => {
-  expect(mergeStatus({ registered: false }, { state: 'stopped' }).state).toBe('unregistered')
-  expect(mergeStatus(identity, { state: 'connecting', pid: 42 }, online).state).toBe('online')
-  expect(mergeStatus(identity, { state: 'connecting', pid: 43 }, online).state).toBe('connecting')
-  expect(mergeStatus(identity, { state: 'rejected', code: 'needs_reauth' }, online)).toMatchObject({
-    state: 'rejected',
-    code: 'needs_reauth',
+it('maps the control status without inventing a bound identity', () => {
+  expect(desktopStatus({ ok: true, state: 'unbound', service_installed: false })).toEqual({
+    state: 'unbound',
+    registered: false,
+    service_installed: false,
   })
-  expect(mergeStatus(identity, { state: 'external' }, online)).toMatchObject({
-    state: 'external',
-    connection_state: 'online',
+  expect(
+    desktopStatus({
+      ok: true,
+      state: 'online',
+      pid: 42,
+      batond_version: '1.0.0',
+      protocol_version: 1,
+      platform: 'darwin arm64',
+      coordinator_url: 'https://center.test',
+      node_id: '11111111-1111-4111-8111-111111111111',
+      employee_id: '22222222-2222-4222-8222-222222222222',
+      display_name: 'MacBook',
+      service_installed: true,
+    }),
+  ).toMatchObject({
+    state: 'online',
+    registered: true,
+    node_id: '11111111-1111-4111-8111-111111111111',
+    display_name: 'MacBook',
+    service_installed: true,
   })
 })
 
-it('状态文件必须与活跃 daemon.lock 中的 PID 一致', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'desktop-status-'))
-  try {
-    expect(await readDaemonStatus(directory)).toBeUndefined()
-    await writeFile(join(directory, 'daemon-status.json'), JSON.stringify(online))
-    expect(await readDaemonStatus(directory, () => true)).toBeUndefined()
-    await mkdir(join(directory, 'daemon.lock'))
-    const token = '12345678-1234-1234-1234-123456789012'
-    const file = join(directory, 'daemon.lock', `${token}.json`)
-    await writeFile(file, JSON.stringify({ pid: 42, token }))
-    expect(await readDaemonStatus(directory, () => true)).toEqual(online)
-    expect(await readDaemonStatus(directory, () => false)).toBeUndefined()
-    await writeFile(file, JSON.stringify({ pid: 43, token }))
-    expect(await readDaemonStatus(directory, () => true)).toBeUndefined()
-  } finally {
-    await rm(directory, { recursive: true, force: true })
-  }
+it('reports rejection before a transient error and falls back to a stopped status', () => {
+  const rejection = { code: 'credential_revoked', message: '凭据已吊销', at: '2026-01-01T00:00:00.000Z' }
+  expect(desktopStatusReason(desktopStatus({ ok: true, state: 'rejected', rejection }))).toBe('凭据已吊销')
+  expect(desktopStatusReason(stoppedStatus('无法启动'))).toBe('无法启动')
+  expect(stoppedStatus().state).toBe('stopped')
 })
 
-it('连接拒绝在 daemon 退出和释放锁后仍通知，只读取本次进程的事实', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'desktop-rejection-'))
-  try {
-    const rejected = {
-      ...online,
-      state: 'rejected',
-      code: 'node_version_incompatible',
-      message: 'Requires Baton 0.2.0',
-    }
-    await writeFile(join(directory, 'daemon-status.json'), JSON.stringify(rejected))
-    expect(await readDaemonStatus(directory, () => false)).toBeUndefined()
-    expect(await readDaemonRejection(directory, 42)).toEqual(rejected)
-    expect(await readDaemonRejection(directory, 43)).toBeUndefined()
-    expect(await readDaemonRejection(directory, undefined)).toBeUndefined()
-    expect(await readDaemonRejection(directory, 42, Date.parse(rejected.updated_at) + 1)).toBeUndefined()
-  } finally {
-    await rm(directory, { recursive: true, force: true })
-  }
-})
-
-it('只有中心主页面可调用桥接，已有其他中心身份会拒绝替换', () => {
-  expect(() => authorizeBridge('https://center.test/devices', 'https://center.test', true)).not.toThrow()
-  for (const url of [
-    'https://other.test',
-    'https://center.test.evil.test',
-    'file:///tmp/setup.html',
-    'data:text/html,hello',
-  ])
-    expect(() => authorizeBridge(url, 'https://center.test', true)).toThrow()
-  expect(() => authorizeBridge('https://center.test', 'https://center.test', false)).toThrow()
-  expect(() => assertIdentityOrigin(identity, 'https://other.test')).toThrow('本机已接入')
-  expect(() => assertIdentityOrigin(identity, 'https://center.test')).not.toThrow()
-  expect(() => assertIdentityOrigin({ registered: false }, 'https://other.test')).not.toThrow()
+it('only exposes the bridge to the saved center main frame', () => {
+  expect(canExposeBridge(true, 'https://center.test', 'https://center.test')).toBe(true)
+  expect(canExposeBridge(false, 'https://center.test', 'https://center.test')).toBe(false)
+  expect(canExposeBridge(true, 'https://elsewhere.test', 'https://center.test')).toBe(false)
+  expect(canExposeBridge(true, 'file:///setup.html', undefined)).toBe(false)
+  expect(canExposeBridge(true, 'https://center.test', '')).toBe(false)
 })

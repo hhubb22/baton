@@ -85,7 +85,6 @@ export interface RunDaemonOptions {
   readonly telemetryRelay?: TelemetryRelay
   readonly identity?: NodeIdentity
   readonly relayURL?: string
-  readonly caFile?: string
   readonly controlTimeoutSeconds?: number
   readonly heartbeatMs?: number
   readonly pollIntervalMs?: number
@@ -141,7 +140,6 @@ const terminal = (code?: string) =>
     'node_source_rejected',
     'credential_revoked',
     'node_revoked',
-    'needs_reauth',
     'credential_expired',
     'node_idle_expired',
   ].includes(code ?? '')

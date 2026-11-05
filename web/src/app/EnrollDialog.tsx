@@ -11,7 +11,7 @@ import { radius, space } from '../theme/tokens.stylex'
 import { Button, focusRing, IconButton } from '../ui/Button'
 import { Dialog } from '../ui/Dialog'
 import { Segmented } from '../ui/Tabs'
-import { DesktopEnrollDialog } from './DesktopEnrollDialog'
+import { DesktopConnectDialog } from './DesktopConnectDialog'
 
 const styles = stylex.create({
   section: { display: 'flex', flexDirection: 'column', gap: space.sm },
@@ -82,7 +82,7 @@ export function EnrollDialog(props: {
   onClose: () => void
   finalFocus?: () => HTMLElement | null | boolean
 }) {
-  return desktopBridge() ? <DesktopEnrollDialog {...props} /> : <BrowserEnrollDialog {...props} />
+  return desktopBridge() ? <DesktopConnectDialog {...props} /> : <BrowserEnrollDialog {...props} />
 }
 
 function BrowserEnrollDialog({

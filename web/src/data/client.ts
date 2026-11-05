@@ -9,13 +9,11 @@ import type { DownloadsResponse } from '@baton/protocol/http-api'
 import type {
   AgentKind,
   Device,
-  Enrollment,
   Execution,
   FilePreview,
   FileReadOptions,
   FolderListing,
   ID,
-  IssuedEnrollment,
   LiveOutput,
   MemoryNote,
   MemorySave,
@@ -186,8 +184,6 @@ export interface BatonClient {
   setCommandAccess(input: { deviceId: ID; enabled: boolean }): Promise<Device>
   // 返回时中心已经拒绝这台设备的新连接并关闭了当前连接。
   removeDevice(deviceId: ID): Promise<void>
-  createEnrollment(nodeId?: ID): Promise<IssuedEnrollment>
-  getEnrollment(id: ID): Promise<Enrollment>
 
   subscribe(listener: (event: ChangeEvent) => void): () => void
 }

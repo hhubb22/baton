@@ -12,10 +12,10 @@ import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, test, vi } from 'vite-plus/test'
 import * as P from '@baton/protocol'
 import { startServer } from '@baton/server/server'
-import { openTestDatabase } from '@baton/server/testing/database'
+import { openTestDatabase, seedNodeIdentity } from '@baton/server/testing/database'
 import * as Auth from '@baton/server/auth'
 import * as Nodes from '@baton/server/nodes'
-import { registerNode } from '@baton/batond/daemon/identity'
+import { saveDeviceIdentity } from '@baton/batond/daemon/identity'
 import { runDaemon } from '@baton/batond/daemon/daemon'
 import { connectWebSocket } from '@baton/batond/daemon/transport'
 import { initializeBrowseRoots } from '@baton/batond/devices/roots'
@@ -154,25 +154,12 @@ test('HTTP → TS center → batond → independent Worker survives reconnects w
     }
     const alice = await login('remotealice'),
       bob = await login('remotebob')
-    const enrollment = await alice<P.EnrollmentResponse>('/node-enrollments', 'POST', {})
-    expect(enrollment.status).toBe(201)
-    const enrollmentFile = join(directory, 'enrollment')
-    await writeFile(enrollmentFile, enrollment.body.enrollment_token, { mode: 0o600 })
-    const identity = await registerNode({
-      dataDirectory: nodeDirectory,
-      coordinatorURL: `https://127.0.0.1:${port}`,
-      enrollmentFile,
+    const me = await alice<{ employee: { id: string } }>('/me')
+    const issued = await seedNodeIdentity(database.run, signer, {
+      employeeId: me.body.employee.id,
       displayName: 'Replay workstation',
-      transport: async (_url, input) => {
-        const response = await fetch(`${base}/api/v1/nodes/register`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(input),
-        })
-        expect(response.status).toBe(200)
-        return response.json()
-      },
     })
+    const identity = await saveDeviceIdentity(nodeDirectory, issued.identity, `https://127.0.0.1:${port}`)
     await initializeBrowseRoots(nodeDirectory, directory)
     const capability: P.RuntimeAgent = {
       agent_type: 'cursor',

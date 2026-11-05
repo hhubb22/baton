@@ -5,7 +5,7 @@ import { expect, it } from 'vite-plus/test'
 import * as Auth from './auth.ts'
 import * as Nodes from './nodes.ts'
 import { createDatabaseRuntime } from './database.ts'
-import { withTestDatabase, type TestDatabase } from './testing/database.ts'
+import { seedNodeIdentity, withTestDatabase, type TestDatabase } from './testing/database.ts'
 import { compensateRevocations, createRevocationCompensator } from './control-maintenance.ts'
 
 async function employee(db: TestDatabase) {
@@ -13,18 +13,7 @@ async function employee(db: TestDatabase) {
 }
 async function node(db: TestDatabase, owner: Auth.Employee, connect = false) {
   const signer = Nodes.CredentialSigner.generate()
-  const enrollment = await db.run(Nodes.issueEnrollment(owner.id))
-  const identity = await db.run(
-    Nodes.registerNode(
-      {
-        enrollment_token: String(enrollment.enrollment_token),
-        display_name: 'Device',
-        system: 'linux',
-        capabilities: [],
-      },
-      signer,
-    ),
-  )
+  const { identity } = await seedNodeIdentity(db.run, signer, { employeeId: owner.id })
   const source = {
     employee_id: owner.id,
     node_id: identity.node_id,

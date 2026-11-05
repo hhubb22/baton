@@ -62,10 +62,19 @@ it('preserves service error codes in CLI errors', () => {
   }
 })
 
-it('retains reauth routing and documents device login in help', async () => {
-  const args = ['--data-dir', '/offline-node', '--enrollment-file', '/private/enrollment']
-  await runBatondCLI(['reauth', ...args])
-  expect(runDaemonCLI).toHaveBeenCalledWith('reauth', args)
+it('routes run to the daemon CLI and documents device login in help', async () => {
+  const directory = await makePrivateTempDirectory('baton-run-')
+  const previous = process.env.BATON_ENV_REEXEC
+  process.env.BATON_ENV_REEXEC = '1'
+  try {
+    const args = ['--data-dir', directory]
+    await runBatondCLI(['run', ...args])
+    expect(runDaemonCLI).toHaveBeenCalledWith('run', args)
+  } finally {
+    if (previous === undefined) delete process.env.BATON_ENV_REEXEC
+    else process.env.BATON_ENV_REEXEC = previous
+    await rm(directory, { recursive: true, force: true })
+  }
   const output = vi.spyOn(console, 'log').mockImplementation(() => undefined)
   try {
     await runBatondCLI(['--help'])

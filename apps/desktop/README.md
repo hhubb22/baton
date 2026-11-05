@@ -1,6 +1,6 @@
 # Baton 桌面客户端
 
-Electron 客户端加载一个 Baton 中心，使用内置 batond 管理本机连接。支持 macOS arm64 与 Windows x64，数据目录沿用 CLI 的 `~/.baton/data`，程序在 `~/.baton/program`。中心网页通过受限桥接接入和重新认证本机；已有同一中心的 CLI 身份可直接沿用。
+Electron 客户端加载一个 Baton 中心，通过按需拉起的本地控制通道使用内置 `batond` 管理本机连接。支持 macOS arm64 与 Windows x64，数据目录沿用 CLI 的 `~/.baton/data`，程序在 `~/.baton/program`。中心网页通过受限桥接接入本机；已有同一中心的 CLI 身份可直接沿用。
 
 ## 构建与验证
 
@@ -17,19 +17,19 @@ node --test tools/package-desktop.test.mjs
 
 ## 接入与身份
 
-未配置时显示本地说明页。接入链接格式为 `baton://connect?url=<百分号编码的 HTTPS 源>&ca=<CA DER 的 base64url>`；公共 CA 场景省略 `ca`。链接最多 8KB，中心地址只含 scheme、host 和可选端口，证书须声明 CA。客户端先显示中心地址与 SHA-256 指纹，经确认后才保存配置；取消不写入文件。已有其他中心的设备身份时拒绝替换。
+未配置时显示本地说明页。接入链接格式为 `baton://connect?url=<百分号编码的 HTTPS 源>`，只接受 `https` 源，不包含证书、路径、查询串或片段，最多 2 KiB。客户端显示中心地址，经确认后保存；取消不写入文件。已有其他中心的设备身份时拒绝替换，提示先运行 `batond logout`；本机尚未绑定时可确认替换已保存但未绑定的地址。
 
-部署配置位于 Electron `userData` 的 `deployment.json`，CA 镜像为 `ca.pem`，POSIX 文件权限为 0600。macOS 默认目录为 `~/Library/Application Support/Baton`，Windows 为 `%APPDATA%\Baton`。客户端不把凭据放入接入链接、进程参数或日志；注册和重新认证凭据只通过子进程环境变量 `BATON_ENROLLMENT_TOKEN` 交给 batond。外部 batond 仍在运行时须先停止该服务再重新认证。
+中心配置保存在 Electron `userData/coordinator.json`，格式为 `{ format: 1, coordinator_url }`，POSIX 权限为 `0600`。macOS 默认目录为 `~/Library/Application Support/Baton`，Windows 为 `%APPDATA%\Baton`。客户端不把凭据放入接入链接、进程参数或日志，也不读取或保存自定义 CA；batond 使用系统根证书库验证 TLS。外部 batond 仍在运行时由本地控制通道统一查询和接管，不再要求先停止服务。
 
-本地说明页不暴露桥接。中心主页面通过 `window.batonDesktop` 使用 `protocol: 1`、`version`、`capabilities: [{ name, version }]`、`update()`、`status()`、`onStatus(callback)`、`enroll({ code, displayName? })` 与 `reauth({ code })`。能力列表声明 `update`、`notifications`、`tray-status`、`open-local`、`pick-directory`、`diagnostics`，版本均为 1；网页忽略未知名称或版本，缺少某项能力时不调用对应接口。`update()` 打开原生更新对话框，不接收下载地址、本机路径或命令。订阅返回取消函数；成功注册或重新认证返回公开设备状态，失败抛出不含凭据的错误。main 每次核查调用方窗口、主 frame 与源。证书验证执行签名、有效期、主机名、CA 路径长度与服务器用途检查；包含当前未支持的名称或策略约束、未知 critical 扩展时拒绝自定义信任。远程页面开启 sandbox 和 context isolation，禁用 Node integration 与 webview；非中心的 HTTP(S) 导航交给系统浏览器，其他协议不打开。
+本地说明页不暴露桥接。中心主页面通过 `window.batonDesktop` 使用 `protocol: 1`、`version`、`capabilities: [{ name, version }]`、`update()`、`status()`、`onStatus(callback)`、`startLogin({ displayName? })`、`cancelLogin()` 与 `logout()`。能力列表声明 `update`、`notifications`、`tray-status`、`open-local`、`pick-directory`、`diagnostics`、`model-connection-key` 和 `device-login`，版本均为 1；网页忽略未知名称或版本，缺少某项能力时不调用对应接口。`update()` 打开原生更新对话框，不接收下载地址、本机路径或命令。订阅返回取消函数；`startLogin` 返回待确认短码或已有绑定状态，失败抛出不含凭据的错误。preload 只在主框架且 `location.origin` 等于已保存中心源时注入桥接，main 每次调用再核查窗口、主 frame 与源。远程页面开启 sandbox 和 context isolation，禁用 Node integration 与 webview；非中心的 HTTP(S) 导航交给系统浏览器，其他协议不打开。
 
 ## 运行与退出
 
-客户端运行 `batond identity` 判断身份；未注册时等待接入，同一中心的身份启动监管，其他中心的身份显示冲突。监管运行 `batond run --exit-with-stdin`，合并进程状态和经过 PID、`daemon.lock` 核查的状态文件，每秒推送托盘与网页。版本不兼容时显示原因，并打开原生更新对话框。
+客户端只用内置 `resources/batond/batond(.exe)` 的 `ControlClient` 查询状态与控制本机服务。`status()` 在 `batond` 未运行时按需后台拉起；客户端每秒刷新并把公开状态推送给托盘和网页，不自己持有 `batond` 子进程。状态包含 `unbound`、`authorizing`、`connecting`、`syncing`、`online`、`rejected`、`stopped`，以及拒绝原因、待确认登录、最近错误和 `service_installed`。
 
-异常退出从 1 秒指数退避，最长 30 秒；60 秒内连续失败 5 次停止重启。退出码 78、凭据拒绝、版本不兼容或无效部署配置停止重启。客户端仍在运行时，daemon 的其他退出（含正常退出）都会重新拉起；主动退出客户端时停止监管。`daemon_running` 表示外部服务占用，每 30 秒重试接管，不停止外部进程。运行日志为 `~/.baton/data/logs/desktop-batond.log`，超过 10MB 轮转一份。
+Devices 页面在桌面模式且本机 `unbound` 时显示「连接这台电脑」。点击后调用 `startLogin`，主进程经本地控制通道触发设备码登录并把短码、有效期和设备信息显示在窗口内；员工确认后网页向同一中心提交 `POST /api/v1/device-auth/sessions/:id/approve`，由后台 `batond` 换取凭据并上线。页面和日志不出现 `device_code`。
 
-关闭窗口隐藏到托盘。托盘可打开窗口、重启 batond、打开日志目录、切换登录启动或退出。登录启动默认开启，以登录项启动时隐藏窗口；选择保存在 userData 的 `login-start.json`。退出时关闭 batond stdin 并等待最多 15 秒，超时只终止客户端自己启动的进程。替换应用保留 userData 与设备数据；升级期间不强制结束独立 Worker 或外部服务。
+关闭窗口隐藏到托盘。托盘显示连接状态和拒绝原因，可打开窗口、打开日志目录、切换登录启动或退出；未安装用户服务时还可重启 batond。登录启动默认开启，以登录项启动时隐藏窗口；选择保存在 userData 的 `login-start.json`。选择「退出」时，`service_installed === false` 先经控制通道发送 `shutdown` 并最多等待 10 秒再退出，`service_installed === true` 只退出客户端和托盘，后台服务继续在线。替换应用保留 userData 与设备数据；升级期间不强制结束独立 Worker 或服务。
 
 ## 系统通知与托盘状态
 
@@ -37,7 +37,7 @@ node --test tools/package-desktop.test.mjs
 
 `viewingThread(id | null)` 声明正在查看的 Thread，主进程再核查窗口是否可见且聚焦。点击通知显示并聚焦窗口，通过 `onOpenTarget(callback)` 打开对应 Thread、Project 或本机设备；对象已删除或归档时网页打开列表并显示原因。本机连接拒绝只使用 daemon 的持久拒绝状态，进程退出后仍按本次 PID 与启动时间校验，中心设备拒绝事件不重复弹出。
 
-托盘使用网页同一 `/api/v1/activity` 员工快照统计所有设备上的运行与等待回复 Thread，包含 Project 中的 Thread，等待 Thread 去重，菜单最多列出 5 个。`setActivity({ running, waiting, threads })` 更新摘要和图标标记；退出登录清空计数。菜单按设备、工作摘要、等待 Thread、偏好、动作排列，外部服务不提供重启，迁移时保留阶段与日志入口。
+托盘使用网页同一 `/api/v1/activity` 员工快照统计所有设备上的运行与等待回复 Thread，包含 Project 中的 Thread，等待 Thread 去重，菜单最多列出 5 个。`setActivity({ running, waiting, threads })` 更新摘要和图标标记；退出登录清空计数。菜单按设备、工作摘要、等待 Thread、偏好、动作排列，已安装用户服务时不提供重启，迁移时保留阶段与日志入口。
 
 通知默认开启，开关保存在 `notifications.json`，关闭通知保留计数和等待菜单。macOS 通过 UserNotifications、Windows 通过本机通知注册表设置检查系统权限，禁用时显示原因和系统通知设置入口；查询失败保留未知状态，不据此禁用通知。Windows 使用固定 AppUserModelID `dev.baton.desktop`。通知正文和凭据不写入本机去重文件。
 
@@ -47,15 +47,15 @@ node --test tools/package-desktop.test.mjs
 
 新建 Thread 且目标为本机时可以选择本机目录，取消保留原选择；所选路径仍须通过中心与设备的可用目录范围校验。Project 保持跨设备调度，新建 Project 不选择设备或目录。
 
-本机设备详情显示进程状态、最近退出时间与原因、客户端与 batond 版本和已有升级阶段，可打开日志目录、复制诊断摘要。自动重启后仍保留本次客户端运行期间的最近退出事实。外部服务运行时说明由外部服务管理，不提供重启；升级或迁移阻止监管时也不能重启。旧外部服务未报告版本时显示未知。
+本机设备详情显示进程状态、最近退出时间与原因、客户端与 batond 版本和已有升级阶段，可打开日志目录、复制诊断摘要。最近退出事实来自控制通道的持久状态。已安装用户服务、升级或迁移阻止重启时，不提供重启；未报告版本时显示未知。
 
-复制摘要由主进程完成，包含设备状态、版本、平台、退出原因和当前日志末尾最多 200 行。凭据、部署配置、私钥及其续行被隐藏，URL 用户信息、查询和片段被移除。日志不通过桥接返回网页，摘要不附带身份或模型凭据文件。路径授权与桥接字段见 [桌面客户端设计](../../specs/desktop/TECH.md#本机目录与诊断桥接)。
+复制摘要由主进程完成，包含设备状态、版本、平台、退出原因和 `<data-dir>/logs/batond.log` 末尾最多 200 行。凭据、设备身份、私钥及其续行被隐藏，URL 用户信息、查询和片段被移除。日志不通过桥接返回网页，摘要不附带身份或模型凭据文件。路径授权与桥接字段见 [桌面客户端设计](../../specs/desktop/TECH.md#本机目录与诊断桥接)。
 
 ## 更新与数据迁移
 
 设备定期查询保存中心的签名更新清单并预下载。原生窗口菜单和托盘提供更新入口、目标版本、当前阶段及原因，并提供手动更新和空闲时自动更新设置。
 
-更新由 batond 准备和迁移设备数据，等待正在运行的工作自然结束。桌面停止监管后使用 electron-updater 安装并重启；本机回环更新源只提供由签名清单指定并校验大小与 SHA-256 的元数据和安装包。
+更新由 batond 准备和迁移设备数据，等待正在运行的工作自然结束。桌面客户端使用 electron-updater 安装并重启；本机回环更新源只提供由签名清单指定并校验大小与 SHA-256 的元数据和安装包。
 
 Windows 使用按用户安装的 NSIS 更新并重启。未使用 Authenticode 签名的安装包由签名清单和摘要保护，系统发布者身份未经认证，Windows 可能显示安全警告。macOS 自动安装需要 Developer ID 签名和公证的 ZIP；没有证书时可以提供手动安装的 DMG，自动安装不可用。
 
@@ -63,7 +63,7 @@ Windows 使用按用户安装的 NSIS 更新并重启。未使用 Authenticode �
 
 ## 验证范围
 
-链接解析、证书链、源与身份检查、batond 凭据传递、重启策略、stdin 关闭、日志轮转和状态合并使用 Node 离线测试。通知离线测试覆盖持久去重、并发重复提交、聚焦抑制、关闭后消费、点击目标和退出后的拒绝事实。证书夹具与生成命令见 [测试数据](src/testing/data/README.md)。
+接入链接解析、中心地址存储、跨中心替换判断、桥接注入源、控制通道状态映射，以及 `service_installed` 两种退出行为使用 Node 离线测试。网页测试覆盖桌面模式下的「连接这台电脑」、短码确认和取消。通知离线测试覆盖持久去重、并发重复提交、聚焦抑制、关闭后消费、点击目标和退出后的拒绝事实。
 
 macOS Developer ID 签名和公证的自动更新，以及 Windows NSIS 自动更新与重启，尚需原生平台验证。平台验收边界见 [桌面客户端规格](../../specs/desktop/PRODUCT.md#验收)。
 

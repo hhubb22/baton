@@ -19,7 +19,6 @@ import {
 import { LocalWorkerHost, initializeWorkerDirectory } from './daemon/host.ts'
 import { workerPaths } from './daemon/paths.ts'
 import { IPCError } from './daemon/ipc.ts'
-import { desktopDirectory, DesktopDirectoryError } from './daemon/desktop-directory.ts'
 import { ServiceError } from './daemon/service.ts'
 import { ProcessLockBusy } from './platform/lock.ts'
 import { StorageFormatError } from './storage-format.ts'
@@ -36,7 +35,6 @@ const usage = `Baton 节点
   status
   serve | run
   identity
-  desktop-directory --thread-id <UUID> --data-dir <已有数据目录>
 
 login 展示验证网址与短验证码，并等待浏览器确认后上线。
 Ctrl-C 仅退出终端等待；login --cancel 取消后台登录。
@@ -157,7 +155,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
     await runEnvironmentCLI(args)
     return
   }
-  if ((action === 'run' || action === 'serve' || action === 'up') && process.env.BATON_ENV_REEXEC !== '1') {
+  if ((action === 'run' || action === 'serve') && process.env.BATON_ENV_REEXEC !== '1') {
     const index = argv.findIndex((arg) => arg === '--data-dir' || arg.startsWith('--data-dir='))
     const directory =
       index < 0
@@ -229,18 +227,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
     }
     return
   }
-  if (action === 'desktop-directory') {
-    console.log(JSON.stringify(await desktopDirectory(args)))
-    return
-  }
-  if (
-    action === 'up' ||
-    action === 'register' ||
-    action === 'reauth' ||
-    action === 'run' ||
-    action === 'serve' ||
-    action === 'identity'
-  ) {
+  if (action === 'run' || action === 'serve' || action === 'identity') {
     const { runDaemonCLI } = await import('./daemon/cli.ts')
     await runDaemonCLI(action, args)
     return
@@ -524,9 +511,7 @@ export function reportBatondError(error: unknown, action = process.argv[2]): voi
       : undefined
   const daemonRunning = error instanceof ProcessLockBusy && basename(error.path) === 'daemon.lock'
   const knownCode =
-    error instanceof Error &&
-    'code' in error &&
-    ['needs_reauth', 'credential_revoked', 'deployment_invalid'].includes(String(error.code))
+    error instanceof Error && 'code' in error && String(error.code) === 'credential_revoked'
       ? String(error.code)
       : undefined
   const code = incompatible
@@ -534,10 +519,7 @@ export function reportBatondError(error: unknown, action = process.argv[2]): voi
     : daemonRunning
       ? 'daemon_running'
       : (knownCode ??
-        (error instanceof IPCError ||
-        error instanceof ServiceError ||
-        error instanceof StorageFormatError ||
-        error instanceof DesktopDirectoryError
+        (error instanceof IPCError || error instanceof ServiceError || error instanceof StorageFormatError
           ? error.code
           : 'batond_failed'))
   // SDK 诊断留在隔离宿主内，公开错误不包含原始 SDK 输出。
@@ -549,16 +531,14 @@ export function reportBatondError(error: unknown, action = process.argv[2]): voi
       message:
         action === 'worker' || action === 'agent-host' || action === 'watchdog'
           ? `${action} failed`
-          : action === 'desktop-directory' && !(error instanceof DesktopDirectoryError)
-            ? '无法查询 Thread 工作目录'
-            : daemonRunning
-              ? '服务或桌面客户端正在运行，请先停止已有 batond 再重试'
-              : error instanceof Error
-                ? error.message
-                : 'Baton 本地命令失败',
+          : daemonRunning
+            ? '服务或桌面客户端正在运行，请先停止已有 batond 再重试'
+            : error instanceof Error
+              ? error.message
+              : 'Baton 本地命令失败',
     }),
   )
-  process.exitCode = ['needs_reauth', 'node_version_incompatible'].includes(code) ? 78 : 1
+  process.exitCode = code === 'node_version_incompatible' ? 78 : 1
 }
 
 export async function runLocalCLI(

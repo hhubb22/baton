@@ -1,11 +1,11 @@
 import { expect, it } from 'vite-plus/test'
 import { Schema } from 'effect'
-import { BatonHttpApi, EnrollmentResponse, HttpErrors, SessionResponse, httpOpenApi } from '../src/http-api.ts'
-import { EnrollmentResponse as DeviceEnrollmentResponse, SessionResponse as AuthSessionResponse } from '../src/index.ts'
+import { BatonHttpApi, HttpErrors, SessionResponse, httpOpenApi } from '../src/http-api.ts'
+import { SessionResponse as AuthSessionResponse } from '../src/index.ts'
 
 it('generates schemas, statuses and cookie security for every implemented HTTP endpoint', () => {
   const endpoints = Object.values(BatonHttpApi.groups).flatMap((group) => Object.values(group.endpoints))
-  expect(endpoints).toHaveLength(71)
+  expect(endpoints).toHaveLength(66)
   const document = httpOpenApi()
   expect(document.info.title).toBe('Baton HTTP API')
   expect(document.paths['/api/v1/release']?.get?.responses).toHaveProperty('200')
@@ -51,19 +51,14 @@ it('generates schemas, statuses and cookie security for every implemented HTTP e
     expect(document.paths[path]?.get?.responses).toHaveProperty('200')
     expect(document.paths[path]?.get?.security).toEqual([{ session: [] }])
   }
-  expect(document.paths['/api/v1/nodes/{nodeId}/reauth-enrollments']?.post?.security).toEqual([{ session: [] }])
-  expect(document.paths['/api/v1/nodes/{nodeId}/reauth-enrollments']?.post?.responses).toHaveProperty('201')
-  expect(document.paths['/api/v1/nodes/{nodeId}/reauth']?.post?.responses).toHaveProperty('200')
-  expect(document.paths['/api/v1/nodes/{nodeId}/reauth']?.post?.security ?? []).toEqual([])
   expect(document.components.securitySchemes.session).toMatchObject({
     type: 'apiKey',
     in: 'cookie',
     name: 'baton_session',
   })
-  expect(document.paths['/api/v1/node-enrollments']?.post?.responses).toHaveProperty('501')
 })
 
-it('Session 与 Enrollment 在领域和 HTTP 入口保留实际响应约束', () => {
+it('Session 在领域和 HTTP 入口保留实际响应约束', () => {
   const session = {
     employee: {
       id: 'employee',
@@ -80,18 +75,6 @@ it('Session 与 Enrollment 在领域和 HTTP 入口保留实际响应约束', ()
     expect(Schema.encodeSync(schema)(decoded)).toEqual(session)
     expect(Schema.is(schema)({ ...session, csrf_token: 1 })).toBe(false)
     expect(Schema.is(schema)({ ...session, expires_at: 'tomorrow' })).toBe(false)
-  }
-  const enrollment = {
-    enrollment_id: 'enrollment',
-    enrollment_token: 'token',
-    expires_at: '2026-10-24T00:00:00.123456789Z',
-    expires_in_ms: 60000,
-  }
-  for (const schema of [EnrollmentResponse, DeviceEnrollmentResponse]) {
-    const decoded = Schema.decodeUnknownSync(schema)({ ...enrollment, future_field: true })
-    expect(Schema.encodeSync(schema)(decoded)).toEqual(enrollment)
-    expect(Schema.is(schema)({ ...enrollment, expires_at: 0 })).toBe(false)
-    expect(Schema.is(schema)({ ...enrollment, expires_at: 'tomorrow' })).toBe(false)
   }
 })
 

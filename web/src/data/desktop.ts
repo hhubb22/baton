@@ -2,18 +2,39 @@ import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-quer
 import { useEffect } from 'react'
 import type { BrowserNotification } from '@baton/protocol'
 import { keys } from './queries'
-import type { Device } from './types'
 
 // 网页只依赖 preload 的公开协议，不导入桌面进程代码。
-export type DesktopStatus = (
-  | { registered: false }
-  | { registered: true; coordinator_url: string; node_id: string; display_name: string; system: string }
-) & {
-  state: 'stopped' | 'connecting' | 'restarting' | 'rejected' | 'external' | 'stopping' | 'unregistered' | 'online'
-  connection_state?: 'connecting' | 'online' | 'rejected' | 'stopping'
-  code?: string
-  message?: string
+export type DesktopState = 'unbound' | 'authorizing' | 'connecting' | 'syncing' | 'online' | 'rejected' | 'stopped'
+
+export interface DesktopLogin {
+  session_id: string
+  user_code: string
+  verification_uri: string
+  verification_uri_complete: string
+  expires_at: string
+  expires_in_seconds: number
 }
+
+export interface DesktopStatus {
+  state: DesktopState
+  registered: boolean
+  pid?: number
+  batond_version?: string
+  protocol_version?: number
+  platform?: string
+  coordinator_url?: string
+  node_id?: string
+  employee_id?: string
+  display_name?: string
+  rejection?: { code: string; message: string; at: string }
+  pending_login?: DesktopLogin & { status: 'pending' }
+  last_error?: { code: string; message: string; at: string }
+  service_installed?: boolean
+}
+
+export type StartLoginResult =
+  | { status: 'pending'; login: DesktopLogin }
+  | { status: 'already_bound'; device: DesktopStatus }
 
 export interface DesktopTarget {
   thread_id?: string
@@ -55,8 +76,9 @@ export interface DesktopBridge {
   setActivity?(activity: DesktopActivity): Promise<void>
   status(): Promise<DesktopStatus>
   onStatus(callback: (status: DesktopStatus) => void): () => void
-  enroll(input: { code: string; displayName?: string }): Promise<DesktopStatus>
-  reauth(input: { code: string }): Promise<DesktopStatus>
+  startLogin(input?: { displayName?: string }): Promise<StartLoginResult>
+  cancelLogin(): Promise<void>
+  logout(): Promise<DesktopStatus>
 }
 
 declare global {
@@ -73,6 +95,7 @@ type DesktopCapability =
   | 'pick-directory'
   | 'diagnostics'
   | 'model-connection-key'
+  | 'device-login'
 
 export function desktopCapability(name: DesktopCapability) {
   const bridge = desktopBridge()
@@ -140,53 +163,37 @@ export function useLocalDesktop(nodeId: string | null, capability: DesktopCapabi
   return { bridge: local ? bridge : null, status }
 }
 
-export function needsDesktopReauth(status: DesktopStatus, devices: Device[]) {
-  return (
-    status.registered &&
-    (status.code === 'needs_reauth' ||
-      devices.some((device) => device.id === status.node_id && device.credentialState === 'idle_expired'))
-  )
-}
-
 export function desktopStatusLabel(status: DesktopStatus) {
-  const labels: Record<DesktopStatus['state'], string> = {
-    unregistered: '未连接',
-    stopped: '已停止',
+  const labels: Record<DesktopState, string> = {
+    unbound: '未连接',
+    authorizing: '等待确认…',
     connecting: '正在连接…',
-    restarting: '正在重新连接…',
-    rejected: '连接被拒绝',
-    external: '由外部服务管理',
-    stopping: '正在停止…',
+    syncing: '正在同步…',
     online: '在线',
+    rejected: '连接被拒绝',
+    stopped: '已停止',
   }
   return labels[status.state]
 }
 
 export function desktopErrorMessage(error: unknown, secret = '') {
   const raw = typeof error === 'string' ? error : error instanceof Error ? error.message : '无法连接此电脑，请重试。'
-  const message = raw.replace(
-    /^Error invoking remote method 'baton:(?:enroll|reauth|status|open-local|pick-directory|diagnostics|restart-daemon|open-logs|copy-diagnostics)': (?:Error: )?/,
-    '',
-  )
+  const message = raw.replace(/^Error invoking remote method 'baton:[^']+': (?:Error: )?/, '')
   const messages: Record<string, string> = {
-    '接入凭据已过期，请在中心重新领取': '设置码已过期，请重试。',
-    '接入参数无效，请重新领取接入凭据': '无法使用此设置码，请重试。',
-    'batond 操作失败，请检查设备状态或重新领取接入凭据': '无法连接此电脑，请检查状态后重试。',
-    '请先停止外部 batond 服务，再重新认证': '请先停止外部设备服务，再重新连接。',
-    '本机已接入，请使用已有身份或重新认证': '此电脑已连接，请检查状态。',
-    'batond 命令超时，请检查本机设备状态后重试': '此电脑没有响应，请检查状态后重试。',
-    '无法运行内置 batond，请重新安装客户端': '请重新安装桌面客户端以连接此电脑。',
-    '无法启动内置 batond': '无法启动此电脑上的服务，请重新安装桌面客户端。',
-    '无法读取本机设备状态，请检查日志': '无法读取此电脑的状态，请查看日志。',
-    'batond 在 60 秒内连续失败 5 次，请检查日志后重启':
-      '此电脑上的服务多次失败后已停止，请查看日志并重新启动桌面客户端。',
+    请先打开中心的接入链接: '请从中心重新打开接入链接。',
+    设备名称无效: '设备名称无效，请重试。',
+    '请先连接此电脑。': '此电脑还没有连接，请重试。',
+    '本机设备属于其他中心。': '此电脑已连接到其他中心。',
+    '无法打开此文件夹。': '无法打开此文件夹。',
+    '无法打开日志文件夹。': '无法打开日志文件夹。',
+    '当前无法重启设备服务。': '当前无法重启设备服务。',
+    '本机未能开始设备登录，请重试。': '无法开始设备登录，请重试。',
   }
   const translated = messages[message] ?? message
   return secret ? translated.replaceAll(secret, '[hidden]') : translated
 }
 
 export function desktopStatusReason(status: DesktopStatus) {
-  if (status.code === 'needs_reauth') return '此电脑的登录已过期。'
-  if (status.code === 'node_version_incompatible') return '请从 Baton 下载最新的桌面客户端。'
-  return status.message ? desktopErrorMessage(status.message) : null
+  if (status.rejection) return desktopErrorMessage(status.rejection.message)
+  return status.last_error ? desktopErrorMessage(status.last_error.message) : null
 }

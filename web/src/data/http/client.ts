@@ -1,7 +1,7 @@
 import type { DownloadsResponse } from '@baton/protocol/http-api'
 import type { ActivitySnapshot, BrowserEvent, DeviceLoginSession } from '@baton/protocol'
 import { ClientError, type BatonClient, type ChangeEvent, type NotificationReplay, type Topic } from '../client'
-import type { AgentKind, Device, Enrollment, Operation, OperationPhase, Session } from '../types'
+import type { AgentKind, Device, Operation, OperationPhase, Session } from '../types'
 import type { HttpContext } from './context'
 import { apiPath, timestamp } from './context'
 import { createProjectAPI } from './projects'
@@ -85,16 +85,6 @@ interface NodesDTO {
 interface MeDTO {
   employee: { id: string; display_name: string; username: string; must_change_password: boolean }
   csrf_token?: string
-}
-interface EnrollmentDTO {
-  enrollment_id?: string
-  id?: string
-  enrollment_token?: string
-  state?: Enrollment['state']
-  device_id?: string | null
-  node_id?: string | null
-  expires_at: string
-  expires_in_ms?: number
 }
 
 export const subscriptionName = (provider: string) =>
@@ -278,13 +268,6 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
     operation,
   }
   const origin = options.origin ?? globalThis.location?.origin ?? 'https://localhost'
-  const enrollment = (value: EnrollmentDTO): Enrollment => ({
-    id: value.enrollment_id ?? value.id ?? '',
-    state: value.state ?? 'pending',
-    coordinatorUrl: origin,
-    expiresIn: Math.max(0, value.expires_in_ms ?? timestamp(value.expires_at) - Date.now()),
-    deviceId: value.device_id ?? value.node_id ?? null,
-  })
 
   function stop() {
     if (timer) clearInterval(timer)
@@ -582,14 +565,6 @@ export function createHttpClient(options: HttpClientOptions = {}): BatonClient {
       }
       emit('devices', 'session', 'threads', 'projects', 'files')
       if (result.status !== 'effective') throw new ClientError('unavailable', '正在确认断开设备，请重试。')
-    },
-    async createEnrollment(nodeId) {
-      const path = nodeId === undefined ? '/node-enrollments' : `/nodes/${apiPath(nodeId)}/reauth-enrollments`
-      const value = await request<EnrollmentDTO>(path, { method: 'POST', body: '{}' })
-      return { ...enrollment(value), code: value.enrollment_token ?? '' }
-    },
-    async getEnrollment(id) {
-      return enrollment(await request<EnrollmentDTO>(`/node-enrollments/${apiPath(id)}`))
     },
     subscribe(listener) {
       listeners.add(listener)

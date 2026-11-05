@@ -13,10 +13,10 @@ import { createDatabaseRuntime } from '@baton/server/database'
 import type { TraceData } from 'effect/observability/OtlpTracer'
 import * as P from '@baton/protocol'
 import { startServer } from '@baton/server/server'
-import { openTestDatabase } from '@baton/server/testing/database'
+import { openTestDatabase, seedNodeIdentity } from '@baton/server/testing/database'
 import * as Auth from '@baton/server/auth'
 import * as Nodes from '@baton/server/nodes'
-import { registerNode } from '@baton/batond/daemon/identity'
+import { saveDeviceIdentity } from '@baton/batond/daemon/identity'
 import { runDaemon } from '@baton/batond/daemon/daemon'
 import { connectWebSocket } from '@baton/batond/daemon/transport'
 import { startTelemetryRelay } from '@baton/batond/daemon/telemetry-relay'
@@ -227,11 +227,12 @@ async function withProviderThread(
       await Codex.writeCodexTranscript(join(directory, 'codex-resumed.ndjson'), Codex.resumedOnly(transcript))
     }
     const origin = 'https://baton.local'
+    const signer = Nodes.CredentialSigner.generate()
     const running = await (tracedRuntime ?? database.runtime).runPromise(
       startServer({
         port: 0,
         allowedOrigins: [origin],
-        signer: Nodes.CredentialSigner.generate(),
+        signer,
         dispatchMs: 20,
         heartbeatMs: 1000,
         offlineMs: 5000,
@@ -300,27 +301,14 @@ async function withProviderThread(
       })
       expect(result.status).toBe(200)
     }
-    const enrollment = await request('/node-enrollments', 'POST', {})
-    expect(enrollment.status).toBe(201)
-    const enrollmentFile = join(directory, 'enrollment')
-    await writeFile(enrollmentFile, Schema.decodeUnknownSync(P.EnrollmentResponse)(enrollment.body).enrollment_token, {
-      mode: 0o600,
-    })
-    const identity = await registerNode({
-      dataDirectory: nodeDirectory,
-      coordinatorURL: `https://127.0.0.1:${running.port}`,
-      enrollmentFile,
+    const me = await request('/me')
+    expect(me.status).toBe(200)
+    const employeeId = (me.body as { employee: { id: string } }).employee.id
+    const issued = await seedNodeIdentity(database.run, signer, {
+      employeeId,
       displayName: `${agentType} replay workstation`,
-      transport: async (_url, input) => {
-        const response = await fetch(`${base}/api/v1/nodes/register`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(input),
-        })
-        expect(response.status).toBe(200)
-        return response.json()
-      },
     })
+    const identity = await saveDeviceIdentity(nodeDirectory, issued.identity, `https://127.0.0.1:${running.port}`)
     await initializeBrowseRoots(nodeDirectory, directory)
     const capability: P.RuntimeAgent = {
       agent_type: agentType,

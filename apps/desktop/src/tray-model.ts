@@ -2,13 +2,12 @@ import type { DesktopStatus } from './status.ts'
 import type { Activity } from './notifications.ts'
 
 export const trayLabels: Record<DesktopStatus['state'], string> = {
-  unregistered: '未连接',
+  unbound: '未连接',
+  authorizing: '等待确认…',
   connecting: '正在连接…',
+  syncing: '正在同步…',
   online: '',
   rejected: '连接被拒绝',
-  external: '由外部服务管理',
-  restarting: '正在重新连接…',
-  stopping: '正在停止…',
   stopped: '已停止',
 }
 

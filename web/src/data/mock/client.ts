@@ -1,13 +1,12 @@
 import type { DeviceLoginSession } from '@baton/protocol'
 import type { BatonClient, ChangeEvent } from '../client'
 import { ClientError } from '../client'
-import type { DeviceConnection, DeviceOS, Enrollment, ID, SessionEnd } from '../types'
+import type { DeviceConnection, ID, SessionEnd } from '../types'
 import type { ScenarioId } from './scenarios'
 import { HttpError } from '../http/transport'
 import { mockDownloads } from './downloads'
 import { realScheduler, type Scheduler } from './scheduler'
 import { browserLatency, MockStore, type Latency } from './store'
-import type { EnrollmentRecord } from './world'
 
 // 开发场景面板使用的控制入口，页面代码不调用。
 export interface MockControls {
@@ -19,11 +18,6 @@ export interface MockControls {
   readonly reachable: boolean
   setReachable(reachable: boolean): void
   setDeviceLoginState(state: 'pending' | 'expired' | 'approved' | 'denied'): void
-  // 最近一个有效的设置码；没有时为 null。下面三个操作都作用于它。
-  readonly pendingEnrollment: { id: ID } | null
-  connectEnrollment(name: string, os: DeviceOS): void
-  expireEnrollment(): void
-  useEnrollmentElsewhere(): void
   completeSubscriptionLogin(deviceNameOrId: string, provider: string): void
 }
 
@@ -56,21 +50,6 @@ export function createMockClient(
       throw new HttpError(410, { code: 'device_login_expired' })
     if (deviceLoginState === 'approved' || deviceLoginState === 'denied')
       throw new HttpError(409, { code: 'device_login_handled' })
-  }
-
-  function enrollmentView(record: EnrollmentRecord): Enrollment {
-    return {
-      id: record.id,
-      state: record.state,
-      coordinatorUrl: mockCoordinatorUrl,
-      expiresIn: Math.max(0, record.expiresAt - scheduler.now()),
-      deviceId: record.deviceId,
-    }
-  }
-
-  function closePending(state: 'expired' | 'used') {
-    const record = store.pendingEnrollment()
-    if (record) store.closeEnrollment(record, state)
   }
 
   // 每次读写先等待模拟延迟，返回的数据是副本，页面改动不会影响模拟状态。
@@ -116,13 +95,6 @@ export function createMockClient(
       setReachable(next) {
         reachable = next
       },
-      get pendingEnrollment() {
-        const record = store.pendingEnrollment()
-        return record && { id: record.id }
-      },
-      connectEnrollment: (name, os) => store.connectEnrollment(name, os),
-      expireEnrollment: () => closePending('expired'),
-      useEnrollmentElsewhere: () => closePending('used'),
       completeSubscriptionLogin: (device, provider) => store.completeSubscriptionLogin(device, provider),
     },
 
@@ -345,14 +317,6 @@ export function createMockClient(
       signedIn()
       store.removeDevice(deviceId)
     },
-    async createEnrollment(nodeId) {
-      await connect(latency.save)
-      signedIn()
-      const record = store.createEnrollment(nodeId)
-      return { ...enrollmentView(record), code: record.code }
-    },
-    getEnrollment: (id) => guarded(() => enrollmentView(store.enrollment(id))),
-
     subscribe: (listener: (event: ChangeEvent) => void) => store.subscribe(listener),
   }
 }

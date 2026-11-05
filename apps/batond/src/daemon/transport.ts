@@ -25,7 +25,7 @@ export const connectWebSocket: DaemonTransport = (url, options) =>
     const agent = url.startsWith('wss:') ? new HttpsAgent({ proxyEnv }) : new HttpAgent({ proxyEnv })
     const socket = new WebSocket(url, {
       agent,
-      ca: options.ca ?? getCACertificates('system'),
+      ca: options.ca ?? [...getCACertificates('system'), ...getCACertificates('extra')],
       minVersion: 'TLSv1.2',
       maxPayload: MaxMessageBytes,
       handshakeTimeout: 10_000,

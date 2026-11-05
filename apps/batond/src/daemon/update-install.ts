@@ -269,7 +269,7 @@ export async function dispatchInstallation(dataDirectory: string, args: readonly
 /** The versioned launcher owns the daemon and forwards shutdown. */
 export async function launchInstallation(dataDirectory: string, args: readonly string[]): Promise<number> {
   const paths = installationPaths(dataDirectory)
-  if (args[0] === 'run' || args[0] === 'up') {
+  if (args[0] === 'run') {
     try {
       await lstat(join(paths.root, 'rollback.json'))
       const { readUpdateState } = await import('./update-state.ts')
@@ -303,7 +303,7 @@ export async function launchInstallation(dataDirectory: string, args: readonly s
     (args[1] === undefined || args[1].startsWith('--') || ['start', 'manifest', 'desktop-feed'].includes(args[1]))
   )
     env = await (await import('../environment.ts')).loadProcessEnvironment(dataDirectory)
-  if (args[0] === 'run' || args[0] === 'up') {
+  if (args[0] === 'run') {
     const { initializeEnvironment, applyEnvironment } = await import('../environment.ts')
     const config = await initializeEnvironment(dataDirectory, process.env)
     if (config.revision)
@@ -325,7 +325,7 @@ export async function launchInstallation(dataDirectory: string, args: readonly s
   process.once('SIGINT', interrupt)
   process.once('SIGTERM', terminate)
   try {
-    if (args[0] === 'run' || args[0] === 'up') {
+    if (args[0] === 'run') {
       await new Promise<void>((resolve, reject) => {
         child.once('spawn', resolve)
         child.once('error', reject)

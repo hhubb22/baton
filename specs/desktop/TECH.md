@@ -1,6 +1,6 @@
 # 桌面客户端技术设计
 
-Status: draft
+Status: implemented
 Owner: Asa
 Basis: [桌面客户端行为规格](PRODUCT.md) DC-01～DC-15；[设备接入设计](../device-setup/TECH.md)；[发布设计](../release/TECH.md)。
 
@@ -56,9 +56,9 @@ Basis: [桌面客户端行为规格](PRODUCT.md) DC-01～DC-15；[设备接入�
 
 | Requirement | Setup and observation | Failure condition | Where | Status |
 |---|---|---|---|---|
-| DC-01～DC-03 | 在浏览器、完整客户端、裁剪能力客户端、外部源、子框架与 `setup.html` 下分别触发桥接调用 | 浏览器显示桌面专属入口；非保存中心主框架调用未被拒绝；Schema 放过额外路径字段或跨员工设备请求 | `web` 单元 + `apps/desktop` 单元 | planned |
-| DC-04 | 本地控制通道替身返回 `rejected(node_version_incompatible)`；模拟客户端覆盖升级后读取同一 `userData` 与数据目录 | 托盘或详情页未显示版本不兼容与下载入口；升级后丢失原中心配置或设备身份 | `apps/desktop` 单元 + `web` 单元 | planned |
-| DC-05～DC-10 | 模拟窗口隐藏、聚焦同 Thread、聚焦其他 Thread、页面重载与待回复列表变化 | 聚焦同 Thread 仍弹窗；重载后重复弹已见事件；`waiting > 0` 未更新托盘标记或菜单跳转失效 | `apps/desktop` 单元 | planned |
-| DC-11～DC-13 | 用控制通道替身覆盖本机 Thread、其他设备 Thread、缺失目录、越界符号链接、编辑器无 shell 启动及目录选择取消 | 其他设备或 Project 显示入口；缺失目录被自动创建；越界链接被打开；取消选择改动原输入 | `apps/desktop` 单元 + `web` 单元 | planned |
-| DC-14、DC-15 | 注入含连接凭据、设备码、模型密钥与带参 URL 的日志末尾，分别在 `service_installed` 为 `true`/`false` 下查看详情并复制摘要 | 服务托管时仍开放重启；网页脚本能读到原始日志；剪贴板摘要残留任何秘密或查询串 | `apps/desktop` 单元 | planned |
-| 原生平台验证 | macOS arm64 DMG 与 Windows x64 NSIS 真机核验窗口常驻、通知权限、访达/资源管理器打开与剪贴板 | 任一原生交互与规格不符 | 手动验证（未测平台如实记录） | planned |
+| DC-01～DC-03 | 在浏览器、完整客户端、裁剪能力客户端、外部源、子框架与 `setup.html` 下分别触发桥接调用 | 浏览器显示桌面专属入口；非保存中心主框架调用未被拒绝；Schema 放过额外路径字段或跨员工设备请求 | `web` 单元 + `apps/desktop` 单元 | automated |
+| DC-04 | 本地控制通道替身返回 `rejected(node_version_incompatible)`；模拟客户端覆盖升级后读取同一 `userData` 与数据目录 | 托盘或详情页未显示版本不兼容与下载入口；升级后丢失原中心配置或设备身份 | `apps/desktop` 单元 + `web` 单元 | automated |
+| DC-05～DC-10 | 模拟窗口隐藏、聚焦同 Thread、聚焦其他 Thread、页面重载与待回复列表变化 | 聚焦同 Thread 仍弹窗；重载后重复弹已见事件；`waiting > 0` 未更新托盘标记或菜单跳转失效 | `apps/desktop` 单元 | automated |
+| DC-11～DC-13 | 用控制通道替身覆盖本机 Thread、其他设备 Thread、缺失目录、越界符号链接、编辑器无 shell 启动及目录选择取消 | 其他设备或 Project 显示入口；缺失目录被自动创建；越界链接被打开；取消选择改动原输入 | `apps/desktop` 单元 + `web` 单元 | automated |
+| DC-14、DC-15 | 注入含连接凭据、设备码、模型密钥与带参 URL 的日志末尾，分别在 `service_installed` 为 `true`/`false` 下查看详情并复制摘要 | 服务托管时仍开放重启；网页脚本能读到原始日志；剪贴板摘要残留任何秘密或查询串 | `apps/desktop` 单元 | automated |
+| 原生平台验证 | macOS arm64 DMG 与 Windows x64 NSIS 真机核验窗口常驻、通知权限、访达/资源管理器打开与剪贴板 | 任一原生交互与规格不符 | 手动验证（未测平台如实记录） | manual pending |

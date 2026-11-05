@@ -1,15 +1,13 @@
 import { randomUUID } from 'node:crypto'
-import { rm, stat } from 'node:fs/promises'
+import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Effect } from 'effect'
 import { afterEach, describe, expect, it } from 'vite-plus/test'
 import type { NodeIdentity, ThreadReport, WorkerOpen } from '@baton/protocol'
-import { readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
 import { makePrivateTempDirectory } from '../testing/private.ts'
-import { registerNode, loadIdentity, coordinatorURL, relayURL } from './identity.ts'
+import { coordinatorURL, relayURL } from './identity.ts'
 import { contentHash, makeNodeLedger } from './ledger.ts'
 import { reconnectDelay } from './transport.ts'
-import { runDaemonCLI } from './cli.ts'
 
 const temporary: string[] = []
 const directory = async () => {
@@ -136,42 +134,7 @@ describe('node.db durable handoff', () => {
   })
 })
 
-describe('private registration', () => {
-  it('saves the issued credential and canonical coordinator once without replacing an identity', async () => {
-    const path = await directory(),
-      tokenFile = join(path, 'enrollment')
-    await writePrivateFileAtomic(tokenFile, 'offline-enrollment')
-    const issued = identity()
-    let calls = 0
-    const options = {
-      dataDirectory: path,
-      coordinatorURL: 'https://COORDINATOR.invalid:443/',
-      enrollmentFile: tokenFile,
-      transport: async (url: string, body: { enrollment_token: string }) => {
-        calls++
-        expect(url).toBe('https://coordinator.invalid/api/v1/nodes/register')
-        expect(body.enrollment_token).toBe('offline-enrollment')
-        return issued
-      },
-    }
-    const id = await registerNode(options)
-    expect(id.credential).toEqual(issued.credential)
-    expect((await loadIdentity(path)).coordinator_url).toBe('https://coordinator.invalid')
-    // Windows 的私有文件由父目录 ACL 保护，mode 不表示 DACL。
-    if (process.platform !== 'win32') expect((await stat(join(path, 'identity.json'))).mode & 0o777).toBe(0o600)
-    await expect(registerNode(options)).rejects.toThrow('节点身份已存在')
-    expect(calls).toBe(1)
-    expect((await readPrivateFile(join(path, 'identity.json'))).toString()).not.toContain('offline-enrollment')
-  })
-
-  it('rejects secret CLI arguments without echoing their values', async () => {
-    const error = await runDaemonCLI('register', ['--enrollment-token=private-fixture-value']).catch(
-      (error: unknown) => error,
-    )
-    expect(String(error)).toContain('注册凭据仅支持环境变量或私有文件')
-    expect(String(error)).not.toContain('private-fixture-value')
-  })
-
+describe('coordinator validation', () => {
   it('rejects insecure endpoints and bounds jitter', () => {
     for (const raw of ['http://local', 'https://user:secret@local', 'https://local/path', 'https://local/?secret=x'])
       expect(() => coordinatorURL(raw)).toThrow()

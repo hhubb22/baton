@@ -1,12 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { DesktopStatus } from './status.ts'
+import type { DesktopStatus, StartLoginResult } from './status.ts'
 import type { Activity, NativeNotice, NotificationTarget } from './notifications.ts'
 import { desktopCapabilities } from './capabilities.ts'
+import { canExposeBridge } from './bridge.ts'
 import type { DesktopDiagnostics } from './diagnostics.ts'
 
 const originArgument = process.argv.find((argument) => argument.startsWith('--baton-origin='))
 const origin = originArgument?.slice('--baton-origin='.length)
-if (process.isMainFrame && origin && location.origin === origin) {
+if (canExposeBridge(process.isMainFrame, location.origin, origin)) {
   contextBridge.exposeInMainWorld(
     'batonDesktop',
     Object.freeze({
@@ -53,9 +54,10 @@ if (process.isMainFrame && origin && location.origin === origin) {
           ipcRenderer.removeListener('baton:status-changed', listener)
         }
       },
-      enroll: (input: { code: string; displayName?: string }): Promise<DesktopStatus> =>
-        ipcRenderer.invoke('baton:enroll', input),
-      reauth: (input: { code: string }): Promise<DesktopStatus> => ipcRenderer.invoke('baton:reauth', input),
+      startLogin: (input: { displayName?: string } = {}): Promise<StartLoginResult> =>
+        ipcRenderer.invoke('baton:start-login', input),
+      cancelLogin: (): Promise<void> => ipcRenderer.invoke('baton:cancel-login'),
+      logout: (): Promise<DesktopStatus> => ipcRenderer.invoke('baton:logout'),
     }),
   )
 }

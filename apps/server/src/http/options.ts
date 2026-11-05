@@ -12,7 +12,6 @@ export interface HTTPOptions {
   readonly trustedProxies: ReturnType<typeof parseTrustedProxies>
   readonly signer: CredentialSigner
   readonly sessionTTLSeconds?: number
-  readonly enrollmentTTLSeconds?: number
   readonly webDirectory?: string
   readonly downloads?: DownloadsOptions
   readonly gateway: () => Pick<Gateway, 'request' | 'notify' | 'disconnect' | 'disconnectBrowsers' | 'diagnostics'>

@@ -42,7 +42,6 @@ export interface ServerOptions {
   readonly trustedProxyCidrs?: string
   readonly signer: Nodes.CredentialSigner
   readonly sessionTTLSeconds?: number
-  readonly enrollmentTTLSeconds?: number
   readonly tls?: TLSOptions
   readonly webDirectory?: string
   readonly downloads?: DownloadsOptions

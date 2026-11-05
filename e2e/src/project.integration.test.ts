@@ -17,8 +17,8 @@ import * as P from '@baton/protocol'
 import * as Auth from '@baton/server/auth'
 import * as Nodes from '@baton/server/nodes'
 import { startServer } from '@baton/server/server'
-import { openTestDatabase } from '@baton/server/testing/database'
-import { registerNode } from '@baton/batond/daemon/identity'
+import { openTestDatabase, seedNodeIdentity } from '@baton/server/testing/database'
+import { saveDeviceIdentity } from '@baton/batond/daemon/identity'
 import { initializeBrowseRoots } from '@baton/batond/devices/roots'
 import { LocalWorkerHost } from '@baton/batond/daemon/host'
 import { runDaemon } from '@baton/batond/daemon/daemon'
@@ -144,11 +144,12 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
       banner: { js: 'const __baton_import_meta_url__ = require("node:url").pathToFileURL(__filename).href;' },
       logLevel: 'silent',
     })
+    const signer = Nodes.CredentialSigner.generate()
     const server = await database.runtime.runPromise(
       startServer({
         port: 0,
         allowedOrigins: [origin],
-        signer: Nodes.CredentialSigner.generate(),
+        signer,
         tls: { cert: ca, key: await readFile(keyFile) },
         dispatchMs: 20,
         projectDispatchMs: 25,
@@ -163,17 +164,12 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
       bob = browser(base, ca)
     await signIn(alice, 't3alice')
     await signIn(bob, 't3bob')
-    const enrollment = await alice<P.EnrollmentResponse>('/node-enrollments', 'POST', {})
-    expect(enrollment.status).toBe(201)
-    const enrollmentFile = join(directory, 'enrollment')
-    await writeFile(enrollmentFile, enrollment.body.enrollment_token, { mode: 0o600 })
-    const identity = await registerNode({
-      dataDirectory: nodeDirectory,
-      coordinatorURL: base,
-      caFile,
-      enrollmentFile,
+    const me = await alice<{ employee: { id: string } }>('/me')
+    const issued = await seedNodeIdentity(database.run, signer, {
+      employeeId: me.body.employee.id,
       displayName: 'T3 local workstation',
     })
+    const identity = await saveDeviceIdentity(nodeDirectory, issued.identity, base)
     await writeFile(join(nodeDirectory, 'browse-roots.json'), '{"roots":[]}', { mode: 0o600 })
     await initializeBrowseRoots(nodeDirectory, workspace)
     await writeFile(join(workspace, 'artifact.log'), 'T3 local artifact preview\n')
@@ -549,11 +545,12 @@ test('completed chat → background memory and HTTP embeddings → recall → re
       caFile,
     ])
     const ca = await readFile(caFile, 'utf8')
+    const signer = Nodes.CredentialSigner.generate()
     const server = await database.runtime.runPromise(
       startServer({
         port: 0,
         allowedOrigins: [origin],
-        signer: Nodes.CredentialSigner.generate(),
+        signer,
         tls: { cert: ca, key: await readFile(keyFile) },
         dispatchMs: 20,
         projectDispatchMs: 25,
@@ -565,10 +562,12 @@ test('completed chat → background memory and HTTP embeddings → recall → re
     await database.run(Auth.createEmployee('memoryalice', 'Alice', 'local-t3-initial-password-123'))
     const alice = browser(base, ca)
     await signIn(alice, 'memoryalice')
-    const enrollment = await alice<P.EnrollmentResponse>('/node-enrollments', 'POST', {})
-    const enrollmentFile = join(directory, 'enrollment')
-    await writeFile(enrollmentFile, enrollment.body.enrollment_token, { mode: 0o600 })
-    const identity = await registerNode({ dataDirectory: nodeDirectory, coordinatorURL: base, caFile, enrollmentFile })
+    const me = await alice<{ employee: { id: string } }>('/me')
+    const issued = await seedNodeIdentity(database.run, signer, {
+      employeeId: me.body.employee.id,
+      displayName: 'Memory node',
+    })
+    const identity = await saveDeviceIdentity(nodeDirectory, issued.identity, base)
     await writeFile(join(nodeDirectory, 'browse-roots.json'), '{"roots":[]}', { mode: 0o600 })
     const entry = new URL(import.meta.resolve('@baton/project-agent-runtime/testing/memory-worker'))
     const loader = createRequire(entry).resolve('tsx')

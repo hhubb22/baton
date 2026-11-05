@@ -1,6 +1,5 @@
-import { lstat, realpath, stat } from 'node:fs/promises'
+import { realpath, stat } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
-import { parseArgs } from 'node:util'
 import { Effect, Schema } from 'effect'
 import * as Reactivity from 'effect/reactivity/Reactivity'
 import * as Sqlite from '@baton/sqlite'
@@ -12,7 +11,6 @@ import { loadIdentity } from './identity.ts'
 export class DesktopDirectoryError extends Error {
   constructor(
     readonly code:
-      | 'invalid_arguments'
       | 'identity_unavailable'
       | 'ledger_unavailable'
       | 'thread_unknown'
@@ -34,22 +32,7 @@ const readWorker = Effect.fnUntraced(function* (filename: string, threadId: stri
 })
 
 /** 仅从节点已保存的中心配置读取目录，不发现或启动 Worker。 */
-export async function desktopDirectory(args: string[]) {
-  let dataDirectory: string
-  let threadId: string
-  try {
-    const { values } = parseArgs({
-      args,
-      options: { 'data-dir': { type: 'string' }, 'thread-id': { type: 'string' } },
-    })
-    if (!values['data-dir'] || !Schema.is(UUID)(values['thread-id'])) throw new Error()
-    dataDirectory = values['data-dir']
-    threadId = values['thread-id']!
-    if (!(await lstat(dataDirectory)).isDirectory()) throw new Error()
-  } catch {
-    throw new DesktopDirectoryError('invalid_arguments', '需要 --thread-id UUID 和 --data-dir 已有数据目录')
-  }
-
+export async function resolveThreadDirectory(dataDirectory: string, threadId: string) {
   const identity = await loadIdentity(dataDirectory).catch(() => {
     throw new DesktopDirectoryError('identity_unavailable', '无法读取已注册的节点身份')
   })

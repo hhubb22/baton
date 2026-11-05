@@ -8,14 +8,13 @@ import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, test } from 'vite-plus/test'
 import { NodeIdentity, type CreateBrowserThreadInput, type RuntimeAgent, type RuntimeReport } from '@baton/protocol'
 import { runDaemon } from '@baton/batond/daemon/daemon'
-import { nodeSystem } from '@baton/batond/daemon/identity'
 import { initializeBrowseRoots } from '@baton/batond/devices/roots'
 import { connectWebSocket } from '@baton/batond/daemon/transport'
 import * as Auth from '@baton/server/auth'
 import { createDatabaseRuntime } from '@baton/server/database'
 import * as Nodes from '@baton/server/nodes'
 import { startServer } from '@baton/server/server'
-import { openTestDatabase } from '@baton/server/testing/database'
+import { openTestDatabase, seedNodeIdentity } from '@baton/server/testing/database'
 
 async function postgresProxy(databaseURL: string) {
   const target = new URL(databaseURL)
@@ -84,20 +83,11 @@ test('database outage rejects HTTP writes and retries daemon authentication unti
     const password = randomUUID()
     await database.run(Auth.changePassword(account.employee.id, account.password, password))
     const session = await database.run(Auth.login(account.employee.username, password))
-    const enrollment = await database.run(Nodes.issueEnrollment(account.employee.id))
-    const identity = Schema.decodeUnknownSync(NodeIdentity)(
-      await database.run(
-        Nodes.registerNode(
-          {
-            enrollment_token: String(enrollment.enrollment_token),
-            display_name: 'Local outage fixture',
-            system: nodeSystem(),
-            capabilities: [],
-          },
-          signer,
-        ),
-      ),
-    )
+    const issued = await seedNodeIdentity(database.run, signer, {
+      employeeId: account.employee.id,
+      displayName: 'Local outage fixture',
+    })
+    const identity = Schema.decodeUnknownSync(NodeIdentity)(issued.identity)
     const threadId = randomUUID()
     // A persisted idle Thread lets the message endpoint run without creating a Worker.
     await database.run(

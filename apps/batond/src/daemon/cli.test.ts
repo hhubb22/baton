@@ -4,24 +4,21 @@ import { beforeEach, expect, it, vi } from 'vite-plus/test'
 import type { NodeIdentity } from '@baton/protocol'
 import { runDaemonCLI } from './cli.ts'
 import { runDaemon } from './daemon.ts'
-import { loadIdentity, reauthNode, registerNode } from './identity.ts'
+import { loadIdentity } from './identity.ts'
 import { initializeBrowseRoots } from '../devices/roots.ts'
-import { loadDeployment } from './deployment.ts'
 
 vi.mock('./daemon.ts', () => ({ runDaemon: vi.fn(() => Effect.void) }))
-vi.mock('./deployment.ts', () => ({ loadDeployment: vi.fn() }))
 vi.mock('./identity.ts', () => ({
   defaultDataDirectory: () => '/offline-node',
   isMissing: (error: unknown) => error instanceof Error && 'code' in error && error.code === 'ENOENT',
   loadIdentity: vi.fn(),
-  registerNode: vi.fn(),
-  reauthNode: vi.fn(),
 }))
 vi.mock('../devices/roots.ts', () => ({ initializeBrowseRoots: vi.fn() }))
 
 const identity: NodeIdentity = {
   node_id: '729f92e9-e68c-4a30-817a-0adb2da87b51',
   employee_id: '74b66275-348c-4dd3-ae1d-7f3d21440f70',
+  coordinator_url: 'https://center.test',
   display_name: 'Offline node',
   system: 'linux',
   role: '',
@@ -39,55 +36,18 @@ const identity: NodeIdentity = {
 beforeEach(() => {
   vi.resetAllMocks()
   vi.mocked(runDaemon).mockImplementation(() => Effect.void)
-  vi.mocked(registerNode).mockResolvedValue(identity)
   vi.mocked(loadIdentity).mockResolvedValue(identity)
-  vi.mocked(reauthNode).mockResolvedValue(identity)
 })
 
-it('reauthenticates without starting the daemon or changing directory authorization and prints no credentials', async () => {
-  const output = vi.spyOn(console, 'log').mockImplementation(() => undefined)
-  try {
-    await runDaemonCLI('reauth', [
-      '--data-dir',
-      '/saved-node',
-      '--enrollment-file',
-      '/private/enrollment',
-      '--ca-file',
-      '/private/ca.pem',
-      '--coordinator',
-      'https://ignored.invalid',
-    ])
-    expect(reauthNode).toHaveBeenCalledWith({
-      dataDirectory: '/saved-node',
-      enrollmentFile: '/private/enrollment',
-      caFile: '/private/ca.pem',
-      signal: expect.any(AbortSignal),
-    })
-    expect(initializeBrowseRoots).not.toHaveBeenCalled()
-    expect(registerNode).not.toHaveBeenCalled()
-    expect(runDaemon).not.toHaveBeenCalled()
-    expect(output).toHaveBeenCalledExactlyOnceWith(
-      JSON.stringify({
-        node_id: identity.node_id,
-        employee_id: identity.employee_id,
-        display_name: identity.display_name,
-        system: identity.system,
-      }),
-    )
-  } finally {
-    output.mockRestore()
-  }
-})
-
-it('rejects enrollment secrets in reauth arguments without echoing them', async () => {
-  const result = await runDaemonCLI('reauth', ['--enrollment-token=offline-secret']).catch((error: unknown) => error)
-  expect(String(result)).toContain('注册凭据仅支持环境变量或私有文件')
+it('rejects unknown arguments without echoing them', async () => {
+  const result = await runDaemonCLI('run', ['--unknown-option=offline-secret']).catch((error: unknown) => error)
+  expect(String(result)).toContain('节点命令参数无效')
   expect(String(result)).not.toContain('offline-secret')
-  expect(reauthNode).not.toHaveBeenCalled()
+  expect(initializeBrowseRoots).not.toHaveBeenCalled()
+  expect(runDaemon).not.toHaveBeenCalled()
 })
 
-it.each(['up', 'run'])('passes the default control budget through %s', async (action) => {
-  if (action !== 'up' && action !== 'run') throw new Error('Invalid fixture action')
+it.each(['run', 'serve'] as const)('passes the default control budget through %s', async (action) => {
   await runDaemonCLI(action, [])
   expect(runDaemon).toHaveBeenCalledWith(expect.objectContaining({ controlTimeoutSeconds: 370 }))
 })
@@ -133,49 +93,6 @@ it.each(['0', '-1', '1.5', '3601', 'NaN', 'Infinity'])(
   },
 )
 
-it.each(['up', 'register'] as const)('%s uses deployment defaults only for first registration', async (action) => {
-  const output = vi.spyOn(console, 'log').mockImplementation(() => undefined)
-  try {
-    vi.mocked(loadIdentity).mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }))
-    vi.mocked(loadDeployment).mockResolvedValue({
-      format: 1,
-      coordinator_url: 'https://deployment.invalid',
-      ca_pem: 'deployment-ca',
-    })
-    await runDaemonCLI(action, [], { installationDirectory: '/installation' })
-    expect(loadDeployment).toHaveBeenCalledWith('/installation')
-    expect(registerNode).toHaveBeenCalledWith(
-      expect.objectContaining({
-        coordinatorURL: 'https://deployment.invalid',
-        caPem: 'deployment-ca',
-      }),
-    )
-    vi.mocked(registerNode).mockClear()
-    await runDaemonCLI(action, ['--coordinator', 'https://explicit.invalid', '--ca-file', '/explicit-ca'])
-    const options = vi.mocked(registerNode).mock.calls[0]![0]
-    expect(options).toMatchObject({ coordinatorURL: 'https://explicit.invalid', caFile: '/explicit-ca' })
-    expect(options).not.toHaveProperty('caPem')
-  } finally {
-    output.mockRestore()
-  }
-})
-
-it.each(['up', 'run', 'register', 'reauth'] as const)(
-  '%s does not read deployment for an existing identity',
-  async (action) => {
-    const output = vi.spyOn(console, 'log').mockImplementation(() => undefined)
-    try {
-      vi.mocked(loadDeployment).mockRejectedValue(new Error('must not read deployment'))
-      if (action === 'register') await expect(runDaemonCLI(action, [])).rejects.toThrow('节点身份已存在')
-      else await runDaemonCLI(action, [])
-      expect(loadDeployment).not.toHaveBeenCalled()
-      expect(registerNode).not.toHaveBeenCalled()
-    } finally {
-      output.mockRestore()
-    }
-  },
-)
-
 it('identity reports only public identity fields and handles an unregistered directory without creating it', async () => {
   const output = vi.spyOn(console, 'log').mockImplementation(() => undefined)
   try {
@@ -183,6 +100,7 @@ it('identity reports only public identity fields and handles an unregistered dir
     expect(JSON.parse(output.mock.calls[0]![0] as string)).toEqual({
       registered: true,
       employee_id: identity.employee_id,
+      coordinator_url: identity.coordinator_url,
       node_id: identity.node_id,
       display_name: identity.display_name,
       system: identity.system,
@@ -192,7 +110,6 @@ it('identity reports only public identity fields and handles an unregistered dir
     await runDaemonCLI('identity', [])
     expect(output).toHaveBeenLastCalledWith(JSON.stringify({ registered: false }))
     expect(initializeBrowseRoots).not.toHaveBeenCalled()
-    expect(loadDeployment).not.toHaveBeenCalled()
     expect(runDaemon).not.toHaveBeenCalled()
   } finally {
     output.mockRestore()

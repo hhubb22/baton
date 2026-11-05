@@ -49,7 +49,7 @@ import type {
 import { previewLimit } from '../types'
 import { createWorld, type ScenarioId } from './scenarios'
 import type { Scheduler } from './scheduler'
-import { fileKey, type AssistantContext, type EnrollmentRecord, type PassiveInput, type World } from './world'
+import { fileKey, type AssistantContext, type PassiveInput, type World } from './world'
 
 export interface Latency {
   // 读取一次数据。
@@ -74,25 +74,6 @@ export const browserLatency: Latency = { read: 150, save: 400, device: 900, run:
 
 // Agent 收到停止请求一分钟后还没停下，设备结束它的进程。
 export const stopTimeout = 60_000
-
-// 设置码 10 分钟内有效，只能用一次。
-export const enrollmentTtl = 10 * 60_000
-
-const codeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'
-
-// 模拟设置码按序号生成，同一场景每次相同，不是可用的凭据。
-function sampleCode(seed: number) {
-  let state = seed * 7919 + 17
-  const group = (length: number) => {
-    let out = ''
-    for (let index = 0; index < length; index += 1) {
-      state = (state * 1103515245 + 12345) % 2147483648
-      out += codeAlphabet[state % codeAlphabet.length]
-    }
-    return out
-  }
-  return [group(8), group(4), group(4), group(4)].join('-')
-}
 
 function separator(path: string) {
   return path.includes('\\') ? '\\' : '/'
@@ -1245,109 +1226,6 @@ export class MockStore {
     this.world.devices.push(device)
     if (!this.world.session.defaultDeviceId) this.world.session.defaultDeviceId = device.id
     this.emit('session', 'devices')
-  }
-
-  createEnrollment(nodeId?: ID): EnrollmentRecord {
-    if (nodeId !== undefined && this.device(nodeId).credentialState === 'revoked')
-      throw new ClientError('conflict', '设备已断开')
-    this.sequence += 1
-    const record: EnrollmentRecord = {
-      id: `enr-${this.sequence}`,
-      code: sampleCode(this.sequence),
-      targetNodeId: nodeId,
-      state: 'pending',
-      expiresAt: this.scheduler.now() + enrollmentTtl,
-      deviceId: null,
-    }
-    this.world.enrollments.push(record)
-    this.schedule(enrollmentTtl, () => this.closeEnrollment(record, 'expired'))
-    this.emit('devices')
-    return record
-  }
-
-  enrollment(id: ID): EnrollmentRecord {
-    const record = this.world.enrollments.find((item) => item.id === id)
-    if (!record) throw new ClientError('notFound', `找不到设置码 ${id}`)
-    return record
-  }
-
-  pendingEnrollment() {
-    return this.world.enrollments.findLast((item) => item.state === 'pending') ?? null
-  }
-
-  closeEnrollment(record: EnrollmentRecord, state: 'expired' | 'used') {
-    if (record.state !== 'pending') return
-    record.state = state
-    this.emit('devices')
-  }
-
-  // 设备用最近一个有效的设置码完成注册：先同步设备信息，再上线。还没有默认设备时，它成为默认设备。
-  connectEnrollment(name: string, os: DeviceOS) {
-    const record = this.pendingEnrollment()
-    if (!record) return
-    if (record.targetNodeId !== undefined) {
-      const device = this.device(record.targetNodeId)
-      if (device.credentialState === 'revoked') throw new ClientError('conflict', '设备已断开')
-      device.credentialState = 'active'
-      record.state = 'connected'
-      record.deviceId = device.id
-      this.setDeviceConnection(device.id, 'syncing')
-      this.schedule(this.latency.device, () => this.setDeviceConnection(device.id, 'online'))
-      return
-    }
-    const defaults = newDeviceDefaults[os]
-    const world = this.world
-    const device: Device = {
-      id: this.nextId('dev'),
-      name,
-      os,
-      system: defaults.system,
-      batondVersion: '0.9.2',
-      connection: 'syncing',
-      lastSeenAt: this.scheduler.now(),
-      registeredAt: this.scheduler.now(),
-      agents: [],
-      subscriptions: [{ provider: 'ChatGPT', signedIn: true }],
-      hasRuntime: true,
-      folders: [...defaults.folders],
-      repos: [...defaults.repos],
-      commandAccess: { enabled: false, user: world.session.account?.username ?? 'kaken', shell: defaults.shell },
-    }
-    world.devices.push(device)
-    record.state = 'connected'
-    record.deviceId = device.id
-    if (!world.session.defaultDeviceId) world.session.defaultDeviceId = device.id
-    this.emit('session', 'devices')
-
-    this.schedule(this.latency.device, () => {
-      if (!world.devices.includes(device)) return
-      const abilities = { create: true, queue: true, steer: true, stop: true, resume: true, switchModel: true }
-      device.agents = [
-        {
-          kind: 'codex',
-          status: 'available',
-          reason: null,
-          version: '0.98.0',
-          models: ['gpt-6.1-sol', 'gpt-6.1-mini'],
-          defaultModel: 'gpt-6.1-sol',
-          abilities,
-          account: 'ChatGPT',
-          problem: null,
-        },
-        {
-          kind: 'pi',
-          status: 'available',
-          reason: null,
-          version: '0.31.0',
-          models: ['gpt-6.1-sol'],
-          defaultModel: 'gpt-6.1-sol',
-          abilities: { ...abilities, switchModel: false },
-          account: null,
-          problem: null,
-        },
-      ]
-      this.setDeviceConnection(device.id, 'online')
-    })
   }
 
   // 场景里已经在执行或正在停止的 Thread 和 Project 助手接着往下走。

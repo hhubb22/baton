@@ -1,6 +1,6 @@
 # 桌面客户端行为规格
 
-Status: draft
+Status: implemented
 Owner: Asa
 Basis: 桌面端与本机控制通道简化对齐；[设备接入行为规格](../device-setup/PRODUCT.md) DS-08～DS-17；[发布行为规格](../release/PRODUCT.md)。
 

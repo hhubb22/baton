@@ -12,7 +12,7 @@ import { FolderDialog } from './FolderDialog'
 import { LocalThreadActions } from './LocalThreadActions'
 import { createAppRouter } from './router'
 
-const registeredDesktop = desktopStatusFixture as Extract<DesktopStatus, { registered: true }>
+const registeredDesktop: DesktopStatus = desktopStatusFixture
 
 const diagnostics: DesktopDiagnostics = {
   clientVersion: '0.1.0',
@@ -83,7 +83,7 @@ describe('local thread actions', () => {
       if (mode === 'browser') vi.stubGlobal('batonDesktop', undefined)
       if (mode === 'old client') desktop.bridge.capabilities = []
       if (mode === 'future capability') desktop.bridge.capabilities.forEach((capability) => (capability.version = 2))
-      if (mode === 'unregistered') desktop.publish({ registered: false, state: 'unregistered' })
+      if (mode === 'unregistered') desktop.publish({ registered: false, state: 'unbound' })
       const client = createMockClient('normal')
       render(
         <ClientProvider client={client}>
@@ -95,8 +95,8 @@ describe('local thread actions', () => {
     },
   )
 
-  it('uses the desktop system for Windows labels and removes actions when the local identity changes', async () => {
-    const desktop = localBridge({ ...registeredDesktop, system: 'windows' })
+  it('uses the desktop platform for Windows labels and removes actions when the local identity changes', async () => {
+    const desktop = localBridge({ ...registeredDesktop, platform: 'win32 x64' })
     const client = createMockClient('normal')
     render(
       <ClientProvider client={client}>
@@ -242,12 +242,12 @@ describe('local device diagnostics', () => {
     await waitFor(() => expect(f.desktop.bridge.diagnostics.mock.calls.length).toBeGreaterThan(1))
   })
 
-  it('explains external service management and has no restart action', async () => {
-    const f = fixture('/devices?device=dev-mac', localBridge({ ...registeredDesktop, state: 'external' }))
-    f.desktop.bridge.diagnostics.mockResolvedValue({ ...diagnostics, processState: 'external', canRestart: false })
+  it('hides restart when the user service manages this computer', async () => {
+    const f = fixture('/devices?device=dev-mac', localBridge({ ...registeredDesktop, state: 'stopped' }))
+    f.desktop.bridge.diagnostics.mockResolvedValue({ ...diagnostics, processState: 'stopped', canRestart: false })
     f.show()
     const section = await screen.findByRole('region', { name: '本机诊断' })
-    expect(await within(section).findByText('由外部服务管理')).toBeInTheDocument()
+    expect(await within(section).findByText('已停止')).toBeInTheDocument()
     expect(within(section).queryByRole('button', { name: '重启设备服务' })).not.toBeInTheDocument()
     expect(within(section).getByRole('button', { name: '打开日志文件夹' })).toBeInTheDocument()
     expect(within(section).getByRole('button', { name: '复制诊断摘要' })).toBeInTheDocument()

@@ -18,7 +18,7 @@
 | `thread-question.ts`、`full-output.ts` | Agent 问题与回答、设备完整输出读取 |
 | `common.ts`、`constants.ts`、`trace.ts`、`project-providers.ts` | 基础值、通用响应与诊断、容量限制、追踪上下文及 provider 标识规范化 |
 
-领域模块不依赖 `node.ts`、`worker.ts`、`http.ts` 或 `http-api.ts`。传输模块直接组合领域 Schema；节点的 `Route`、`Source`、`Envelope` 和 `Frame` 定义在 `node.ts`。`SessionResponse` 统一定义在 `auth.ts`，`EnrollmentResponse` 统一定义在 `device.ts`，`http-api.ts` 重导出它们并在端点处附加状态与响应头。前者的 `csrf_token` 使用 `Schema.String`，两者的 `expires_at` 都使用 `Timestamp`。
+领域模块不依赖 `node.ts`、`worker.ts`、`http.ts` 或 `http-api.ts`。传输模块直接组合领域 Schema；节点的 `Route`、`Source`、`Envelope` 和 `Frame` 定义在 `node.ts`。`SessionResponse` 统一定义在 `auth.ts`，设备码响应统一定义在 `device.ts`，`http-api.ts` 重导出它们并在端点处附加状态与响应头。`SessionResponse` 的 `csrf_token` 使用 `Schema.String`，设备码会话的 `expires_at` 使用 `Timestamp`。
 
 `src/index.ts` 保留包入口的公开导出名，包内代码直接导入所属领域模块。
 
@@ -103,6 +103,6 @@ Thread 历史通过中心时间线读取已保存的输入、回复和事件，�
 
 验证命令与按包筛选方法见 [AGENTS.md](../../AGENTS.md#常用构建与验证命令)。
 
-协议包使用少量 TS 自写样例验证 Thread 派生对象往返、字段约束与未知字段容忍、命令完成身份、open 成功回执的存储代次、Worker 就绪关系及问题与回答容量。HTTP 契约测试核对路径、参数、响应与错误声明，并验证 Session、Enrollment 在领域与 HTTP 入口的响应约束。已有调用方覆盖的 Schema 随对应业务测试验证。
+协议包使用少量 TS 自写样例验证 Thread 派生对象往返、字段约束与未知字段容忍、命令完成身份、open 成功回执的存储代次、Worker 就绪关系及问题与回答容量。HTTP 契约测试核对路径、参数、响应与错误声明，并验证 Session、设备码会话在领域与 HTTP 入口的响应约束。已有调用方覆盖的 Schema 随对应业务测试验证。
 
 中心、节点、Worker 和网页的调用方测试验证这些契约在实际路由、命令接收、异步完成和事件消费中的使用。协议包只检查传输形状及局部关系；账本事务、ACK 与完成到达顺序、数据库 JSONB 容量、权限、租约、Agent 行为、跨系统进程和安装包由对应模块验证。

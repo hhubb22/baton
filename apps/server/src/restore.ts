@@ -14,7 +14,6 @@ export const finalizeRestore = Effect.fn('finalizeRestore')(function* (signingKe
         yield* sql`SELECT pg_advisory_xact_lock(4815162342)`
         yield* sql`UPDATE login_sessions SET revoked_at=clock_timestamp() WHERE revoked_at IS NULL`
         yield* sql`UPDATE device_login_sessions SET status='expired' WHERE status IN ('pending','approved','consumed')`
-        yield* sql`UPDATE node_enrollments SET used_at=clock_timestamp() WHERE used_at IS NULL`
         yield* sql`UPDATE node_presence SET online=false,synced=false,status_updated_at=clock_timestamp() WHERE online OR synced`
 
         // 旧快照中的未派发也可能已在备份之后执行，所有待发操作均等待人工核对。

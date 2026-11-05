@@ -10,7 +10,7 @@ Baton 将 Project Runtime 编入 batond 的单一 Node SEA 可执行文件。安
 
 | 子命令 | 用途 |
 | --- | --- |
-| `up`、`register`、`run` | 节点注册和连接中心 |
+| `login`、`run`、`serve` | 设备登录与本机服务 |
 | `worker` | 独立 Thread Worker，持有账本、独占锁和认证 IPC |
 | `watchdog` | POSIX 所属进程组监控与回收 |
 | `agent-host <类型> --cwd <目录> --state <目录>` | 独占 Cursor、Pi、Codex 或 Kiro 执行宿主 |

@@ -3,21 +3,25 @@ import { mkdir, readFile, realpath } from 'node:fs/promises'
 import { homedir, hostname } from 'node:os'
 import { join } from 'node:path'
 import { Schema } from 'effect'
-import { Batond, daemonLog } from './batond.ts'
+import { Batond } from './batond.ts'
 import {
   authorizeBridge,
-  assertIdentityOrigin,
-  EnrollmentInput,
+  LoginInput,
   NotificationBatch,
   NotificationScope,
   TrayActivity,
   ViewingThread,
 } from './bridge.ts'
-import { loadDeployment, saveDeployment, parseConnectLink, caFingerprint, type DeploymentConfig } from './deployment.ts'
-import { verifyCertificate } from './trust.ts'
+import {
+  linkDecision,
+  loadCoordinator,
+  parseConnectLink,
+  saveCoordinator,
+  type CoordinatorConfig,
+} from './coordinator.ts'
 import { createWindow } from './window.ts'
-import { isUpdateStartupFailure, Supervisor } from './supervisor.ts'
-import { managedDaemonPid, mergeStatus, readDaemonStatus, readDaemonRejection, type PublicIdentity } from './status.ts'
+import { DaemonClient, stopDaemonForQuit } from './daemon-client.ts'
+import { type DesktopStatus } from './status.ts'
 import { createTray } from './tray.ts'
 import { autostart } from './autostart.ts'
 import { prepareDesktopInstaller } from './update-feed.ts'
@@ -38,8 +42,8 @@ import { editorPreferences, launchEditor } from './editor.ts'
 app.setName('Baton')
 if (process.platform === 'win32') app.setAppUserModelId('dev.baton.desktop')
 
-let configuration: DeploymentConfig | undefined
-let identity: PublicIdentity = { registered: false }
+let configuration: CoordinatorConfig | undefined
+let status: DesktopStatus = { state: 'stopped', registered: false }
 let window: BrowserWindow | undefined
 let quitting = false
 let serial: Promise<unknown> = Promise.resolve()
@@ -87,14 +91,11 @@ async function start() {
   const dataDirectory = await realpath(requestedDataDirectory)
   const batond = new Batond(process.resourcesPath, dataDirectory)
   await batond.bootstrap()
+  const daemon = new DaemonClient(process.resourcesPath, dataDirectory)
   const release = Schema.decodeUnknownSync(Schema.Struct({ version: Schema.String, commit: Schema.String }))(
     JSON.parse(await readFile(join(process.resourcesPath, 'batond', 'release.json'), 'utf8')),
   )
   const version = release.version
-  const log = daemonLog(dataDirectory, () => {
-    supervisor.reject('log_failed', '无法写入 batond 日志，请检查数据目录权限')
-  })
-  let status = mergeStatus(identity, { state: 'stopped' })
   const show = () => {
     window?.show()
     window?.focus()
@@ -136,38 +137,6 @@ async function start() {
     }, openTarget),
   )
   const notificationScope = (scope: string) => JSON.stringify([configuration?.coordinator_url, scope])
-  let lastManagedPid: number | undefined
-  let managedStartedAt = 0
-  let startingUpdate: { operationId: string; attempt: number } | undefined
-  let startupFailureBlocked = false
-  const supervisor = new Supervisor({
-    spawn: () => {
-      startingUpdate =
-        deviceUpdate?.phase === 'syncing'
-          ? { operationId: deviceUpdate.operation_id, attempt: deviceUpdate.attempt }
-          : undefined
-      return batond.run()
-    },
-    log: (chunk) => log.write(chunk),
-    unexpectedExit: (info) => {
-      const operation = startingUpdate
-      if (!operation || !isUpdateStartupFailure(info)) return
-      startupFailureBlocked = true
-      void serialize(async () => {
-        await supervisor.stop()
-        await batond.reportUpdateStartupFailure(operation.operationId, operation.attempt)
-        await refreshDeviceUpdate()
-        await refresh()
-      }).catch(reportError)
-    },
-    changed: (state) => {
-      if (state.pid) {
-        lastManagedPid = undefined
-        managedStartedAt = Date.now()
-      }
-      void refresh()
-    },
-  })
   const login = await autostart(userData)
   const editor = await editorPreferences(userData)
   async function showSettings() {
@@ -196,7 +165,7 @@ async function start() {
         await reconcile(true)
       }).catch(reportError)
     },
-    restartAvailable: () => !startupFailureBlocked && !deviceUpdateError && !blocksDaemon(deviceUpdate),
+    restartAvailable: () => status.service_installed !== true && !deviceUpdateError && !blocksDaemon(deviceUpdate),
     update: () => {
       void showUpdate().catch(reportError)
     },
@@ -243,7 +212,6 @@ async function start() {
     try {
       deviceUpdate = await batond.updateStatus()
       deviceUpdateError = ''
-      if (deviceUpdate?.phase === 'failed' && deviceUpdate.rollback_complete) startupFailureBlocked = false
     } catch (error) {
       deviceUpdateError = error instanceof Error ? error.message : '无法读取设备更新状态'
     }
@@ -252,10 +220,7 @@ async function start() {
 
   async function continueUpdate() {
     if (deviceUpdateError || !deviceUpdate) return
-    if (['ready', 'migrating'].includes(deviceUpdate.phase)) {
-      await supervisor.stop()
-      return
-    }
+    if (['ready', 'migrating'].includes(deviceUpdate.phase)) return
     if (!shouldHandoffDesktop(deviceUpdate)) return
     if (deviceUpdate.target_version) {
       const key = `${deviceUpdate.operation_id}:${deviceUpdate.attempt}`
@@ -302,8 +267,6 @@ async function start() {
       installer.close()
       throw new Error('更新目标已变化，请重新检查')
     }
-    await supervisor.stop()
-    await log.flush()
     clearInterval(poll)
     clearInterval(permissionPoll)
     tray.destroy()
@@ -346,7 +309,6 @@ async function start() {
           )
             throw new Error('签名更新目标早于或不同于当前桌面版本')
           await batond.update()
-          startupFailureBlocked = false
           await refreshDeviceUpdate()
           await refresh()
         }
@@ -454,74 +416,59 @@ async function start() {
       ]),
     )
   }
+  let coordinatorMismatch = ''
   async function refresh() {
-    try {
-      const daemon = await readDaemonStatus(dataDirectory)
-      const ownedPid = await managedDaemonPid(dataDirectory, supervisor.state.pid)
-      if (ownedPid !== undefined) lastManagedPid = ownedPid
-      const previousCode = status.code
-      const supervisorStatus = { ...supervisor.state }
-      delete supervisorStatus.pid
-      if (ownedPid !== undefined) supervisorStatus.pid = ownedPid
-      status = mergeStatus(identity, supervisorStatus, daemon)
-      tray.update(status, activity, systemNotificationsDisabled)
-      updateWindowMenu()
-      const rejection =
-        daemon?.state === 'rejected'
-          ? daemon
-          : await readDaemonRejection(dataDirectory, lastManagedPid, managedStartedAt)
-      if (identity.registered && rejection) {
-        const key = `device:${identity.node_id}:${rejection.code}:${rejection.updated_at}`
-        await notices.deliver(
-          notificationScope('local-device'),
-          [
-            {
-              event_id: key,
-              title: identity.display_name,
-              body: `连接被拒绝：${rejection.message ?? rejection.code}`,
-              node_id: identity.node_id,
-            },
-          ],
-          null,
-          null,
-        )
-      }
-      if (window && !window.isDestroyed()) window.webContents.send('baton:status-changed', status)
-      if (status.code === 'node_version_incompatible' && previousCode !== status.code && configuration) {
-        void showUpdate().catch(reportError)
-      }
-    } catch {
-      status = {
-        ...identity,
-        state: 'rejected',
-        code: 'status_unavailable',
-        message: '无法读取本机设备状态，请检查日志',
-      }
-      tray.update(status, activity, systemNotificationsDisabled)
+    const previous = status.rejection?.code
+    status = await daemon.status()
+    tray.update(status, activity, systemNotificationsDisabled)
+    updateWindowMenu()
+    if (status.registered && status.node_id && status.rejection) {
+      const rejection = status.rejection
+      const key = `device:${status.node_id}:${rejection.code}:${rejection.at}`
+      await notices.deliver(
+        notificationScope('local-device'),
+        [
+          {
+            event_id: key,
+            title: status.display_name ?? 'Baton',
+            body: `连接被拒绝：${rejection.message}`,
+            node_id: status.node_id,
+          },
+        ],
+        null,
+        null,
+      )
+    }
+    if (window && !window.isDestroyed()) window.webContents.send('baton:status-changed', status)
+    if (status.rejection?.code === 'node_version_incompatible' && previous !== status.rejection.code && configuration) {
+      void showUpdate().catch(reportError)
     }
     return status
   }
   async function reconcile(restart = false) {
     if (quitting) return
-    identity = await batond.identity()
-    if (!configuration || !identity.registered) {
+    if (!configuration) {
       await refresh()
       return
     }
-    try {
-      assertIdentityOrigin(identity, configuration.coordinator_url)
-    } catch (error) {
-      supervisor.reject('coordinator_conflict', error instanceof Error ? error.message : '中心地址冲突')
-      await refresh()
-      return
+    if (restart) await daemon.restart()
+    const current = await refresh()
+    if (
+      current.registered &&
+      current.coordinator_url !== undefined &&
+      current.coordinator_url !== configuration.coordinator_url &&
+      coordinatorMismatch !== current.coordinator_url
+    ) {
+      coordinatorMismatch = current.coordinator_url
+      void dialog.showMessageBox({
+        type: 'error',
+        title: '中心地址不一致',
+        message: `本机已接入 ${current.coordinator_url}`,
+        detail: `已保存的中心地址是 ${configuration.coordinator_url}。请先在终端运行 batond logout，或从原中心重新接入。`,
+        buttons: ['知道了'],
+        noLink: true,
+      })
     }
-    if (startupFailureBlocked || deviceUpdateError || blocksDaemon(deviceUpdate)) {
-      await refresh()
-      return
-    }
-    if (restart) await supervisor.restart(() => !quitting && !blocksDaemon(deviceUpdate))
-    else supervisor.start()
-    await refresh()
   }
   async function replaceWindow(hidden = false) {
     window?.destroy()
@@ -545,9 +492,6 @@ async function start() {
   }
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
   session.defaultSession.setPermissionCheckHandler(() => false)
-  session.defaultSession.setCertificateVerifyProc((request, callback) => {
-    callback(verifyCertificate(request.hostname, request.certificate, configuration))
-  })
   function authorize(event: Electron.IpcMainInvokeEvent) {
     authorizeBridge(
       event.senderFrame?.url ?? '',
@@ -565,35 +509,27 @@ async function start() {
     return response.json() as Promise<unknown>
   }
   async function localIdentity() {
-    const saved = await batond.identity()
-    if (!configuration || !saved.registered || !saved.employee_id) throw new Error('请先连接此电脑。')
-    assertIdentityOrigin(saved, configuration.coordinator_url)
+    const saved = await refresh()
+    if (!configuration || !saved.registered || !saved.employee_id || !saved.coordinator_url)
+      throw new Error('请先连接此电脑。')
+    if (saved.coordinator_url !== configuration.coordinator_url) throw new Error('本机设备属于其他中心。')
     const current = Schema.decodeUnknownSync(Schema.Struct({ employee: Schema.Struct({ id: Schema.String }) }))(
       await centerJSON('/api/v1/me'),
     )
     return localAccount(saved, configuration.coordinator_url, current.employee.id)
   }
   async function localDiagnostics(): Promise<DesktopDiagnostics> {
-    await refresh()
-    const daemon = await readDaemonStatus(dataDirectory)
-    const ownedPid = await managedDaemonPid(dataDirectory, supervisor.state.pid)
-    const external = status.state === 'external'
+    const current = await refresh()
     return {
       clientVersion: version,
-      batondVersion: daemon?.batond_version ?? 'unknown',
-      platform: `${process.platform} ${process.arch}`,
-      processState: external ? 'external' : status.state,
-      lastExit: supervisor.lastExit
-        ? { ...supervisor.lastExit, reason: redactDiagnostics(supervisor.lastExit.reason) }
+      batondVersion: current.batond_version ?? 'unknown',
+      platform: current.platform ?? `${process.platform} ${process.arch}`,
+      processState: current.state,
+      lastExit: current.last_error
+        ? { at: current.last_error.at, reason: redactDiagnostics(current.last_error.message) }
         : null,
       upgradePhase: deviceUpdate?.phase ?? null,
-      canRestart:
-        !external &&
-        !startupFailureBlocked &&
-        !deviceUpdateError &&
-        (!daemon || daemon.pid === ownedPid) &&
-        !blocksDaemon(deviceUpdate) &&
-        !quitting,
+      canRestart: current.service_installed !== true && !deviceUpdateError && !blocksDaemon(deviceUpdate) && !quitting,
     }
   }
   const localActions = new LocalActions({
@@ -603,7 +539,7 @@ async function start() {
       Schema.decodeUnknownSync(Schema.Struct({ node_id: Schema.String }))(
         await centerJSON(`/api/v1/threads/${encodeURIComponent(threadId)}`),
       ).node_id,
-    directory: (threadId) => batond.directory(threadId),
+    directory: (threadId) => daemon.threadDirectory(threadId),
     openDirectory: async (path, useEditor) => {
       const selected = editor.get()
       if (useEditor && selected) await launchEditor(selected, path)
@@ -627,10 +563,9 @@ async function start() {
       if (error) throw new Error('无法打开日志文件夹。')
     },
     copyDiagnostics: async () => {
-      await log.flush()
       const summary = diagnosticSummary(
         await localDiagnostics(),
-        await readLogTail(join(dataDirectory, 'logs', 'desktop-batond.log')),
+        await readLogTail(join(dataDirectory, 'logs', 'batond.log')),
       )
       await clipboard.writeText(summary)
     },
@@ -679,70 +614,86 @@ async function start() {
     authorize(event)
     return refresh()
   })
-  for (const action of ['enroll', 'reauth'] as const)
-    ipcMain.handle(`baton:${action}`, (event, input: unknown) => {
+  ipcMain.handle('baton:start-login', (event, input: unknown) => {
+    authorize(event)
+    const parsed = (() => {
+      try {
+        return Schema.decodeUnknownSync(LoginInput)(input ?? {}, { onExcessProperty: 'error' })
+      } catch {
+        throw new Error('设备名称无效')
+      }
+    })()
+    return serialize(async () => {
       authorize(event)
-      const parsed = (() => {
-        try {
-          return Schema.decodeUnknownSync(EnrollmentInput)(input)
-        } catch {
-          throw new Error('接入参数无效，请重新领取接入凭据')
-        }
-      })()
-      return serialize(async () => {
-        authorize(event)
-        if (!configuration) throw new Error('请先打开中心的接入链接')
-        identity = await batond.identity()
-        assertIdentityOrigin(identity, configuration.coordinator_url)
-        if (action === 'enroll' && identity.registered) throw new Error('本机已接入，请使用已有身份或重新认证')
-        if (action === 'reauth' && !identity.registered) throw new Error('本机尚未接入')
-        const running = await readDaemonStatus(dataDirectory)
-        if (running && running.pid !== (await managedDaemonPid(dataDirectory, supervisor.state.pid)))
-          throw new Error('请先停止外部 batond 服务，再重新认证')
-        await supervisor.stop()
-        await saveDeployment(userData, configuration)
-        identity =
-          action === 'enroll'
-            ? await batond.enroll(configuration, userData, parsed.code, parsed.displayName ?? hostname())
-            : await batond.reauth(configuration, userData, parsed.code)
-        await refreshDeviceUpdate()
-        await reconcile(true)
-        return refresh()
-      })
+      if (!configuration) throw new Error('请先打开中心的接入链接')
+      const result = await daemon.startLogin(configuration.coordinator_url, parsed.displayName ?? hostname())
+      await refresh()
+      return result
     })
+  })
+  ipcMain.handle('baton:cancel-login', (event) =>
+    serialize(async () => {
+      authorize(event)
+      await daemon.cancelLogin()
+      await refresh()
+    }),
+  )
+  ipcMain.handle('baton:logout', (event) =>
+    serialize(async () => {
+      authorize(event)
+      await daemon.logout()
+      return refresh()
+    }),
+  )
   try {
-    configuration = await loadDeployment(userData)
-    if (configuration) await saveDeployment(userData, configuration)
+    configuration = await loadCoordinator(userData)
   } catch {
-    dialog.showErrorBox('部署配置无效', '请从中心重新打开接入链接，原配置未修改')
+    dialog.showErrorBox('中心配置无效', '请从中心重新打开接入链接，原配置未修改')
   }
   app.setAsDefaultProtocolClient('baton')
   receiveLink = (raw) => {
     void serialize(async () => {
-      let candidate: DeploymentConfig
+      let candidate: string
       try {
         candidate = parseConnectLink(raw)
       } catch {
         throw new Error('接入链接无效，请从中心重新打开')
       }
-      const currentIdentity = await batond.identity()
-      assertIdentityOrigin(currentIdentity, candidate.coordinator_url)
+      const current = await daemon.status()
+      const decision = linkDecision(
+        configuration?.coordinator_url,
+        current.registered ? current.coordinator_url : undefined,
+        candidate,
+      )
+      if (decision === 'conflict') {
+        await dialog.showMessageBox({
+          type: 'error',
+          title: '无法更换中心',
+          message: `本机已接入 ${current.coordinator_url}`,
+          detail: '请先在终端运行 batond logout，再接入新的中心。现有身份和配置未修改。',
+          buttons: ['知道了'],
+          noLink: true,
+        })
+        return
+      }
       show()
       const confirmation = await dialog.showMessageBox({
         type: 'question',
         title: '连接 Baton 中心',
-        message: candidate.coordinator_url,
-        detail: `CA SHA-256：${caFingerprint(candidate)}\n确认地址与中心提供的指纹一致后继续。`,
+        message: candidate,
+        detail:
+          decision === 'replace'
+            ? '本机尚未连接中心，确认后将替换已保存的中心地址。\n确认这是中心的 HTTPS 地址后继续。'
+            : '确认这是中心的 HTTPS 地址后继续。',
         buttons: ['取消', '连接'],
         defaultId: 0,
         cancelId: 0,
         noLink: true,
       })
       if (confirmation.response !== 1) return
-      await saveDeployment(userData, candidate)
-      configuration = candidate
+      await saveCoordinator(userData, candidate)
+      configuration = { format: 1, coordinator_url: candidate }
       await replaceWindow()
-      identity = currentIdentity
       await refreshDeviceUpdate()
       await reconcile()
     }).catch(reportError)
@@ -761,20 +712,19 @@ async function start() {
     clearInterval(permissionPoll)
     void (async () => {
       await serial
-      await supervisor.stop()
-      await log.flush()
+      const current = await daemon.status(false)
+      await stopDaemonForQuit(daemon.control, current)
       tray.destroy()
       app.quit()
     })().catch(() => app.exit(1))
   })
   const hidden = process.argv.includes('--hidden') || app.getLoginItemSettings().wasOpenedAtLogin
   await replaceWindow(hidden)
-  identity = await batond.identity()
-  if (configuration) assertIdentityOrigin(identity, configuration.coordinator_url)
   const initialUpdate = await refreshDeviceUpdate()
   if (quitting) return
   await continueUpdate()
   if (!initialUpdate || !['syncing', 'ready', 'migrating'].includes(initialUpdate.phase)) await reconcile()
+  else await refresh()
   if (quitting) return
   for (const link of pendingLinks.splice(0)) receiveLink(link)
   poll = setInterval(() => {

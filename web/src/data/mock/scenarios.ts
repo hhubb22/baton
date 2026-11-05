@@ -760,7 +760,7 @@ function files(): Record<string, DeviceFile> {
   return {
     [fileKey('dev-mac', '~/src/baton/README.md')]: file(readme),
     [fileKey('dev-mac', '~/src/baton/docs/batond.md')]: file(
-      '# batond on macOS\n\n1. Install with Homebrew.\n2. Run `batond enroll` and enter the code from the web page.\n3. Run `brew services start batond`.\n',
+      '# batond on macOS\n\n1. Download the installer.\n2. Run `batond login --coordinator https://baton.example` and approve the code in the web page.\n3. Run `batond service install`.\n',
     ),
     [fileKey('dev-ubuntu', `${ubuntuRepo}/apps/server/src/gateway.ts`)]: file(gatewayTs),
     [fileKey('dev-ubuntu', `${ubuntuRepo}/apps/server/src/gateway.test.ts`)]: file(
@@ -822,7 +822,7 @@ function traces(): Record<string, TraceStep[]> {
       command('batond upgrade --version 0.9.2', 'Downloaded batond 0.9.2 (18.4 MB)'),
       command('Restart-Service batond', ''),
     ],
-    'msg-guide-2': [tool('Search', 'batond enroll'), file('~/src/baton/docs/batond.md')],
+    'msg-guide-2': [tool('Search', 'batond login'), file('~/src/baton/docs/batond.md')],
   }
   return Object.fromEntries(
     Object.entries(records).map(([messageId, steps]) => [
@@ -869,7 +869,6 @@ function base(now: number): World {
     outputs: outputs(),
     outputLoss: [],
     failingReads: [],
-    enrollments: [],
     directories: directories(),
     stubbornStops: [],
     lostHistory: [],

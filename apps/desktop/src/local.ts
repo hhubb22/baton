@@ -3,7 +3,7 @@ import { isAbsolute } from 'node:path'
 import { Schema } from 'effect'
 import { UUID } from '@baton/protocol'
 import type { DesktopDiagnostics } from './diagnostics.ts'
-import type { PublicIdentity } from './status.ts'
+import type { DesktopStatus } from './status.ts'
 
 export const LocalDeviceInput = Schema.Struct({ nodeId: UUID })
 export const OpenLocalInput = Schema.Struct({ threadId: UUID, action: Schema.Literals(['reveal', 'editor']) })
@@ -17,8 +17,9 @@ export interface LocalIdentity {
   employee_id: string
   coordinator_url: string
 }
-export function localAccount(saved: PublicIdentity, origin: string | undefined, employeeId: string): LocalIdentity {
-  if (!origin || !saved.registered || !saved.employee_id) throw new Error('请先连接此电脑。')
+export function localAccount(saved: DesktopStatus, origin: string | undefined, employeeId: string): LocalIdentity {
+  if (!origin || !saved.registered || !saved.employee_id || !saved.coordinator_url || !saved.node_id)
+    throw new Error('请先连接此电脑。')
   if (saved.coordinator_url !== origin || saved.employee_id !== employeeId)
     throw new Error('Sign in to this computer’s account to use local actions.')
   return { node_id: saved.node_id, employee_id: saved.employee_id, coordinator_url: saved.coordinator_url }

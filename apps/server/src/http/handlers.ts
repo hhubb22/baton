@@ -2,12 +2,7 @@ import { Cause, Effect, Exit, Layer } from 'effect'
 import { HttpApiBuilder, HttpApiSchema } from 'effect/http-api'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
-import {
-  BatonHttpApi,
-  CurrentBrowserSession,
-  DefaultDeviceResponse,
-  EnrollmentResponse,
-} from '@baton/protocol/http-api'
+import { BatonHttpApi, CurrentBrowserSession, DefaultDeviceResponse } from '@baton/protocol/http-api'
 import * as Auth from '../auth.ts'
 import * as Nodes from '../nodes.ts'
 import * as DeviceAuth from '../device-auth.ts'
@@ -89,18 +84,6 @@ export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
                 headers: { 'set-cookie': Auth.sessionCookie(result.token, result.expires_at) },
               })
             }),
-          ),
-        )
-        .handle('reauthNode', ({ params, payload }) =>
-          httpBusiness(
-            Nodes.reauthenticateNode(params.nodeId, payload, options.signer).pipe(
-              Effect.flatMap(decodeResponse(P.NodeIdentity)),
-            ),
-          ),
-        )
-        .handle('registerNode', ({ payload }) =>
-          httpBusiness(
-            Nodes.registerNode(payload, options.signer).pipe(Effect.flatMap(decodeResponse(P.NodeIdentity))),
           ),
         ),
     ),
@@ -188,35 +171,6 @@ export const httpHandlers = (options: HTTPOptions, downloads?: Downloads) => {
     ),
     HttpApiBuilder.group(BatonHttpApi, 'nodes', (handlers) =>
       handlers
-        .handle('issueReauthEnrollment', ({ params }) =>
-          httpBusiness(
-            Effect.gen(function* () {
-              const { employee } = yield* CurrentBrowserSession
-              return yield* Nodes.issueReauthEnrollment(employee.id, params.nodeId).pipe(
-                Effect.flatMap(decodeResponse(EnrollmentResponse)),
-              )
-            }),
-          ),
-        )
-        .handle('issueEnrollment', () =>
-          httpBusiness(
-            Effect.gen(function* () {
-              const { employee } = yield* CurrentBrowserSession
-              const result = yield* Nodes.issueEnrollment(employee.id, options.enrollmentTTLSeconds)
-              return yield* decodeResponse(EnrollmentResponse)(result)
-            }),
-          ),
-        )
-        .handle('getEnrollment', ({ params }) =>
-          httpBusiness(
-            Effect.gen(function* () {
-              const { employee } = yield* CurrentBrowserSession
-              return yield* Nodes.getEnrollment(employee.id, params.enrollmentId).pipe(
-                Effect.flatMap(decodeResponse(P.EnrollmentView)),
-              )
-            }),
-          ),
-        )
         .handle('list', () =>
           httpBusiness(
             Effect.gen(function* () {

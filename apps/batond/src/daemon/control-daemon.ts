@@ -17,6 +17,7 @@ import {
   type ControlRequest,
 } from './control.ts'
 import { DeviceLogin } from './device-login.ts'
+import { DesktopDirectoryError, resolveThreadDirectory } from './desktop-directory.ts'
 import { listenAuthenticated, IPCError } from './ipc.ts'
 import { stopManagedProcesses } from './daemon-shutdown.ts'
 import { loadBindingFence, retireBinding } from './binding-fence.ts'
@@ -25,6 +26,25 @@ import type { RunDaemonOptions } from './daemon.ts'
 const failure = (error: unknown): Error => (error instanceof Error ? error : new Error('本机守护进程操作失败'))
 const attempt = <A>(run: () => Promise<A>) => Effect.tryPromise({ try: run, catch: failure })
 const ErrorSummary = Schema.Struct({ code: Schema.String, message: Schema.String, at: Schema.String })
+
+export async function resolveThreadDirectoryResponse(
+  dataDirectory: string,
+  threadId: string,
+): Promise<ControlResponse> {
+  try {
+    const saved = await resolveThreadDirectory(dataDirectory, threadId)
+    return {
+      ok: true,
+      node_id: saved.node_id,
+      employee_id: saved.employee_id,
+      coordinator_url: saved.coordinator_url,
+      directory: saved.working_directory,
+    }
+  } catch (error) {
+    if (error instanceof DesktopDirectoryError) return { ok: false, code: error.code, message: error.message }
+    return { ok: false, code: 'directory_unavailable', message: '此对话的文件夹不可用' }
+  }
+}
 
 export const runControlDaemon = Effect.fnUntraced(function* (
   options: RunDaemonOptions,
@@ -289,6 +309,8 @@ export const runControlDaemon = Effect.fnUntraced(function* (
       }
       return { ok: true }
     }
+    if (request.method === 'resolve_thread_directory')
+      return resolveThreadDirectoryResponse(paths.root, request.thread_id)
     if (request.method === 'diagnostics') return status()
     return { ok: false, code: 'unsupported', message: '本机控制方法尚不支持' }
   }

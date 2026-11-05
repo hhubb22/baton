@@ -83,14 +83,14 @@ function relayFixture(initial: string | null = '0') {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('desktop capabilities', () => {
-  it('preserves enrollment in old clients and enables only recognized capability versions', async () => {
+  it('starts device login through the bridge and enables only recognized capability versions', async () => {
     vi.stubGlobal('batonDesktop', undefined)
     expect(desktopBridge()).toBeNull()
     expect(desktopCapability('notifications')).toBeNull()
     const { bridge } = createDesktopBridge()
     vi.stubGlobal('batonDesktop', bridge)
-    await desktopBridge()!.enroll({ code: 'setup-code' })
-    expect(bridge.enroll).toHaveBeenCalledWith({ code: 'setup-code' })
+    await desktopBridge()!.startLogin({})
+    expect(bridge.startLogin).toHaveBeenCalledWith({})
     expect(desktopCapability('notifications')).toBeNull()
     vi.stubGlobal('batonDesktop', {
       ...bridge,

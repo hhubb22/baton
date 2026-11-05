@@ -1,16 +1,31 @@
 import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from 'node:child_process'
-import { appendFile, mkdir, rename, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Schema } from 'effect'
 import { SignedUpdateManifest } from '@baton/protocol/update-manifest'
-import type { DeploymentConfig } from './deployment.ts'
 import { programRoot } from './layout.ts'
-import { PublicIdentity } from './status.ts'
-import { lastFailure } from './supervisor.ts'
-import { ThreadDirectory } from './local.ts'
 
 export type Spawn = (file: string, args: string[], options: SpawnOptionsWithoutStdio) => ChildProcessWithoutNullStreams
 
+export interface CommandFailure {
+  code?: string
+  message?: string
+}
+
+export function lastFailure(stderr: string): CommandFailure {
+  try {
+    const value: unknown = JSON.parse(stderr.trim().split('\n').at(-1) ?? '')
+    if (typeof value === 'object' && value !== null && 'code' in value && typeof value.code === 'string')
+      return {
+        code: value.code,
+        ...('message' in value && typeof value.message === 'string' ? { message: value.message } : {}),
+      }
+  } catch {
+    /* stderr 可能包含普通诊断行。 */
+  }
+  return {}
+}
+
+// 桌面只调用一次性维护命令；设备身份、登录和控制通道都由本机 daemon 负责。
 export class Batond {
   readonly executable: string
   private command: { executable: string; args: string[] } | undefined
@@ -19,28 +34,20 @@ export class Batond {
     readonly dataDirectory: string,
     private readonly spawnProcess: Spawn = (file, args, options) => spawn(file, args, { ...options, stdio: 'pipe' }),
   ) {
-    this.executable = join(resources, 'batond', process.platform === 'win32' ? 'batond.exe' : 'batond')
+    this.executable = batondExecutable(resources)
   }
 
-  private spawn(args: string[], code?: string, bootstrap = false) {
-    const env = { ...process.env }
-    delete env.BATON_ENROLLMENT_TOKEN
-    if (args[0] === 'run') env.BATON_DESKTOP_MANAGED = '1'
-    if (code !== undefined) env.BATON_ENROLLMENT_TOKEN = code
+  private spawn(args: string[], bootstrap = false) {
     const command = !bootstrap && this.command ? this.command : { executable: this.executable, args: [] }
     return this.spawnProcess(command.executable, [...command.args, ...args, '--data-dir', this.dataDirectory], {
-      env,
+      env: { ...process.env },
       windowsHide: true,
     })
   }
 
-  run() {
-    return this.spawn(['run', '--exit-with-stdin'])
-  }
-
-  private execute(args: string[], code?: string, upgrade = false, stdin?: string, bootstrap = false): Promise<string> {
+  private execute(args: string[], upgrade = false, stdin?: string, bootstrap = false): Promise<string> {
     return new Promise((resolve, reject) => {
-      const child = this.spawn(args, code, bootstrap)
+      const child = this.spawn(args, bootstrap)
       let output = '',
         stderr = '',
         complete = false
@@ -75,15 +82,13 @@ export class Batond {
         if (exit === 0) finish()
         else {
           const failure = lastFailure(stderr)
-          // 子进程的原始输出不返回网页，注册秘密只存在于子进程环境中。
+          // 子进程的原始输出不返回网页；诊断只保留稳定的错误码。
           finish(
             Object.assign(
               new Error(
                 upgrade
                   ? `${failure.code ?? 'upgrade_failed'}：${failure.message ?? '升级操作失败，请检查日志'}`
-                  : failure.code === 'enrollment_expired'
-                    ? '接入凭据已过期，请在中心重新领取'
-                    : 'batond 操作失败，请检查设备状态或重新领取接入凭据',
+                  : 'batond 操作失败，请检查设备状态或日志',
               ),
               {
                 code: failure.code ?? 'batond_failed',
@@ -98,12 +103,8 @@ export class Batond {
   async bootstrap(): Promise<void> {
     const command = Schema.decodeUnknownSync(
       Schema.Struct({ executable: Schema.String, args: Schema.Array(Schema.String) }),
-    )(JSON.parse(await this.execute(['update', 'bootstrap'], undefined, true, undefined, true)))
-    const expected = join(
-      programRoot(this.dataDirectory),
-      'launcher',
-      process.platform === 'win32' ? 'batond.exe' : 'batond',
-    )
+    )(JSON.parse(await this.execute(['update', 'bootstrap'], true, undefined, true)))
+    const expected = batondExecutable(programRoot(this.dataDirectory), 'launcher')
     if (
       command.executable !== expected ||
       JSON.stringify(command.args) !== JSON.stringify(['dispatch', '--data-dir', this.dataDirectory, '--'])
@@ -114,31 +115,23 @@ export class Batond {
   }
 
   async update(): Promise<void> {
-    await this.execute(['update'], undefined, true)
+    await this.execute(['update'], true)
   }
 
   async cancelUpdate(): Promise<void> {
-    await this.execute(['update', 'cancel'], undefined, true)
-  }
-
-  async reportUpdateStartupFailure(operationId: string, attempt: number): Promise<void> {
-    await this.execute(
-      ['update', 'startup-failed', '--operation-id', operationId, '--attempt', String(attempt)],
-      undefined,
-      true,
-    )
+    await this.execute(['update', 'cancel'], true)
   }
 
   async updatePolicy(policy?: 'manual' | 'idle'): Promise<'manual' | 'idle'> {
     const result = Schema.decodeUnknownSync(Schema.Struct({ policy: Schema.Literals(['manual', 'idle']) }))(
-      JSON.parse(await this.execute(['update', 'policy', ...(policy ? [policy] : [])], undefined, true)),
+      JSON.parse(await this.execute(['update', 'policy', ...(policy ? [policy] : [])], true)),
     )
     return result.policy
   }
 
   async updateManifest(): Promise<typeof SignedUpdateManifest.Type> {
     const value = Schema.decodeUnknownSync(Schema.Struct({ manifest: SignedUpdateManifest }))(
-      JSON.parse(await this.execute(['update', 'manifest'], undefined, true)),
+      JSON.parse(await this.execute(['update', 'manifest'], true)),
     )
     return value.manifest
   }
@@ -179,7 +172,6 @@ export class Batond {
       JSON.parse(
         await this.execute(
           ['update', 'desktop-feed', '--operation-id', operationId, '--attempt', String(attempt)],
-          undefined,
           true,
         ),
       ),
@@ -209,69 +201,15 @@ export class Batond {
           }),
         ),
       }),
-    )(JSON.parse(await this.execute(['update', 'status'], undefined, true)))
+    )(JSON.parse(await this.execute(['update', 'status'], true)))
     return result.state
   }
 
   async setModelConnectionKey(connectionId: string, key: string): Promise<void> {
-    await this.execute(['project-runtime', 'connection-key', connectionId], undefined, false, key)
-  }
-
-  async directory(threadId: string): Promise<ThreadDirectory> {
-    try {
-      return Schema.decodeUnknownSync(ThreadDirectory)(
-        JSON.parse(await this.execute(['desktop-directory', '--thread-id', threadId])),
-      )
-    } catch (error) {
-      const code = error instanceof Error && 'code' in error ? error.code : undefined
-      throw new Error(code === 'directory_missing' ? '此文件夹已不存在。' : '此对话的文件夹不可用。')
-    }
-  }
-
-  async identity(): Promise<PublicIdentity> {
-    return Schema.decodeUnknownSync(PublicIdentity)(JSON.parse(await this.execute(['identity'])))
-  }
-
-  async enroll(config: DeploymentConfig, userData: string, code: string, displayName: string) {
-    const args = ['register', '--coordinator', config.coordinator_url, '--display-name', displayName]
-    if (config.ca_pem !== undefined) args.push('--ca-file', join(userData, 'ca.pem'))
-    await this.execute(args, code)
-    return this.identity()
-  }
-
-  async reauth(config: DeploymentConfig, userData: string, code: string) {
-    const args = ['reauth']
-    if (config.ca_pem !== undefined) args.push('--ca-file', join(userData, 'ca.pem'))
-    await this.execute(args, code)
-    return this.identity()
+    await this.execute(['project-runtime', 'connection-key', connectionId], false, key)
   }
 }
 
-export function daemonLog(directory: string, failed: (error: unknown) => void) {
-  const file = join(directory, 'logs', 'desktop-batond.log')
-  let serial: Promise<void> = Promise.resolve()
-  return {
-    write(chunk: Buffer) {
-      serial = serial
-        .then(async () => {
-          await mkdir(join(directory, 'logs'), { recursive: true, mode: 0o700 })
-          const size = await stat(file)
-            .then((value) => value.size)
-            .catch((error: unknown) => {
-              if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return 0
-              throw error
-            })
-          if (size + chunk.length > 10 * 1024 * 1024) {
-            await rename(file, file + '.1').catch((error: unknown) => {
-              if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error
-            })
-          }
-          await appendFile(file, chunk, { mode: 0o600 })
-        })
-        .catch(failed)
-    },
-    async flush() {
-      await serial
-    },
-  }
+export function batondExecutable(resources: string, directory = 'batond') {
+  return join(resources, directory, process.platform === 'win32' ? 'batond.exe' : 'batond')
 }

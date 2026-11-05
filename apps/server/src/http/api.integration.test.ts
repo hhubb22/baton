@@ -16,7 +16,7 @@ import { httpApplication, httpRouteTemplate } from './index.ts'
 import { LoginProtection } from './login-protection.ts'
 import * as Auth from '../auth.ts'
 import * as Nodes from '../nodes.ts'
-import { openTestDatabase, type TestDatabase } from '../testing/database.ts'
+import { openTestDatabase, seedNodeIdentity, type TestDatabase } from '../testing/database.ts'
 import type { HTTPOptions } from './options.ts'
 import { saveNotification } from '../desktop-notifications.ts'
 
@@ -84,19 +84,11 @@ beforeAll(async () => {
   await database.run(Auth.createEmployee('httpalice', 'Alice', password))
   const employee = await database.run(Auth.createEmployee('httpready', 'Ready', password))
   await database.run(Auth.changePassword(employee.id, password, readyPassword))
-  const enrollment = await database.run(Nodes.issueEnrollment(employee.id))
   const signer = Nodes.CredentialSigner.generate()
-  const identity = await database.run(
-    Nodes.registerNode(
-      {
-        enrollment_token: String(enrollment.enrollment_token),
-        display_name: 'Local node',
-        system: 'linux',
-        capabilities: [],
-      },
-      signer,
-    ),
-  )
+  const { identity } = await seedNodeIdentity(database.run, signer, {
+    employeeId: employee.id,
+    displayName: 'Local node',
+  })
   nodeId = identity.node_id
   const source = {
     employee_id: employee.id,
@@ -371,13 +363,13 @@ it('requires origin and session for browser telemetry, and CSRF for traces', asy
 
 it('validates payloads, queries, paths, response shapes and available feature routes', async () => {
   await login(readyPassword, 'httpready')
-  const extra = await request('/api/v1/node-enrollments', 'POST', { extra: true })
+  const extra = await request('/api/v1/device-auth/sessions', 'POST', { extra: true })
   expect(extra.status).toBe(400)
   expect(await extra.json()).toMatchObject({
     code: 'invalid_request',
     request_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
   })
-  const contentType = await request('/api/v1/node-enrollments', 'POST', {}, { 'content-type': 'text/plain' })
+  const contentType = await request('/api/v1/device-auth/sessions', 'POST', {}, { 'content-type': 'text/plain' })
   expect(contentType.status).toBe(415)
   expect(await contentType.json()).toMatchObject({ code: 'json_required' })
   for (const query of ['?extra=1', '?limit=0', '?limit=1&limit=2']) {
@@ -386,10 +378,6 @@ it('validates payloads, queries, paths, response shapes and available feature ro
   expect((await request('/api/v1/nodes/invalid')).status).toBe(400)
   const denied = await request(`/api/v1/nodes/${randomUUID()}/files?extra=1`)
   expect(denied.status).toBe(403)
-  const enrollment = await request('/api/v1/node-enrollments', 'POST', {})
-  expect(enrollment.status).toBe(201)
-  const value = Schema.decodeUnknownSync(P.EnrollmentResponse)(await enrollment.json())
-  expect((await request(`/api/v1/node-enrollments/${value.enrollment_id}`)).status).toBe(200)
   expect((await request('/api/v1/nodes')).status).toBe(200)
   expect((await request(`/api/v1/nodes/${nodeId}`)).status).toBe(200)
   expect((await request(`/api/v1/nodes/${nodeId}/files`)).status).toBe(200)
@@ -426,55 +414,6 @@ it('validates payloads, queries, paths, response shapes and available feature ro
   expect((await request(readPath, 'POST', { seq: Number.MAX_SAFE_INTEGER + 1 })).status).toBe(400)
   expect((await request(readPath, 'POST', { seq: 0 })).status).toBe(200)
   expect((await request('/api/v1/openapi.json', 'GET', undefined, { cookie: '' })).status).toBe(401)
-})
-
-it('reauthenticates the original device through enrollment and public proof with replay-safe credentials', async () => {
-  await login(readyPassword, 'httpready')
-  const enrollment = Schema.decodeUnknownSync(P.EnrollmentResponse)(
-    await (await request('/api/v1/node-enrollments', 'POST', {})).json(),
-  )
-  const registered = await request('/api/v1/nodes/register', 'POST', {
-    enrollment_token: enrollment.enrollment_token,
-    display_name: 'Workstation',
-    system: 'linux',
-    capabilities: [],
-  })
-  expect(registered.status).toBe(200)
-  const identity = Schema.decodeUnknownSync(P.NodeIdentity)(await registered.json())
-  const path = `/api/v1/nodes/${identity.node_id}`
-  expect(await (await request(path)).json()).toMatchObject({ credential_state: 'active', executable: false })
-  expect((await request(`${path}/reauth-enrollments`, 'POST', {}, { 'x-csrf-token': 'wrong' })).status).toBe(403)
-  const issued = await request(`${path}/reauth-enrollments`, 'POST', {})
-  expect(issued.status).toBe(201)
-  const reauth = Schema.decodeUnknownSync(P.EnrollmentResponse)(await issued.json())
-  await login('http-replacement-password-456')
-  expect((await request(`${path}/reauth-enrollments`, 'POST', {})).status).toBe(403)
-  const body = {
-    operation_id: randomUUID(),
-    enrollment_token: reauth.enrollment_token,
-    previous_token: identity.credential.token,
-  }
-  const fromCLI = () =>
-    handle(
-      new Request(`http://localhost${path}/reauth`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      }),
-    )
-  const response = await fromCLI()
-  expect(response.status).toBe(200)
-  expect(response.headers.get('cache-control')).toBe('no-store')
-  const fresh = Schema.decodeUnknownSync(P.NodeIdentity)(await response.json())
-  expect(fresh).toMatchObject({
-    node_id: identity.node_id,
-    registration_seq: identity.registration_seq,
-    credential: { version: 2 },
-  })
-  expect(await (await fromCLI()).json()).toEqual(fresh)
-  await login(readyPassword, 'httpready')
-  expect((await request(`${path}/revoke`, 'POST', {})).status).toBe(200)
-  expect((await request(`${path}/reauth`, 'POST', body, { cookie: '' })).status).toBe(403)
 })
 
 it('serves persisted trace pages with raw JSON and distinguishes missing Turns from missing trace', async () => {

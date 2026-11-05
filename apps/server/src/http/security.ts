@@ -64,13 +64,7 @@ export const checkOrigin = (options: HTTPOptions) =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest
     const path = new URL(request.url, 'http://localhost').pathname
-    if (
-      request.method === 'POST' &&
-      (path === '/api/v1/nodes/register' ||
-        path === '/api/v1/device-auth/sessions' ||
-        path === '/api/v1/device-auth/token' ||
-        /^\/api\/v1\/nodes\/[0-9a-f-]{36}\/reauth$/i.test(path))
-    )
+    if (request.method === 'POST' && (path === '/api/v1/device-auth/sessions' || path === '/api/v1/device-auth/token'))
       return
     if (
       request.method !== 'GET' &&

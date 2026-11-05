@@ -16,7 +16,7 @@ const READ_LIMIT = 256 * 1024
 const READ_CHUNK = 16 * 1024
 // 整行隐藏凭据和配置，避免只替换字段名后漏出嵌套值。
 const privateLine =
-  /setup|enroll|register|registration|reauth|credential|token|secret|password|passwd|authorization|cookie|api[-_ ]?key|access[-_ ]?key|private[-_ ]?key|deployment|config|coordinator_url|ca_pem|client[-_ ]?key|bearer\s|basic\s|\bsk-[\w-]+|\beyJ[\w-]+\.[\w-]+/i
+  /setup|enroll|register|registration|credential|token|secret|password|passwd|authorization|cookie|api[-_ ]?key|access[-_ ]?key|private[-_ ]?key|deployment|config|coordinator_url|ca_pem|client[-_ ]?key|bearer\s|basic\s|\bsk-[\w-]+|\beyJ[\w-]+\.[\w-]+/i
 const structuredLine = /[{}]|^\s*[[\]"']|^\s*[A-Za-z_][\w.-]*\s*[:=]/
 const logRecord = /^(?:\d{4}-\d\d-\d\d[T ]|\[?(?:TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL)\b)/i
 

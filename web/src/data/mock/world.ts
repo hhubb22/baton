@@ -1,6 +1,5 @@
 import type {
   Device,
-  EnrollmentState,
   ID,
   MemoryNote,
   Message,
@@ -49,7 +48,6 @@ export interface World {
   outputLoss: ID[]
   // 下一次读取会失败一次的内容，键为 `trace:消息 ID` 或 `file:设备 ID:路径`。
   failingReads: string[]
-  enrollments: EnrollmentRecord[]
   // 设备上实际存在的目录（完整路径），用来列出子目录和发现找不到的目录。
   directories: Record<ID, string[]>
   // Agent 收到停止请求后不会自己停下的 Thread，设备一分钟后结束进程。
@@ -63,15 +61,6 @@ export interface World {
   failStatusSaves: number
   // 首次编辑这些记忆时，助手先保存一个新版本。
   memoryElsewhere: Record<ID, string>
-}
-
-export interface EnrollmentRecord {
-  targetNodeId?: ID
-  id: ID
-  code: string
-  state: EnrollmentState
-  expiresAt: number
-  deviceId: ID | null
 }
 
 export interface DeviceFile {

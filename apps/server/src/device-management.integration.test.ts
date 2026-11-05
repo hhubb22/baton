@@ -7,7 +7,7 @@ import * as Auth from './auth.ts'
 import * as Nodes from './nodes.ts'
 import * as Devices from './device-management.ts'
 import { AppError, type NodeSource } from './errors.ts'
-import { openTestDatabase, type TestDatabase } from './testing/database.ts'
+import { openTestDatabase, seedNodeIdentity, type TestDatabase } from './testing/database.ts'
 
 let database: TestDatabase
 let alice: Auth.Employee, bob: Auth.Employee
@@ -23,18 +23,10 @@ afterAll(async () => {
   await database?.close()
 })
 async function node() {
-  const enrollment = await run(Nodes.issueEnrollment(alice.id))
-  const identity = await run(
-    Nodes.registerNode(
-      {
-        enrollment_token: enrollment.enrollment_token as string,
-        display_name: 'Local device',
-        system: 'linux',
-        capabilities: [],
-      },
-      signer,
-    ),
-  )
+  const { identity } = await seedNodeIdentity(run, signer, {
+    employeeId: alice.id,
+    displayName: 'Local device',
+  })
   const source: NodeSource = {
     employee_id: alice.id,
     node_id: identity.node_id,

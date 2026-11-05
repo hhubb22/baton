@@ -120,8 +120,8 @@ it.each(['darwin', 'linux'] as const)(
     const rejected = {
       pid: process.pid,
       state: 'rejected',
-      code: 'needs_reauth',
-      message: '设备需要重新认证',
+      code: 'credential_revoked',
+      message: '设备连接凭据已吊销',
       updated_at: '2026-10-28T00:00:00Z',
     }
     await writeFile(path, JSON.stringify(rejected))

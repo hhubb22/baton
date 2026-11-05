@@ -119,23 +119,6 @@ export interface Device {
 
 export type DeviceOS = 'macOS' | 'Windows' | 'Linux'
 
-// 接入设备用的一次性设置码。凭据只在创建时返回一次，查询时不再带回。
-export type EnrollmentState = 'pending' | 'connected' | 'expired' | 'used'
-
-export interface Enrollment {
-  id: ID
-  state: EnrollmentState
-  coordinatorUrl: string
-  // 返回时距离过期还剩多少毫秒，页面按收到的时间倒计时，不依赖两边时钟一致。
-  expiresIn: number
-  // 连接成功后的设备。
-  deviceId: ID | null
-}
-
-export interface IssuedEnrollment extends Enrollment {
-  code: string
-}
-
 export type ThreadStatus = 'waiting' | 'running' | 'idle' | 'stopped' | 'unknown' | 'archived'
 
 // Thread 停止的原因，决定页面给出的恢复办法。
