@@ -100,7 +100,8 @@ test('本机 CLI 从标准输入保存连接密钥而不输出密钥', async () 
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
-})
+  // 依次冷启动六次 tsx CLI，每次另有 5 秒上限。
+}, 30_000)
 
 test('限制来源数量以确保订阅与 API 连接都能报告', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'baton-connection-limit-'))
