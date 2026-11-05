@@ -2,10 +2,7 @@ import { access } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
-import { Effect } from 'effect'
-import { runWorker } from '@baton/batond/daemon/worker-runner'
 import { runWatchdogCommand } from '@baton/batond/platform/process'
-import { telemetryLayer } from '@baton/telemetry'
 
 async function main() {
   if (process.env.BATON_TELEMETRY_LOCAL_RELAY === '1') {
@@ -41,29 +38,7 @@ async function main() {
     await import(pathToFileURL(bundle).href)
     return
   }
-  if (command !== 'worker') throw new Error('Unsupported replay command')
-  const { values } = parseArgs({
-    args: process.argv.slice(3),
-    options: { 'data-dir': { type: 'string' }, 'thread-id': { type: 'string' } },
-  })
-  const dataDirectory = values['data-dir']
-  const threadId = values['thread-id']
-  if (!dataDirectory || !threadId) throw new Error('Missing replay Worker identity')
-  const controller = new AbortController()
-  process.once('SIGTERM', () => controller.abort())
-  process.once('SIGINT', () => controller.abort())
-  await Effect.runPromise(
-    Effect.scoped(
-      runWorker({
-        dataDirectory,
-        threadId,
-        command: { executable: process.execPath, args: [entry] },
-      }),
-    ).pipe(Effect.provide(telemetryLayer('baton-worker'))),
-    { signal: controller.signal },
-  ).catch((error: unknown) => {
-    if (!controller.signal.aborted) throw error
-  })
+  throw new Error('Unsupported replay command')
 }
 
 await main()

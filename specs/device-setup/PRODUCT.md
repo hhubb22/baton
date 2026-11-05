@@ -4,7 +4,7 @@ Status: implemented
 Owner: Asa
 Basis: 设备连接与本机控制面简化对齐；[Baton R-01～R-04](../baton/PRODUCT.md)；[发布行为规格](../release/PRODUCT.md)。
 
-设备码认证、长效可吊销凭据、CLI 本地控制通道与按需拉起、网页确认页、用户服务接管和桌面客户端接入均已实现。Thread 和 Execution 继续使用独立 Worker。原生 launchd、systemd 用户会话、Windows 命名管道、桌面托盘与安装覆盖需在目标系统验证。
+设备码认证、长效可吊销凭据、CLI 本地控制通道与按需拉起、网页确认页、用户服务接管和桌面客户端接入均已实现。Thread 状态机、Execution 状态机与 agent-host 生命周期都在 batond 进程内，agent-host 空闲后休眠并按需恢复。原生 launchd、systemd 用户会话、Windows 命名管道、桌面托盘与安装覆盖需在目标系统验证。
 
 ## Summary
 

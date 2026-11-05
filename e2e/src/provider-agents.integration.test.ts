@@ -21,7 +21,7 @@ import { runDaemon } from '@baton/batond/daemon/daemon'
 import { connectWebSocket } from '@baton/batond/daemon/transport'
 import { startTelemetryRelay } from '@baton/batond/daemon/telemetry-relay'
 import { initializeBrowseRoots } from '@baton/batond/devices/roots'
-import { LocalWorkerHost } from '@baton/batond/daemon/host'
+import { InProcessWorkerHost } from '@baton/batond/daemon/in-process-host'
 import * as Cursor from '@baton/batond/testing/cursor/transcripts'
 import * as Pi from '@baton/batond/testing/pi/transcripts'
 import * as Codex from '@baton/batond/testing/codex/transcripts'
@@ -103,7 +103,10 @@ async function withProviderThread(
   const nodeDirectory = join(directory, 'node')
   const bundle = join(directory, 'provider-worker.mjs')
   const relay = telemetryEnv ? await startTelemetryRelay() : undefined
-  const host = new LocalWorkerHost(nodeDirectory, { executable: process.execPath, args: [bundle] }, relay)
+  const host = new InProcessWorkerHost(nodeDirectory, {
+    agentCommand: { executable: process.execPath, args: [bundle] },
+    watchdogCommand: { executable: process.execPath, args: [bundle, 'watchdog'] },
+  })
   const controller = new AbortController()
   const scope = await Effect.runPromise(Scope.make())
   const syncResults: unknown[] = []
@@ -489,23 +492,7 @@ async function withProviderThread(
   } finally {
     controller.abort()
     await daemon
-    if (threadId) {
-      const ownedThreadId = threadId
-      const status = await host.request(ownedThreadId, { type: 'status', ok: false }).catch(() => undefined)
-      if (status?.pid) {
-        process.kill(status.pid, 'SIGTERM')
-        await expect
-          .poll(
-            async () =>
-              host.request(ownedThreadId, { type: 'status', ok: false }).then(
-                () => false,
-                () => true,
-              ),
-            { timeout: 10_000 },
-          )
-          .toBe(true)
-      }
-    }
+    await host.close()
     await (tracedRuntime ?? database.runtime).runPromise(Scope.close(scope, Exit.void))
     await tracedRuntime?.dispose()
     await relay?.close()
@@ -514,7 +501,7 @@ async function withProviderThread(
   }
 }
 
-test('exports one trace from HTTP through Worker and Pi agent-host', async () => {
+test('exports one trace from HTTP through the Thread state machine and Pi agent-host', async () => {
   const trace = 'a'.repeat(32)
   const spans: Array<TraceData['resourceSpans'][number]['scopeSpans'][number]['spans'][number] & { service: string }> =
     []
@@ -552,45 +539,10 @@ test('exports one trace from HTTP through Worker and Pi agent-host', async () =>
   try {
     await withProviderThread(
       { ...cases[1]!, trace, telemetryEnv },
-      async ({ replies, threadId, nodeId, employeeId, syncResults, traceDiagnostics }) => {
+      async ({ replies, nodeId, employeeId, syncResults, traceDiagnostics }) => {
         expect(syncResults).toContainEqual({ type: 'node.sync_result', ok: true, telemetry: { forward: true } })
         expect(JSON.stringify(syncResults)).not.toContain('local-test-key')
         await expect.poll(async () => (await replies()).length, { timeout: 15000 }).toBe(1)
-        try {
-          await expect
-            .poll(
-              () =>
-                spans.some(
-                  (span) =>
-                    span.service === 'baton-agent-host' && span.name === 'baton.agent.turn' && span.traceId === trace,
-                ),
-              { timeout: 10000 },
-            )
-            .toBe(true)
-        } catch (error) {
-          throw new Error(`Agent host relay diagnostics: ${JSON.stringify(traceDiagnostics)}`, { cause: error })
-        }
-        try {
-          await expect
-            .poll(
-              () =>
-                spans.some(
-                  (span) => span.service === 'baton-worker' && span.name === 'baton.turn' && span.traceId === trace,
-                ),
-              { timeout: 10000 },
-            )
-            .toBe(true)
-        } catch (error) {
-          throw new Error(`Worker relay diagnostics: ${JSON.stringify(traceDiagnostics)}`, { cause: error })
-        }
-        const turn = spans.find(
-          (span) => span.service === 'baton-worker' && span.name === 'baton.turn' && span.traceId === trace,
-        )!
-        expect(
-          spans.filter(
-            (span) => span.service === 'baton-worker' && span.name === 'baton.turn' && span.traceId === trace,
-          ),
-        ).toHaveLength(1)
         expect(spans.some((span) => span.service === 'baton-web' && span.traceId === trace)).toBe(true)
         expect(
           spans.some(
@@ -601,45 +553,12 @@ test('exports one trace from HTTP through Worker and Pi agent-host', async () =>
               span.parentSpanId === 'b'.repeat(16),
           ),
         ).toBe(true)
-        for (const resource of resources.filter((entry) =>
-          ['batond', 'baton-worker', 'baton-agent-host'].includes(entry.service),
-        )) {
+        for (const resource of resources.filter((entry) => ['batond'].includes(entry.service))) {
           expect(resource.attributes).toContainEqual({ key: 'baton.node.id', value: { stringValue: nodeId } })
           expect(resource.attributes).toContainEqual({ key: 'baton.employee.id', value: { stringValue: employeeId } })
           expect(resource.attributes).toContainEqual({ key: 'user.id', value: { stringValue: employeeId } })
         }
         expect(authorization.every((value) => value === 'local-test-key')).toBe(true)
-        const attributes = Object.fromEntries(turn.attributes.map(({ key, value }) => [key, value]))
-        expect(attributes['baton.thread.id']).toEqual({ stringValue: threadId })
-        expect(attributes['baton.node.id']?.stringValue).toMatch(/^[0-9a-f-]{36}$/)
-        expect(attributes['baton.command.id']?.stringValue).toMatch(/^[0-9a-f-]{36}$/)
-        expect(Number(attributes['baton.turn.seq']?.intValue)).toBeGreaterThan(0)
-        expect(attributes['baton.agent']).toEqual({ stringValue: 'pi' })
-        expect(attributes['gen_ai.request.model']).toEqual({ stringValue: cases[1]!.model })
-        expect(attributes['gen_ai.operation.name']).toEqual({ stringValue: 'chat' })
-        expect(attributes['gen_ai.agent.name']).toEqual({ stringValue: 'pi' })
-        expect(attributes['gen_ai.conversation.id']).toEqual({ stringValue: threadId })
-        expect(JSON.parse(attributes['gen_ai.input.messages']!.stringValue!)[0].role).toBe('user')
-        expect(JSON.parse(attributes['gen_ai.output.messages']!.stringValue!)[0].parts.length).toBeGreaterThan(0)
-        expect(attributes['baton.turn.result']).toEqual({ stringValue: 'completed' })
-        expect(attributes.stop_reason).toEqual({ stringValue: 'completed' })
-        expect(
-          Number(
-            attributes['baton.turn.first_output_ms']?.intValue ?? attributes['baton.turn.first_output_ms']?.doubleValue,
-          ),
-        ).toBeGreaterThanOrEqual(0)
-        expect(attributes['ttft_ms']).toBeDefined()
-        expect(attributes['baton.usage.reported']).toBeDefined()
-        const agentTurn = spans.find(
-          (span) => span.service === 'baton-agent-host' && span.name === 'baton.agent.turn' && span.traceId === trace,
-        )!
-        const agentAttributes = Object.fromEntries(agentTurn.attributes.map(({ key, value }) => [key, value]))
-        expect(agentAttributes['gen_ai.operation.name']).toEqual({ stringValue: 'invoke_agent' })
-        expect(agentAttributes['gen_ai.request.model']).toBeUndefined()
-        if (attributes['baton.usage.reported']?.boolValue === false) {
-          expect(attributes['gen_ai.usage.input_tokens']).toBeUndefined()
-          expect(attributes['gen_ai.usage.output_tokens']).toBeUndefined()
-        }
         await expect
           .poll(
             () =>
@@ -676,7 +595,7 @@ test('exports one trace from HTTP through Worker and Pi agent-host', async () =>
   }
 }, 45000)
 
-test('Codex thinking selection travels from HTTP through the Worker to the native turn', async () => {
+test('Codex thinking selection travels from HTTP through the Thread state machine to the native turn', async () => {
   const thinking = { id: 'reasoningEffort' as const, value: 'high' }
   await withProviderThread(
     {

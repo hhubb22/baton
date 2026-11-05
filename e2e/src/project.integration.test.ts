@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process'
 import { createServer as createHTTPServer } from 'node:http'
 import { once } from 'node:events'
 import { request as httpsRequest } from 'node:https'
-import { mkdtemp, realpath, readFile, writeFile, mkdir, readdir, rm, symlink } from 'node:fs/promises'
+import { mkdtemp, realpath, readFile, writeFile, mkdir, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -20,7 +20,8 @@ import { startServer } from '@baton/server/server'
 import { openTestDatabase, seedNodeIdentity } from '@baton/server/testing/database'
 import { saveDeviceIdentity } from '@baton/batond/daemon/identity'
 import { initializeBrowseRoots } from '@baton/batond/devices/roots'
-import { LocalWorkerHost } from '@baton/batond/daemon/host'
+import { InProcessWorkerHost } from '@baton/batond/daemon/in-process-host'
+import { replay } from './testing/replay-worker.ts'
 import { runDaemon } from '@baton/batond/daemon/daemon'
 import { connectWebSocket } from '@baton/batond/daemon/transport'
 
@@ -105,7 +106,10 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
     runtimeDirectory = join(directory, 'runtime-auth')
   const caFile = join(directory, 'server.crt'),
     keyFile = join(directory, 'server.key')
-  const host = new LocalWorkerHost(nodeDirectory, { executable: process.execPath, args: [bundle] })
+  const host = new InProcessWorkerHost(nodeDirectory, {
+    agentFactory: replay,
+    watchdogCommand: { executable: process.execPath, args: [bundle, 'watchdog'] },
+  })
   const scope = Scope.makeUnsafe()
   const controller = new AbortController()
   let daemon: Promise<unknown> | undefined
@@ -199,7 +203,7 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
           identity,
           transport: (url, options) => connectWebSocket(url, { ...options, ca }),
           host,
-          executionCommand: { executable: process.execPath, args: [bundle] },
+          watchdogCommand: { executable: process.execPath, args: [bundle, 'watchdog'] },
           probe: async () => capability,
           heartbeatMs: 1000,
           pollIntervalMs: 20,
@@ -471,24 +475,7 @@ test('Project HTTP → PostgreSQL → WSS daemon → real Runtime coordinates re
   } finally {
     controller.abort()
     await daemon
-    for (const threadId of await readdir(join(nodeDirectory, 'threads')).catch(() => [])) {
-      try {
-        const worker = await host.request(threadId, { type: 'status', ok: false })
-        if (worker.pid) process.kill(worker.pid, 'SIGTERM')
-        await expect
-          .poll(
-            async () =>
-              host.request(threadId, { type: 'status', ok: false }).then(
-                () => false,
-                () => true,
-              ),
-            { timeout: 5000 },
-          )
-          .toBe(true)
-      } catch {
-        /* 启动失败的 Worker 可能已退出。 */
-      }
-    }
+    await host.close()
     await database.runtime.runPromise(Scope.close(scope, Exit.void))
     await database.close()
     await rm(directory, { recursive: true, force: true })
@@ -577,9 +564,12 @@ test('completed chat → background memory and HTTP embeddings → recall → re
           dataDirectory: nodeDirectory,
           identity,
           transport: (url, options) => connectWebSocket(url, { ...options, ca }),
-          host: new LocalWorkerHost(nodeDirectory, {
-            executable: process.execPath,
-            args: ['--import', loader, fileURLToPath(new URL('./testing/replay-worker.ts', import.meta.url))],
+          host: new InProcessWorkerHost(nodeDirectory, {
+            agentFactory: replay,
+            watchdogCommand: {
+              executable: process.execPath,
+              args: ['--import', loader, fileURLToPath(new URL('./testing/watchdog.ts', import.meta.url))],
+            },
           }),
           probe: async () => [],
           heartbeatMs: 1000,

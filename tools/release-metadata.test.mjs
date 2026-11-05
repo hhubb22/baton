@@ -31,7 +31,7 @@ test('开发与发布 bundle 的中心、节点、子进程及 Runtime 诊断使
     assert.deepEqual(run(server, ['--version']), { ...expected, node: process.version })
     const node = { ...expected, sea: false, node: process.version }
     assert.deepEqual(run(batond, ['--version']), node)
-    for (const role of ['worker', 'agent-host', 'watchdog', 'project-runtime'])
+    for (const role of ['agent-host', 'watchdog', 'project-runtime'])
       assert.deepEqual(run(batond, [role, '--version']), node)
     const runtime = run(batond, ['project-runtime', 'probe'])
     assert.equal(runtime.version, expected.version)

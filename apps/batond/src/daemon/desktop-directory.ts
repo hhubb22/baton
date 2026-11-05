@@ -3,7 +3,7 @@ import { isAbsolute, join } from 'node:path'
 import { Effect, Schema } from 'effect'
 import * as Reactivity from 'effect/reactivity/Reactivity'
 import * as Sqlite from '@baton/sqlite'
-import { UUID, WorkerOpenConfig } from '@baton/protocol'
+import { WorkerOpenConfig } from '@baton/protocol'
 import { authorizeDirectory } from '../devices/roots.ts'
 import { hasCode } from '../platform/errors.ts'
 import { loadIdentity } from './identity.ts'
@@ -22,13 +22,17 @@ export class DesktopDirectoryError extends Error {
   }
 }
 
-const SavedWorker = Schema.Struct({ threadId: UUID, config: WorkerOpenConfig })
-
 const readWorker = Effect.fnUntraced(function* (filename: string, threadId: string) {
   const sql = yield* Sqlite.make({ filename, readonly: true, busyTimeoutMs: 100 })
-  const rows = yield* sql.unsafe<{ payload: string }>('SELECT payload FROM node_workers WHERE thread_id=?', [threadId])
+  const rows = yield* sql.unsafe<{ thread_id: string; config_json: string }>(
+    'SELECT thread_id,config_json FROM threads WHERE thread_id=?',
+    [threadId],
+  )
   if (!rows[0]) return undefined
-  return yield* Effect.try(() => Schema.decodeUnknownSync(SavedWorker)(JSON.parse(rows[0].payload)))
+  return {
+    threadId: rows[0].thread_id,
+    config: yield* Effect.try(() => Schema.decodeUnknownSync(WorkerOpenConfig)(JSON.parse(rows[0].config_json))),
+  }
 })
 
 /** 仅从节点已保存的中心配置读取目录，不发现或启动 Worker。 */

@@ -1,8 +1,5 @@
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { lstat } from 'node:fs/promises'
-import { readLedger } from '../worker/ledger.ts'
-import { isMissing } from './identity.ts'
 import { Schema, type Tracer } from 'effect'
 import { tracePromise } from '@baton/telemetry'
 import {
@@ -78,16 +75,15 @@ export function makeThreadService(options: {
 }) {
   const { ledger, host } = options
   const recovery = makeWorkerRecovery({
-    dataDirectory: options.dataDirectory,
     ledger,
     host,
     nodeId: options.identity.node_id,
   })
   const inFlight = new Map<string, { hash: string; result: Promise<ThreadCommandResult> }>()
-  const polls = new Map<string, { at: number; delay: number }>()
   const now = options.now ?? (() => performance.now())
-  const pollMs = options.pollIntervalMs ?? 250
   let recoverAt = 0
+  const pollMs = options.pollIntervalMs ?? 250
+  const polls = new Map<string, { at: number; delay: number }>()
   const wake = (threadId: string) => {
     polls.delete(threadId)
     options.onActivity?.()
@@ -118,10 +114,13 @@ export function makeThreadService(options: {
     if (!['thread_stop', 'thread_withdraw', 'thread_settings'].includes(req.type))
       await authorizeDirectory(options.dataDirectory, config.working_directory)
     if (performance.now() >= deadline) throw new CommandDeliveryUncertain()
-    const readiness = await recovery.ensure(req.thread_id!)
-    if (readiness === 'lost') throw new WorkerHistoryUnavailable()
-    if (readiness === 'runtime_mode_conflict') throw new AdmissionRejected('runtime_mode_conflict')
-    if (readiness === 'retry') throw new CommandDeliveryUncertain()
+    if (req.type === 'thread_open') await host.ensureWorker(req.thread_id!)
+    else {
+      const readiness = await recovery.ensure(req.thread_id!)
+      if (readiness === 'lost') throw new WorkerHistoryUnavailable()
+      if (readiness === 'runtime_mode_conflict') throw new AdmissionRejected('runtime_mode_conflict')
+      if (readiness === 'retry') throw new CommandDeliveryUncertain()
+    }
     const ipcDeadline = Math.min(deadline, performance.now() + 1000)
     const request = (value: WorkerRequest) => {
       const remaining = Math.floor(ipcDeadline - performance.now())
@@ -201,7 +200,8 @@ export function makeThreadService(options: {
     return result
   }
   async function execute(id: string, cmd: ThreadCommand): Promise<ThreadCommandResult> {
-    if (options.excludedThreadIds?.has(cmd.thread_id)) throw new AdmissionRejected('binding_mismatch')
+    if (options.excludedThreadIds?.has(cmd.thread_id) || ledger.excluded(cmd.thread_id))
+      throw new AdmissionRejected('binding_mismatch')
     // All stages share the command's outer budget; Worker launch owns at most 3 seconds.
     const deadline = performance.now() + 4500
     if (cmd.action === 'check_activity') {
@@ -272,27 +272,6 @@ export function makeThreadService(options: {
         }
         const generation = cmd.storage_generation ?? randomUUID()
         const paths = workerPaths(options.dataDirectory, cmd.thread_id)
-        let physicalExists = true
-        try {
-          await lstat(paths.threadDirectory)
-        } catch (error) {
-          if (isMissing(error)) physicalExists = false
-          else throw error
-        }
-        if (physicalExists) {
-          try {
-            const physical = readLedger(paths.ledger).initial.config
-            if (
-              !physical ||
-              physical.node_id !== options.identity.node_id ||
-              physical.thread_id !== cmd.thread_id ||
-              physical.storage_generation !== generation
-            )
-              throw new AdmissionRejected('binding_mismatch')
-          } catch {
-            throw new AdmissionRejected('binding_mismatch')
-          }
-        }
         const model = cmd.model ?? capability.default_model
         request = {
           type: 'thread_open',

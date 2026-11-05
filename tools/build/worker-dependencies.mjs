@@ -156,7 +156,7 @@ export async function assertWorkerDependencies({ root = repository, external = [
     ],
   })
   const visited = new Set()
-  const pending = ['daemon/worker-runner.ts', 'worker/index.ts'].map((entry) => ({
+  const pending = ['worker/index.ts'].map((entry) => ({
     path: join(root, 'apps/batond/src', entry),
     chain: [],
   }))

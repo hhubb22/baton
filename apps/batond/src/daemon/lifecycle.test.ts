@@ -111,7 +111,7 @@ describe('node.db durable handoff', () => {
             threadId: request.thread_id,
             config: request.open_config,
             ready: true,
-            startup_phase: 'open_attempted',
+            startup_phase: 'awaiting_open',
           })
           yield* ledger.acknowledge({
             type: 'thread.report_result',

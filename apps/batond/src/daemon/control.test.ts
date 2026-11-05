@@ -1,6 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import { spawn } from 'node:child_process'
-import { once } from 'node:events'
 import { lstat, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Effect } from 'effect'
@@ -13,9 +11,6 @@ import { controlPaths, decodeControlRequest, decodeControlResponse } from './con
 import { requestAuthenticated } from './ipc.ts'
 import { processLockIsHeld } from '../platform/lock.ts'
 import { writePrivateFileAtomic } from '../platform/private.ts'
-import { ensurePrivateDirectory } from '../platform/private.ts'
-import { readProcessIdentity } from '../platform/identity.ts'
-import { reapProcessTree } from '../platform/process-tree.ts'
 import { makePrivateTempDirectory } from '../testing/private.ts'
 import { loadIdentity, saveDeviceIdentity } from './identity.ts'
 import { DeviceLogin } from './device-login.ts'
@@ -209,12 +204,18 @@ it('keeps an identity approved while a replacement login is being cancelled', as
 
 it('retains identity when bound-runtime process cleanup fails', async () => {
   const saved = identity()
+  const started = Promise.withResolvers<void>()
   const { directory, client } = await fixture({
     identity: saved,
-    boundRuntime: () => Effect.never.pipe(Effect.ensuring(Effect.die(new Error('process cleanup failed')))),
+    boundRuntime: () => {
+      started.resolve()
+      return Effect.never.pipe(Effect.ensuring(Effect.die(new Error('process cleanup failed'))))
+    },
   })
   await writePrivateFileAtomic(join(directory, 'identity.json'), JSON.stringify(saved))
   await client.status()
+  await started.promise
+  await new Promise<void>((resolve) => setTimeout(resolve, 0))
   expect(await client.request({ method: 'logout' })).toMatchObject({
     ok: false,
     message: expect.stringContaining('process cleanup failed'),
@@ -266,34 +267,3 @@ it('discards rejection state belonging to a different binding', async () => {
   expect(await client.status()).toMatchObject({ state: 'connecting' })
   await expect(readFile(join(directory, 'control-state.json'))).rejects.toMatchObject({ code: 'ENOENT' })
 })
-
-it.skipIf(process.platform === 'win32')(
-  'logout reaps detached Worker descendants before deleting identity',
-  async () => {
-    const saved = identity()
-    const { directory, client } = await fixture({ identity: saved })
-    await writePrivateFileAtomic(join(directory, 'identity.json'), JSON.stringify(saved))
-    const threadId = randomUUID()
-    await ensurePrivateDirectory(join(directory, 'threads'))
-    await ensurePrivateDirectory(join(directory, 'threads', threadId))
-    const lockPath = join(directory, 'threads', threadId, 'worker.lock')
-    const lockModule = new URL('../platform/lock.ts', import.meta.url).href
-    const script = `import { acquireProcessLock } from ${JSON.stringify(lockModule)}; import { spawn } from 'node:child_process'; await acquireProcessLock(${JSON.stringify(lockPath)}); const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {stdio:'ignore'}); await new Promise(resolve=>child.once('spawn',resolve)); process.on('SIGTERM',()=>{}); console.log(JSON.stringify({pid:process.pid,child:child.pid})); setInterval(()=>{},1000)`
-    const worker = spawn(process.execPath, ['--input-type=module', '-e', script], {
-      detached: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    await once(worker, 'spawn')
-    const [chunk] = await once(worker.stdout, 'data')
-    const pids = JSON.parse(String(chunk)) as { pid: number; child: number }
-    const record = await readProcessIdentity(pids.pid)
-    if (!record) throw new Error('Worker fixture exited before cleanup')
-    cleanup.push(() => reapProcessTree(record))
-    expect(await readProcessIdentity(pids.child)).not.toBeNull()
-    expect(await client.request({ method: 'logout' })).toEqual({ ok: true })
-    expect(await readProcessIdentity(pids.pid)).toBeNull()
-    expect(await readProcessIdentity(pids.child)).toBeNull()
-    await expect(loadIdentity(directory)).rejects.toMatchObject({ code: 'ENOENT' })
-  },
-  10000,
-)

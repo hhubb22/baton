@@ -3,7 +3,7 @@ import { chmod, lstat, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Cause, Effect, Exit, Schema, type Scope } from 'effect'
 import { BUILD, PROTOCOL_VERSION } from '@baton/protocol/release'
-import { UUID, type NodeIdentity } from '@baton/protocol'
+import { UUID, type NodeIdentity, type WorkerRequest, type WorkerIPCMessage } from '@baton/protocol'
 import { acquireProcessLock } from '../platform/lock.ts'
 import { ensurePrivateDirectory, readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
 import { readOwnProcessIdentity } from '../platform/identity.ts'
@@ -22,6 +22,15 @@ import { listenAuthenticated, IPCError } from './ipc.ts'
 import { stopManagedProcesses } from './daemon-shutdown.ts'
 import { loadBindingFence, retireBinding } from './binding-fence.ts'
 import type { RunDaemonOptions } from './daemon.ts'
+
+let threadRequestHandler: ((threadId: string, request: WorkerRequest) => Promise<WorkerIPCMessage>) | undefined
+
+/** The bound runtime registers its in-process host; local CLI requests travel over the control channel. */
+export const setThreadRequestHandler = (
+  handler: ((threadId: string, request: WorkerRequest) => Promise<WorkerIPCMessage>) | undefined,
+): void => {
+  threadRequestHandler = handler
+}
 
 const failure = (error: unknown): Error => (error instanceof Error ? error : new Error('本机守护进程操作失败'))
 const attempt = <A>(run: () => Promise<A>) => Effect.tryPromise({ try: run, catch: failure })
@@ -311,6 +320,10 @@ export const runControlDaemon = Effect.fnUntraced(function* (
     }
     if (request.method === 'resolve_thread_directory')
       return resolveThreadDirectoryResponse(paths.root, request.thread_id)
+    if (request.method === 'thread_request') {
+      if (!threadRequestHandler) return { ok: false, code: 'not_bound', message: '设备尚未登录' }
+      return { ok: true, result: await threadRequestHandler(request.thread_id, request.request) }
+    }
     if (request.method === 'diagnostics') return status()
     return { ok: false, code: 'unsupported', message: '本机控制方法尚不支持' }
   }

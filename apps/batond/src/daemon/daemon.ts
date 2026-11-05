@@ -19,9 +19,10 @@ import {
 } from '@baton/protocol'
 import { hasCode } from '../platform/errors.ts'
 import { ensurePrivateDirectory, openPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
-import { LocalWorkerHost, type DaemonWorkerHost, type BatondCommand } from './host.ts'
+import { type DaemonWorkerHost, type BatondCommand } from './host.ts'
+import { InProcessWorkerHost } from './in-process-host.ts'
 import { isMissing, loadIdentity, relayURL as normalizeRelay, coordinatorURL } from './identity.ts'
-import { runControlDaemon } from './control-daemon.ts'
+import { runControlDaemon, setThreadRequestHandler } from './control-daemon.ts'
 import { loadBindingFence } from './binding-fence.ts'
 import type { ConnectionState } from './control.ts'
 import type { DeviceLoginTransport } from './device-login.ts'
@@ -66,7 +67,7 @@ export interface RunDaemonOptions {
   readonly transport?: DaemonTransport
   readonly probe?: (signal: AbortSignal) => Promise<RuntimeAgent | readonly RuntimeAgent[]>
   readonly host?: DaemonWorkerHost
-  readonly executionCommand?: BatondCommand
+  readonly watchdogCommand?: BatondCommand
   readonly random?: () => number
   readonly project?: Omit<ProjectManagerOptions, 'dataDir'>
 }
@@ -727,8 +728,9 @@ const runBoundDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error, S
             const executions = makeExecutionService({
               dataDirectory: options.dataDirectory,
               excludedIds: excludedExecutions,
-              ...(options.executionCommand ? { command: options.executionCommand } : {}),
+              ...(options.watchdogCommand ? { watchdogCommand: options.watchdogCommand } : {}),
             })
+            yield* Effect.addFinalizer(() => Effect.promise(() => executions.close()))
             yield* controlAttempt(() => executions.recover())
             yield* controlAttempt((signal) => threads.discover(signal))
             let deviceReport: Pick<RuntimeReport, 'exec' | 'roots' | 'repos' | 'project_runtime' | 'truncated'> = {
@@ -824,9 +826,16 @@ const runBoundDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error, S
     })
     yield* lifecycle
   })
+  const host =
+    options.host ??
+    new InProcessWorkerHost(
+      options.dataDirectory,
+      options.watchdogCommand ? { watchdogCommand: options.watchdogCommand } : {},
+    )
+  setThreadRequestHandler((threadId, request) => host.request(threadId, request))
   return program.pipe(
     Effect.provideService(DaemonServices, {
-      host: options.host ?? new LocalWorkerHost(options.dataDirectory, undefined, options.telemetryRelay),
+      host,
       transport: options.transport ?? connectWebSocket,
       probe:
         options.probe ??
@@ -837,6 +846,12 @@ const runBoundDaemon = (options: RunDaemonOptions): Effect.Effect<void, Error, S
           return probe(signal)
         }),
     }),
+    Effect.ensuring(
+      Effect.promise(async () => {
+        setThreadRequestHandler(undefined)
+        if (host instanceof InProcessWorkerHost) await host.close()
+      }),
+    ),
   )
 }
 

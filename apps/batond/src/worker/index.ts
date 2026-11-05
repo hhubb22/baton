@@ -51,13 +51,18 @@ import {
   type OutboxEntry,
   type State,
 } from './ledger.ts'
+import { openThreadLedger } from './node-ledger.ts'
 
 export * from './agent.ts'
 export { WorkerFailure } from './ledger.ts'
 
+export const IDLE_HOST_TIMEOUT_MS = 10 * 60 * 1000
+
 export interface WorkerOptions {
   readonly dbPath: string
+  readonly threadId?: string
   readonly dataDirectory?: string
+  readonly idleHostTimeoutMs?: number
   readonly agentFactory: AgentFactory
   readonly openTimeoutMs?: number
   readonly prepareTimeoutMs?: number
@@ -177,14 +182,26 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       turns.clear()
     }),
   )
-  const ledger = yield* openWorkerLedger({
-    dbPath: options.dbPath,
-    ...(options.dataDirectory === undefined ? {} : { dataDirectory: options.dataDirectory }),
-  }).pipe(Effect.mapError((cause) => new WorkerFailure('storage_error', 'Cannot open Worker ledger', cause)))
+  const ledger = yield* (
+    options.threadId === undefined
+      ? openWorkerLedger({
+          dbPath: options.dbPath,
+          ...(options.dataDirectory === undefined ? {} : { dataDirectory: options.dataDirectory }),
+        })
+      : openThreadLedger({
+          dbPath: options.dbPath,
+          threadId: options.threadId,
+          dataDirectory: options.dataDirectory!,
+        })
+  ).pipe(Effect.mapError((cause) => new WorkerFailure('storage_error', 'Cannot open Thread ledger', cause)))
   let state = ledger.initial
   const jobs = yield* Queue.unbounded<Effect.Effect<void>>()
   const fatal = yield* Deferred.make<never, WorkerFailure>()
   let agent: ThreadAgent | undefined
+  let nativeReady = false
+  let idleTimer: Fiber.Fiber<void> | undefined
+  let sleeping = false
+  const idleHostTimeoutMs = options.idleHostTimeoutMs ?? IDLE_HOST_TIMEOUT_MS
   const ownedAgents = new Set<ThreadAgent>()
   let operation: Operation | undefined
   let stopFiber: Fiber.Fiber<void> | undefined
@@ -382,6 +399,48 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       )
     })
   }
+  function idleEligible() {
+    return (
+      state.phase === 'idle' &&
+      state.activeMessage === undefined &&
+      !Object.values(state.messages).some((message) => message.state === 'queued') &&
+      !(state.questions ?? []).some((question) => question.state === 'pending' || question.state === 'queued')
+    )
+  }
+  function syncIdleTimer(): Effect.Effect<void> {
+    return Effect.gen(function* () {
+      if (!idleEligible()) {
+        const running = idleTimer
+        idleTimer = undefined
+        if (running) yield* Fiber.interrupt(running)
+        return
+      }
+      if (idleTimer || !agent || closed || closing || frozen || sleeping) return
+      const epoch = state.epoch
+      const fiber = yield* Effect.forkIn(
+        Effect.gen(function* () {
+          yield* Effect.sleep(idleHostTimeoutMs)
+          if (closed || closing || frozen || epoch !== state.epoch || !idleEligible() || agent === undefined) return
+          const current = agent
+          idleTimer = undefined
+          sleeping = true
+          const stopped = yield* current
+            .close()
+            .pipe(Effect.andThen(current.reap()), Effect.timeout(stopMs), Effect.exit)
+          if (Exit.isFailure(stopped) || !stopped.value.processTreeStopped) {
+            yield* Effect.logWarning('Idle agent-host cleanup was not confirmed; keeping its process record')
+            sleeping = false
+            return
+          }
+          yield* retireAgent(current)
+          sleeping = false
+          yield* Effect.logDebug('Idle agent-host reclaimed', { thread_id: state.config?.thread_id })
+        }),
+        scope,
+      )
+      idleTimer = fiber
+    })
+  }
   function commit<A>(change: (draft: State) => A): Effect.Effect<A, WorkerFailure> {
     return Effect.gen(function* () {
       if (frozen) return yield* Effect.fail(frozen)
@@ -394,6 +453,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       yield* ledger.save(draft).pipe(Effect.catch((cause) => freeze(cause).pipe(Effect.andThen(Effect.fail(frozen!)))))
       const previous = state
       state = draft
+      yield* syncIdleTimer()
       const waitAttributes = {
         'baton.thread.id': state.config?.thread_id ?? '',
         'baton.node.id': state.config?.node_id ?? '',
@@ -584,6 +644,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
   function retireAgent(current: ThreadAgent): Effect.Effect<void> {
     return Effect.gen(function* () {
       ownedAgents.delete(current)
+      nativeReady = false
       if (agent !== current) return
       agent = undefined
       const previous = eventsFiber
@@ -1263,8 +1324,59 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         return
       }
       if (operation || state.phase === 'failed' || state.phase === 'empty') return
-      const current = yield* ensureAgent()
       const intent = Object.values(state.messages).find((message) => message.state === 'intent')
+      const opening = Object.values(state.commands).find(
+        (command) => isPending(command) && command.receipt.action === 'open',
+      )
+      const resuming = Object.values(state.commands).some(
+        (command) => isPending(command) && command.receipt.action === 'resume',
+      )
+      const queued = Object.values(state.messages).filter((message) => message.state === 'queued')
+      const answering = (state.questions ?? []).some(
+        (question) => question.state === 'queued' && question.answer && question.commandId,
+      )
+      if (!intent && !opening && !resuming && !state.resumeRequested && queued.length === 0 && !answering) return
+      const current = yield* ensureAgent()
+      if (
+        !intent &&
+        !opening &&
+        !resuming &&
+        !state.resumeRequested &&
+        queued.length > 0 &&
+        state.opened &&
+        state.nativeId &&
+        !nativeReady
+      ) {
+        const config = state.config!
+        yield* launch(
+          newOperation('resume'),
+          current
+            .resume(state.nativeId, modelConfig(config, Object.values(state.messages)))
+            .pipe(Effect.timeout(openMs)),
+          (result) =>
+            Effect.gen(function* () {
+              if (Exit.isSuccess(result) && result.value.nativeSessionId === state.nativeId) {
+                nativeReady = true
+                return
+              }
+              const reason = reasonOf(Exit.isFailure(result) ? Cause.squash(result.cause) : new Error('Resume failed'))
+              yield* Effect.logWarning('Idle host resume failed')
+              const reaped = yield* cleanupAgent(current).pipe(Effect.timeout(openMs), Effect.exit)
+              yield* commit((draft) => {
+                withdrawQueued(draft, reason)
+                draft.phase = 'stopped'
+                draft.resumeRequested = false
+                draft.processTreeStopped = Exit.isSuccess(reaped) && reaped.value.processTreeStopped
+                const code = /history|session|not found|missing|不存在|会话/i.test(reason)
+                  ? 'history_lost'
+                  : 'start_failed'
+                report(draft, 'thread.stopped', { stop_code: code, reason })
+              })
+              if (Exit.isSuccess(reaped) && reaped.value.processTreeStopped) yield* retireAgent(current)
+            }),
+        )
+        return
+      }
       if (intent) {
         yield* launch(newOperation('recover', intent.input.id), recoverInput(current, intent), (result) =>
           Effect.gen(function* () {
@@ -1290,12 +1402,6 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         )
         return
       }
-      const opening = Object.values(state.commands).find(
-        (command) => isPending(command) && command.receipt.action === 'open',
-      )
-      const resuming = Object.values(state.commands).some(
-        (command) => isPending(command) && command.receipt.action === 'resume',
-      )
       if (opening || state.resumeRequested || resuming) {
         if (!opening && !state.nativeId) {
           yield* uncertain('Cannot resume without a durable native session identity')
@@ -1357,6 +1463,7 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
                 draft.resumeRequested = false
                 delete draft.stopReason
                 draft.phase = 'idle'
+                nativeReady = true
                 report(draft, opening ? 'thread.opened' : 'thread.resumed', { native_session_id: draft.nativeId })
                 for (const command of Object.values(draft.commands)) {
                   if (command.receipt.action === 'open' || command.receipt.action === 'resume')
@@ -1403,7 +1510,6 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         return
       }
       const active = state.activeMessage ? state.messages[state.activeMessage] : undefined
-      const queued = Object.values(state.messages).filter((item) => item.state === 'queued')
       const stale = queued.find(
         (item) => item.input.mode === 'steer' && (!active || active.ended || item.input.targetTurn !== active.turn),
       )
@@ -1584,7 +1690,19 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
       draft.commands[request.command_id] = command
       switch (action) {
         case 'open': {
-          if (draft.config || !request.open_config) return reject('invalid_state', 'Thread already has an open command')
+          if (
+            !request.open_config ||
+            Object.values(draft.commands).some(
+              (command) => command.receipt.command_id !== request.command_id && command.receipt.action === 'open',
+            )
+          )
+            return reject('invalid_state', 'Thread already has an open command')
+          if (
+            draft.config &&
+            (draft.config.thread_id !== request.open_config.thread_id ||
+              draft.config.storage_generation !== request.open_config.storage_generation)
+          )
+            return reject('identity_mismatch', 'Thread open configuration does not match the Worker ledger')
           draft.config = request.open_config
           draft.phase = 'opening'
           break
@@ -1843,6 +1961,22 @@ export const makeWorker = Effect.fn('Worker.make')(function* (options: WorkerOpt
         return
       }
       yield* commit((draft) => cancelQuestions(draft, 'Agent restarted; question is no longer available'))
+      const interruptedOpen = Object.values(state.commands).find(
+        (command) => command.receipt.action === 'open' && command.status.state === 'running',
+      )
+      const active = state.activeMessage ? state.messages[state.activeMessage] : undefined
+      const needsRecovery =
+        interruptedOpen !== undefined ||
+        Object.keys(state.processes).length > 0 ||
+        Object.values(state.messages).some((message) => message.state === 'intent') ||
+        state.phase === 'unknown' ||
+        state.phase === 'stopping' ||
+        state.phase === 'opening' ||
+        (state.phase === 'busy' && active !== undefined)
+      if (!needsRecovery) {
+        recovering = false
+        return
+      }
       const current = yield* ensureAgent()
       const recoveryTask = Effect.gen(function* () {
         if (!(yield* recoverPersistedProcesses())) return { processTreeStopped: false }

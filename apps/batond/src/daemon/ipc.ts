@@ -2,12 +2,11 @@ import { timingSafeEqual } from 'node:crypto'
 import { createConnection, createServer, type Socket } from 'node:net'
 import { Effect, Schema } from 'effect'
 import type * as Scope from 'effect/Scope'
-import { WorkerAuth, WorkerIPCMessage, WorkerRequest, type WorkerIPCMessage as Message } from '@baton/protocol'
+import { WorkerAuth } from '@baton/protocol'
 
 const frameLimit = 256 * 1024
-const decodeRequest = Schema.decodeUnknownSync(WorkerRequest)
-const decodeMessage = Schema.decodeUnknownSync(WorkerIPCMessage)
 const decodeAuth = Schema.decodeUnknownSync(WorkerAuth)
+const decodeAuthResult = Schema.decodeUnknownSync(Schema.Struct({ ok: Schema.Boolean }))
 
 export class IPCError extends Error {
   readonly _tag = 'IPCError'
@@ -117,22 +116,6 @@ export const listenAuthenticated = <Request, Response>(options: {
     })
   })
 
-export const listenWorker = (options: {
-  readonly endpoint: string
-  readonly token: string
-  readonly handle: (request: typeof WorkerRequest.Type) => Effect.Effect<Message, unknown>
-  readonly onResponse?: (request: typeof WorkerRequest.Type, response: Message) => void
-}) =>
-  listenAuthenticated({
-    ...options,
-    decodeRequest: (value) => {
-      const request = decodeRequest(value)
-      if (request.type === 'auth') throw new IPCError('invalid_request', 'Already authenticated')
-      return request
-    },
-    decodeResponse: decodeMessage,
-  })
-
 export function requestAuthenticated<Request, Response>(options: {
   readonly endpoint: string
   readonly token: string
@@ -174,7 +157,7 @@ export function requestAuthenticated<Request, Response>(options: {
         try {
           const raw = JSON.parse(frame.toString('utf8')) as unknown
           if (!authenticated) {
-            const result = decodeMessage(raw)
+            const result = decodeAuthResult(raw)
             if (!result.ok) {
               finish(new IPCError('unauthorized', 'Worker authentication failed'))
               return
@@ -198,10 +181,3 @@ export function requestAuthenticated<Request, Response>(options: {
     })
   })
 }
-
-export const requestWorker = (options: {
-  readonly endpoint: string
-  readonly token: string
-  readonly request: typeof WorkerRequest.Type
-  readonly timeoutMs?: number
-}) => requestAuthenticated({ ...options, decodeRequest, decodeResponse: decodeMessage })

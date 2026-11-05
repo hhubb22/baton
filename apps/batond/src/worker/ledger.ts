@@ -65,7 +65,7 @@ interface PendingQuestion {
   answer?: ThreadAnswerInput
   commandId?: string
 }
-interface Meta {
+export interface Meta {
   questions?: PendingQuestion[]
   config?: WorkerOpenConfig
   phase: Phase
@@ -97,7 +97,7 @@ export const storageBaseline = [
   'CREATE TABLE thread_outbox (seq INTEGER PRIMARY KEY, payload TEXT NOT NULL)',
 ] as const
 
-const initialState = (): State => ({
+export const emptyWorkerState = (): State => ({
   phase: 'empty',
   epoch: 0,
   opened: false,
@@ -177,7 +177,7 @@ function decodeLedger(query: (sql: string) => readonly Row[], expected?: WorkerO
   const checks = query('PRAGMA quick_check(1)')
   if (checks.length !== 1 || Object.values(checks[0]!)[0] !== 'ok') corrupt()
   const found = new Set(query("SELECT name FROM sqlite_schema WHERE type='table'").map((row) => row.name))
-  if (found.size === 0) return { initial: initialState(), condition: 'empty' as const }
+  if (found.size === 0) return { initial: emptyWorkerState(), condition: 'empty' as const }
   if (tables.some((table) => !found.has(table))) corrupt()
   const commands = query('SELECT id, payload FROM thread_commands ORDER BY rowid')
   const messages = query('SELECT id, payload FROM thread_messages ORDER BY rowid')
@@ -187,7 +187,7 @@ function decodeLedger(query: (sql: string) => readonly Row[], expected?: WorkerO
   const rows = query('SELECT payload FROM thread_meta WHERE id=1')
   if (!rows.length) {
     if (hasActivity) corrupt()
-    return { initial: initialState(), condition: 'empty' as const }
+    return { initial: emptyWorkerState(), condition: 'empty' as const }
   }
   const meta: Meta = JSON.parse(String(rows[0]!.payload))
   Schema.decodeUnknownSync(metaSchema)(meta)
@@ -203,7 +203,7 @@ function decodeLedger(query: (sql: string) => readonly Row[], expected?: WorkerO
       meta.activeMessage !== undefined
     )
       corrupt()
-    return { initial: { ...initialState(), ...meta }, condition: 'empty' as const }
+    return { initial: { ...emptyWorkerState(), ...meta }, condition: 'empty' as const }
   }
   Schema.decodeUnknownSync(WorkerOpenConfig)(meta.config)
   const config = meta.config
@@ -351,7 +351,7 @@ export const openWorkerLedger = Effect.fn('Worker.openWorkerLedger')(function* (
       try {
         await lstat(dbPath)
       } catch (error) {
-        if (hasCode(error, 'ENOENT')) return initialState()
+        if (hasCode(error, 'ENOENT')) return emptyWorkerState()
         throw error
       }
       return readLedger(dbPath).initial

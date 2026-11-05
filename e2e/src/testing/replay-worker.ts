@@ -1,19 +1,15 @@
-import { parseArgs } from 'node:util'
 import { existsSync } from 'node:fs'
 import { appendFile, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { telemetryLayer } from '@baton/telemetry'
 import { Effect, Queue, Stream } from 'effect'
 import type { AgentFactory, AgentEvent, AgentMessage, AgentEventIdentity } from '@baton/batond/worker/agent'
 import { AgentError } from '@baton/batond/worker/agent'
 import { makeOutputMailbox } from '@baton/batond/worker/output'
-import { runWorker } from '@baton/batond/daemon/worker-runner'
 import { runWatchdogCommand } from '@baton/batond/platform/process'
-import { runExecutionWorker } from '@baton/batond/execution/runner'
 
 type Input = { id: string; text: string; executionId: string }
 // Derived from ThreadAgent's documented acceptance and event contract; no native service is called.
-const replay: AgentFactory = (config) => {
+export const replay: AgentFactory = (config) => {
   const events = Effect.runSync(Queue.unbounded<AgentEvent>())
   const output = makeOutputMailbox()
   const nativeSessionId = `replay-${config.thread_id}`
@@ -98,34 +94,6 @@ async function main() {
     await runWatchdogCommand()
     return
   }
-  const { values } = parseArgs({
-    args: process.argv.slice(3),
-    options: { 'data-dir': { type: 'string' }, 'thread-id': { type: 'string' }, 'execution-id': { type: 'string' } },
-  })
-  if (process.argv[2] === 'execution-worker') {
-    if (!values['data-dir'] || !values['execution-id']) throw new Error('Missing Execution Worker identity')
-    await Effect.runPromise(Effect.scoped(runExecutionWorker(values['data-dir'], values['execution-id'])))
-    return
-  }
-  if (!values['data-dir'] || !values['thread-id']) throw new Error('Missing replay Worker identity')
-  const controller = new AbortController()
-  process.once('SIGTERM', () => controller.abort())
-  process.once('SIGINT', () => controller.abort())
-  const dataDirectory = values['data-dir'],
-    threadId = values['thread-id']
-  const program = Effect.gen(function* () {
-    return yield* runWorker({
-      dataDirectory,
-      threadId,
-      agentFactory: replay,
-    })
-  })
-  try {
-    await Effect.runPromise(Effect.scoped(program).pipe(Effect.provide(telemetryLayer('baton-worker'))), {
-      signal: controller.signal,
-    })
-  } catch {
-    if (!controller.signal.aborted) process.exitCode = 1
-  }
+  throw new Error('Unsupported replay command')
 }
-void main()
+if (process.argv[1] && /replay-worker\.(?:ts|cjs)$/.test(process.argv[1])) void main()

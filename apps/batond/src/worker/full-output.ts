@@ -18,7 +18,6 @@ import {
   writePrivateFileAtomic,
 } from '../platform/private.ts'
 import { hasCode } from '../platform/errors.ts'
-import { processLockIsHeld } from '../platform/lock.ts'
 
 export const fullOutputPageBytes = 12 * 1024
 const defaultOutputRetentionDays = 30
@@ -215,7 +214,6 @@ export class FullOutputStore {
         const record = Schema.decodeUnknownSync(Record)(await readJson(join(this.directory, entry)))
         if (Date.parse(record.expires_at) <= now) await this.remove(record.id)
       } else {
-        if (await processLockIsHeld(join(this.threadDirectory, 'worker.lock'))) continue
         try {
           const file = await openPrivateFile(join(this.directory, entry))
           const stat = await file.stat().finally(() => file.close())

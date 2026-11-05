@@ -6,8 +6,6 @@ import { expect, it, vi } from 'vite-plus/test'
 import { makePrivateTempDirectory } from '../testing/private.ts'
 import { makeNodeLedger } from './ledger.ts'
 import { collectNodeMetrics } from './telemetry.ts'
-import { workerPaths } from './paths.ts'
-import { acquireProcessLock } from '../platform/lock.ts'
 
 it('reports durable backlog age and clears gauges after acknowledgement', async () => {
   const directory = await makePrivateTempDirectory('baton-metrics-')
@@ -17,9 +15,24 @@ it('reports durable backlog age and clears gauges after acknowledgement', async 
       Effect.scoped(
         Effect.gen(function* () {
           const ledger = yield* makeNodeLedger(join(directory, 'node.db'))
+          const threadId = randomUUID()
+          yield* ledger.saveWorker({
+            threadId,
+            ready: true,
+            config: {
+              thread_id: threadId,
+              node_id: randomUUID(),
+              storage_generation: randomUUID(),
+              agent_type: 'cursor',
+              runtime_mode: 'full-access',
+              working_directory: directory,
+              execution_timeout_seconds: 60,
+              adapter_config: {},
+            },
+          })
           const report = {
             type: 'thread.report' as const,
-            thread_id: randomUUID(),
+            thread_id: threadId,
             event_id: randomUUID(),
             worker_seq: 1,
             kind: 'thread.opened' as const,
@@ -56,13 +69,9 @@ it('reports durable backlog age and clears gauges after acknowledgement', async 
   }
 })
 
-it('counts live Worker locks and WAL bytes, skips failed scans and recovers', async () => {
-  const directory = await makePrivateTempDirectory('baton-metrics-lock-')
+it('counts registered Thread processes, skips failed scans and recovers', async () => {
+  const directory = await makePrivateTempDirectory('baton-metrics-process-')
   const id = randomUUID()
-  const path = workerPaths(directory, id)
-  await mkdir(path.threadDirectory, { recursive: true })
-  await writeFile(`${path.ledger}-wal`, Buffer.alloc(4096))
-  const release = await acquireProcessLock(path.lock)
   const bad = join(directory, 'bad')
   await mkdir(bad)
   await writeFile(join(bad, 'threads'), 'not a directory')
@@ -85,13 +94,15 @@ it('counts live Worker locks and WAL bytes, skips failed scans and recovers', as
               adapter_config: {},
             },
           })
+          const record = { pid: 4321, creationTime: 'Thu Nov  5 04:15:31 2026', role: 'agent-host' }
+          yield* ledger.recordProcess('thread', id, record)
           const active = Metric.withAttributes(Metric.gauge('baton.workers.active'), { 'baton.agent': 'cursor' })
           yield* collectNodeMetrics(directory, ledger)
           const before = (yield* Metric.value(active)).value
           const bytes = (yield* Metric.value(Metric.gauge('baton.ledger.bytes'))).value
           const failed = yield* Effect.exit(collectNodeMetrics(bad, ledger))
           const afterFailure = (yield* Metric.value(active)).value
-          yield* Effect.promise(release)
+          yield* ledger.removeProcess('thread', id, record)
           yield* collectNodeMetrics(directory, ledger)
           return {
             before,
@@ -104,12 +115,11 @@ it('counts live Worker locks and WAL bytes, skips failed scans and recovers', as
       ).pipe(Effect.provideService(Metric.MetricRegistry, new Map())),
     )
     expect(values.before).toBe(1)
-    expect(values.bytes).toBeGreaterThanOrEqual(4096)
+    expect(values.bytes).toBeGreaterThan(0)
     expect(values.failed).toBe(true)
     expect(values.afterFailure).toBe(1)
     expect(values.after).toBe(0)
   } finally {
-    await release()
     await rm(directory, { recursive: true, force: true })
   }
 })

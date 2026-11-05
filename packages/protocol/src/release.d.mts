@@ -4,7 +4,7 @@ export interface BuildInfo {
 }
 export const PROTOCOL_VERSION: 1
 export const SCHEMA_VERSION: '0018_executions.sql'
-export const LEDGER_VERSIONS: Readonly<{ node: 2; project: 1; thread: 1; execution: 1 }>
+export const LEDGER_VERSIONS: Readonly<{ node: 4; project: 1; thread: 1; execution: 1 }>
 export const BUNDLED: boolean
 export const BUILD: BuildInfo
 export interface ReleaseMetadata extends BuildInfo {

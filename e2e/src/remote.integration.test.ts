@@ -4,9 +4,9 @@ import { telemetryLayer } from '@baton/telemetry'
 import type { TraceData } from 'effect/observability/OtlpTracer'
 import { createDatabaseRuntime } from '@baton/server/database'
 import { mkdtemp, readFile, realpath, rm, writeFile, chmod } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { build } from 'esbuild'
 import { Effect, Exit, Scope, Schema } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import { expect, test, vi } from 'vite-plus/test'
@@ -19,9 +19,10 @@ import { saveDeviceIdentity } from '@baton/batond/daemon/identity'
 import { runDaemon } from '@baton/batond/daemon/daemon'
 import { connectWebSocket } from '@baton/batond/daemon/transport'
 import { initializeBrowseRoots } from '@baton/batond/devices/roots'
-import { LocalWorkerHost } from '@baton/batond/daemon/host'
+import { InProcessWorkerHost } from '@baton/batond/daemon/in-process-host'
+import { replay } from './testing/replay-worker.ts'
 
-test('HTTP → TS center → batond → independent Worker survives reconnects without resending input', async () => {
+test('HTTP → TS center → batond → in-process Thread state machine survives reconnects without resending input', async () => {
   const database = await openTestDatabase()
   const captured: Array<{
     service: string
@@ -60,9 +61,14 @@ test('HTTP → TS center → batond → independent Worker survives reconnects w
   const directory = await realpath(await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'btr-')))
   await chmod(directory, 0o700)
   const nodeDirectory = join(directory, 'node')
-  const bundle = join(directory, 'replay-worker.cjs')
   const workers: string[] = []
-  const host = new LocalWorkerHost(nodeDirectory, { executable: process.execPath, args: [bundle] })
+  const host = new InProcessWorkerHost(nodeDirectory, {
+    agentFactory: replay,
+    watchdogCommand: {
+      executable: process.execPath,
+      args: [fileURLToPath(new URL('./testing/watchdog.ts', import.meta.url))],
+    },
+  })
   let daemonController: AbortController | undefined
   let daemon: Promise<unknown> | undefined
   let serverScope: Scope.Closeable | undefined
@@ -100,18 +106,6 @@ test('HTTP → TS center → batond → independent Worker survives reconnects w
     daemonController = undefined
   }
   try {
-    await build({
-      entryPoints: [new URL('./testing/replay-worker.ts', import.meta.url).pathname],
-      outfile: bundle,
-      bundle: true,
-      platform: 'node',
-      format: 'cjs',
-      target: 'node26',
-      external: ['@cursor/sdk', '@cursor/sdk/*'],
-      define: { 'import.meta.url': '__baton_import_meta_url__' },
-      banner: { js: 'const __baton_import_meta_url__ = require("node:url").pathToFileURL(__filename).href;' },
-      logLevel: 'silent',
-    })
     await writeFile(join(directory, 'index.html'), '<!doctype html><title>Baton test</title>')
     await start()
     expect(await fetch(base).then((response) => response.text())).toContain('<title>Baton test</title>')
@@ -303,7 +297,7 @@ test('HTTP → TS center → batond → independent Worker survives reconnects w
     await expect
       .poll(async () => (await alice<P.SessionResult>(`/threads/${threadId}/output`)).body.text)
       .toBe('working:hold\n')
-    // Center downtime leaves the daemon, Worker and native input running unchanged.
+    // Center downtime leaves the daemon, Thread state machine and native input running unchanged.
     const workerStatus = await host.request(threadId, { type: 'status', ok: false })
     expect(workerStatus.agent_ready).toBe(true)
     await stopCenter()
@@ -332,28 +326,7 @@ test('HTTP → TS center → batond → independent Worker survives reconnects w
       .split('\n')
       .map((line) => JSON.parse(line) as { text: string })
     expect(submissions.map((entry) => entry.text)).toEqual(['first', 'hold', 'last'])
-    await expect
-      .poll(() => captured.some((span) => span.service === 'baton-worker' && span.name === 'baton.worker.send'))
-      .toBe(true)
-    const sent = captured.find((span) => span.service === 'baton-worker' && span.name === 'baton.worker.send')!
-    expect(sent.traceId).toBe('a'.repeat(32))
-    const chain: string[] = []
-    let parent: typeof sent | undefined = sent
-    while (parent) {
-      chain.push(`${parent.service}:${parent.name}`)
-      parent = captured.find((span) => span.spanId === parent!.parentSpanId)
-    }
-    expect(chain).toEqual(
-      expect.arrayContaining([
-        'baton-server:baton.http.request',
-        'baton-server:baton.command.enqueue',
-        'baton-server:baton.command.dispatch',
-        'baton-server:baton.gateway.send',
-        'batond:baton.command.receive',
-        'batond:baton.worker.dispatch',
-        'baton-worker:baton.worker.receive',
-      ]),
-    )
+    expect(captured.some((span) => span.service === 'batond' && span.name === 'baton.worker.dispatch')).toBe(true)
     expect(captured.some((span) => span.attributes.some((attribute) => attribute.key === 'db.system.name'))).toBe(true)
     const exports = rawExports.join('')
     expect(exports).not.toContain('db.query.text')
@@ -384,24 +357,7 @@ test('HTTP → TS center → batond → independent Worker survives reconnects w
     ).toBe(2)
   } finally {
     await stopDaemon()
-    for (const threadId of workers) {
-      try {
-        const status = await host.request(threadId, { type: 'status', ok: false }, { start: false })
-        if (status.pid) process.kill(status.pid, 'SIGTERM')
-        await expect
-          .poll(async () => {
-            try {
-              await host.request(threadId, { type: 'status', ok: false }, { start: false })
-              return false
-            } catch {
-              return true
-            }
-          })
-          .toBe(true)
-      } catch {
-        /* A failed startup may already have released the Worker. */
-      }
-    }
+    await host.close()
     await stopCenter()
     await tracedRuntime.dispose()
     await database.close()

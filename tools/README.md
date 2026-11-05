@@ -12,7 +12,7 @@ node tools/build/batond.mjs
 node tools/dev/batond.mjs --help
 ```
 
-`build/server.mjs [输出路径]` 默认生成 `apps/server/dist/server.cjs`，同时构建相邻的 `web/` 并复制 SQL 迁移到 `migrations/`。`build/batond.mjs [输出路径]` 默认生成 `apps/batond/dist/batond.cjs`，SDK 从已安装依赖加载；构建前从 `daemon/worker-runner.ts` 和 `worker/index.ts` 检查运行时依赖图，禁止 Worker 引入 CLI、探测、host 实现和 SDK，并拒绝本地源码中无法静态解析的动态加载。检查只分析依赖，安装包仍使用统一 bundle。两个脚本从自身位置确定仓库根目录，可从其他工作目录调用。
+`build/server.mjs [输出路径]` 默认生成 `apps/server/dist/server.cjs`，同时构建相邻的 `web/` 并复制 SQL 迁移到 `migrations/`。`build/batond.mjs [输出路径]` 默认生成 `apps/batond/dist/batond.cjs`，SDK 从已安装依赖加载；构建前从 `worker/index.ts` 检查运行时依赖图，禁止 Worker 状态机引入 CLI、探测、host 实现和 SDK，并拒绝本地源码中无法静态解析的动态加载。检查只分析依赖，安装包仍使用统一 bundle。两个脚本从自身位置确定仓库根目录，可从其他工作目录调用。
 
 `dev/server.mjs [中心参数...]` 与 `dev/batond.mjs [节点参数...]` 共用 `runBundle`，先构建再运行，转发 SIGINT/SIGTERM。对应 app 命令为 `pnpm --filter @baton/server dev <参数...>`、`pnpm --filter @baton/batond dev <参数...>`；`build` 命令只构建。中心配置、账号管理与设备接入见 [根文档](../README.md)。
 
@@ -53,37 +53,13 @@ macOS arm64 产出 `baton-desktop-<版本>-darwin-arm64.dmg`，Windows x64 产�
 node tools/check-package.mjs bin/package
 ```
 
-`check-package.mjs [安装目录=bin] [--prepared 驱动目录]` 将完整安装包复制到临时目录，检查布局和包内链接，以空 PATH、临时 HOME 和包外工作目录运行。检查包括帮助、SEA 平台与版本、发布元数据及各子进程版本/诊断一致性、真实 Worker 的认证 IPC 就绪、四个 Agent 模块和原生扩展、Project Runtime 与 memory 模式 stdio 握手、后台请求取消、私有文件与订阅探测，以及移走 `node_modules` 后的明确失败。各项结果输出为 JSON，任一失败时非零退出。
+`check-package.mjs [安装目录=bin]` 将完整安装包复制到临时目录，检查布局和包内链接，以空 PATH、临时 HOME 和包外工作目录运行。检查包括帮助、SEA 平台与版本、发布元数据及各子进程版本/诊断一致性、四个 Agent 模块和原生扩展、Project Runtime 与 memory 模式 stdio 握手、后台请求取消、私有文件与订阅探测，以及移走 `node_modules` 后的明确失败。各项结果输出为 JSON，任一失败时非零退出。
 
 检查还使用当前环境中的 `OTEL_EXPORTER_OTLP_*_ENDPOINT` 和 `OTEL_EXPORTER_OTLP_*_HEADERS` 值扫描安装包及已有的网页构建产物，包括解码后的 header 值；报告只列出配置名，不输出配置值。未提供这些值时报告未扫描，网页产物不存在时扫描目录数为 1。检查子进程使用隔离环境，不继承这些配置。
 
 Cursor 检查按执行环境分别验证：`agent-host --probe` 由 SEA 加载 SDK 及原生模块；SQLite store 检查由隔离的 Node 子进程运行 `verify/cursor-package.mjs`，通过以搬迁安装包为基准的 `createRequire` 加载 `@cursor/sdk/sqlite`，打开并关闭临时 store；ripgrep 和 sandbox helper 的 `--help` 直接执行安装包内的程序。SQLite 子进程检查使用运行工具的 Node，需要 Node 26。检查禁用网络请求，不调用模型；sandbox 的 `--help` 只验证程序能加载。
 
 Runtime 握手回应 `bootstrap` 和空 `read_events`，收到 `claim_inputs` 后由本地协调者结束，核对非零退出，不交付输入或调用模型。memory 模式单独完成 `memory_bootstrap`、空 `pending_embeddings` 和 `finish`，核对正常退出。取消检查先通过 SEA CLI 保存本地 Embedding 凭据，再让 memory 模式访问本地 HTTP 替身；请求进行中关闭 stdio，核对请求关闭、进程正常退出且无提交。POSIX 检查凭据目录及文件仅当前用户可访问，Windows 沿用继承权限、不校验 ACL。
-
-## Worker 启动与 FULL 账本测量
-
-```sh
-node tools/measure/worker-startup.mjs 100 --package bin/package --ledger 2000
-```
-
-`measure/worker-startup.mjs [样本数=100] --package <安装目录> [--ledger 事务数] [--prepared 驱动目录]` 要求实际安装包，并保留旁置依赖。每个样本使用新 Worker、Thread 和 SQLite 账本，在空 PATH、临时 HOME 下调用真实 `LocalWorkerHost`。计时从实际 spawn 前开始，到外部调用方收到 `worker_ready=true` 的认证 status 为止；另报含目录和令牌准备的 Host 总耗时。驱动验证错误令牌被拒绝、Worker 独占锁、实际迁移与 WAL 模式。就绪时 `agent_ready=false`，不打开 Agent 会话。
-
-POSIX 核对 watchdog 身份，发送 SIGTERM 后等待 Worker、watchdog 退出和锁释放。Windows 核对 .NET 进程创建时间的 UTC ticks，再用 `taskkill /T /F` 终止，报告 `graceful=false`；创建时间检查与终止之间仍有竞争窗口。macOS 使用短临时路径以满足 UDS 限制。
-
-报告第一样本、p50、p99、最大值、是否达到 Host 就绪预算（Windows 10 秒，其余系统 3 秒）与清理方式。性能超标单独记录；Host 就绪超时、认证或清理失败、样本不完整时非零退出。不清空系统页缓存，不测已有会话的恢复耗时。
-
-`--ledger` 在驱动包含的真实 `makeWorker` 串行队列中交替执行 `records.add/remove`，预热 200 次，测量实际 WAL/FULL 提交、队列操作和事件循环延迟。该项使用当前源码，与被测 SEA 分别运行；负载不包含 Agent、IPC、prompt 或 intent，未验证断电持久性。Windows 发布测量通过 `TMP`、`TEMP` 使用 `RUNNER_TEMP` 作为临时根。报告标记 COMMIT p99 是否超过 50 ms；账本操作、提交核查或 WAL/FULL 校验失败时非零退出。
-
-## 预构建测量驱动
-
-```sh
-node tools/measure/worker-startup.mjs --prepare /tmp/baton-drivers
-node tools/check-package.mjs bin/package --prepared /tmp/baton-drivers
-node tools/measure/worker-startup.mjs 100 --package bin/package --prepared /tmp/baton-drivers
-```
-
-`--prepare` 通过 esbuild 将普通源码 `measure/worker-driver.mjs` 打包成 `measurement.cjs`，不构建安装包。`--prepared` 读取该文件，适合目标环境缺少 esbuild 的情况。驱动与安装包应使用同一源码版本；工具与驱动需要 Node 26，被测 SEA 自带 Node。检查和测量在目标系统本机运行，容器结果应注明宿主虚拟机和数据库文件系统。
 
 ## 官方 Node 缓存
 

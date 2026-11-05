@@ -9,7 +9,6 @@ async function fixture(t, files) {
   const root = await mkdtemp(join(tmpdir(), 'baton-worker-graph-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const sources = {
-    'apps/batond/src/daemon/worker-runner.ts': '',
     'apps/batond/src/worker/index.ts': '',
     ...files,
   }
@@ -25,7 +24,6 @@ const source = 'apps/batond/src/'
 
 test('运行时图保留静态导入、re-export、字面量 import 和 require，处理循环与 external', async (t) => {
   const root = await fixture(t, {
-    [`${source}daemon/worker-runner.ts`]: "import '../worker/index.ts'; import 'node:fs'",
     [`${source}worker/index.ts`]: "export { value } from './barrel.ts'; export * from './barrel.ts'",
     [`${source}worker/barrel.ts`]: 'export const value = () => import(`./lazy.ts`)',
     [`${source}worker/lazy.ts`]: "const dependency = require('./required.cjs'); export { dependency }",
@@ -38,7 +36,6 @@ test('运行时图保留静态导入、re-export、字面量 import 和 require�
   assert.deepEqual(
     [...graph].map(shown).sort((a, b) => a.localeCompare(b)),
     [
-      `${source}daemon/worker-runner.ts`,
       `${source}worker/index.ts`,
       `${source}worker/barrel.ts`,
       `${source}worker/lazy.ts`,
@@ -59,7 +56,7 @@ test('type import、type re-export 和 import type query 不进入运行时图',
       export const value = 1
     `,
   })
-  assert.equal((await assertWorkerDependencies({ root })).size, 2)
+  assert.equal((await assertWorkerDependencies({ root })).size, 1)
 })
 
 for (const statement of ["import { type SDK } from '@cursor/sdk'", "export { type SDK } from '@cursor/sdk'"]) {
@@ -108,7 +105,7 @@ for (const [name, statement] of [
 ]) {
   test(`${name} 绕入 host driver 时拒绝`, async (t) => {
     const root = await fixture(t, {
-      [`${source}daemon/worker-runner.ts`]: statement,
+      [`${source}worker/index.ts`]: statement,
       [`${source}agents/cursor/host-driver.ts`]: 'export const host = 1',
     })
     await assert.rejects(assertWorkerDependencies({ root }), /forbidden runtime dependency[\s\S]*host-driver\.ts/)
@@ -180,7 +177,7 @@ test('第三方包在 try/catch 中加载缺失可选包时按 external 处理�
     'node_modules/wrapper/package.json': JSON.stringify({ name: 'wrapper', main: './index.cjs' }),
     'node_modules/wrapper/index.cjs': "try { require('missing-optional') } catch {}",
   })
-  assert.equal((await assertWorkerDependencies({ root })).size, 3)
+  assert.equal((await assertWorkerDependencies({ root })).size, 2)
   await writeFile(join(root, 'node_modules/wrapper/index.cjs'), "try { require('@cursor/sdk') } catch {}")
   await assert.rejects(assertWorkerDependencies({ root }), /forbidden runtime dependency[\s\S]*@cursor\/sdk/)
 })

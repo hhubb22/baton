@@ -12,13 +12,15 @@ import {
   DEFAULT_RUNTIME_MODE,
   RuntimeMode,
   ExecutionTimeoutSeconds,
+  WorkerIPCMessage,
   WorkerOpen,
   type RuntimeAgent,
   type WorkerRequest,
 } from '@baton/protocol'
-import { LocalWorkerHost, initializeWorkerDirectory } from './daemon/host.ts'
+import { type DaemonWorkerHost, initializeWorkerDirectory } from './daemon/host.ts'
 import { workerPaths } from './daemon/paths.ts'
 import { IPCError } from './daemon/ipc.ts'
+import { ControlClient } from './daemon/control-client.ts'
 import { ServiceError } from './daemon/service.ts'
 import { ProcessLockBusy } from './platform/lock.ts'
 import { StorageFormatError } from './storage-format.ts'
@@ -152,9 +154,7 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
   if (
     action === '--version' ||
     action === '--binary-version' ||
-    (['worker', 'execution-worker', 'agent-host', 'watchdog', 'project-runtime'].includes(action) &&
-      args.length === 1 &&
-      args[0] === '--version')
+    (['agent-host', 'watchdog', 'project-runtime'].includes(action) && args.length === 1 && args[0] === '--version')
   ) {
     console.log(JSON.stringify({ ...releaseMetadata(), sea: isSea(), node: process.version }))
     return
@@ -262,55 +262,29 @@ export async function runBatondCLI(argv: string[] = process.argv.slice(2)): Prom
     await runWatchdogCommand()
     return
   }
-  if (action === 'worker' || action === 'agent-host' || action === 'execution-worker') {
+  if (action === 'agent-host') {
     const controller = new AbortController()
     const stop = () => controller.abort()
     process.once('SIGINT', stop)
     process.once('SIGTERM', stop)
     try {
-      if (action === 'execution-worker') {
-        const { values } = parseArgs({
-          args,
-          options: { 'data-dir': { type: 'string' }, 'execution-id': { type: 'string' } },
-        })
-        if (!values['data-dir'] || !values['execution-id'])
-          throw new Error('Execution Worker needs --data-dir and --execution-id')
-        const { runExecutionWorker } = await import('./execution/runner.ts')
-        await Effect.runPromise(Effect.scoped(runExecutionWorker(values['data-dir'], values['execution-id'])), {
-          signal: controller.signal,
-        })
-      } else if (action === 'worker') {
-        const { values } = parseArgs({
-          args,
-          options: { 'data-dir': { type: 'string' }, 'thread-id': { type: 'string' } },
-        })
-        if (!values['data-dir'] || !values['thread-id']) throw new Error('Worker needs --data-dir and --thread-id')
-        const { runWorker } = await import('./daemon/worker-runner.ts')
-        await Effect.runPromise(
-          Effect.scoped(runWorker({ dataDirectory: values['data-dir'], threadId: values['thread-id'] })).pipe(
-            Effect.provide(telemetryLayer('baton-worker')),
-          ),
-          { signal: controller.signal },
-        )
-      } else {
-        const { values, positionals } = parseArgs({
-          args,
-          allowPositionals: true,
-          options: { cwd: { type: 'string' }, state: { type: 'string' } },
-        })
-        const agentType = positionals[0]
-        if (!agentType || !values.cwd || !values.state)
-          throw new Error('Agent host needs an Agent type, --cwd and --state')
-        const { runAgentHostCommand } = await import('./cli/agent-host.ts')
-        const telemetryEnv = { ...process.env }
-        for (const name of Object.keys(process.env)) if (name.startsWith('OTEL_')) delete process.env[name]
-        await Effect.runPromise(
-          Effect.scoped(
-            runAgentHostCommand(agentType, { workingDirectory: values.cwd, privateDirectory: values.state }),
-          ).pipe(Effect.provide(telemetryLayer('baton-agent-host', telemetryEnv))),
-          { signal: controller.signal },
-        )
-      }
+      const { values, positionals } = parseArgs({
+        args,
+        allowPositionals: true,
+        options: { cwd: { type: 'string' }, state: { type: 'string' } },
+      })
+      const agentType = positionals[0]
+      if (!agentType || !values.cwd || !values.state)
+        throw new Error('Agent host needs an Agent type, --cwd and --state')
+      const { runAgentHostCommand } = await import('./cli/agent-host.ts')
+      const telemetryEnv = { ...process.env }
+      for (const name of Object.keys(process.env)) if (name.startsWith('OTEL_')) delete process.env[name]
+      await Effect.runPromise(
+        Effect.scoped(
+          runAgentHostCommand(agentType, { workingDirectory: values.cwd, privateDirectory: values.state }),
+        ).pipe(Effect.provide(telemetryLayer('baton-agent-host', telemetryEnv))),
+        { signal: controller.signal },
+      )
     } catch (error) {
       if (!controller.signal.aborted) throw error
     } finally {
@@ -350,7 +324,7 @@ export function reportBatondError(error: unknown, action = process.argv[2]): voi
       code,
       ...(detail ? { version_incompatibility: detail } : {}),
       message:
-        action === 'worker' || action === 'agent-host' || action === 'watchdog'
+        action === 'agent-host' || action === 'watchdog'
           ? `${action} failed`
           : daemonRunning
             ? '服务或桌面客户端正在运行，请先停止已有 batond 再重试'
@@ -362,10 +336,24 @@ export function reportBatondError(error: unknown, action = process.argv[2]): voi
   process.exitCode = code === 'node_version_incompatible' ? 78 : 1
 }
 
+export function makeThreadControlHost(dataDirectory: string): Pick<DaemonWorkerHost, 'request'> {
+  const client = new ControlClient(dataDirectory)
+  return {
+    async request(threadId, request, options = {}) {
+      const response = await client.request(
+        { method: 'thread_request', thread_id: threadId, request },
+        { autostart: options.start !== false, timeoutMs: options.timeoutMs ?? 30000 },
+      )
+      if (!response.ok) throw new IPCError(response.code ?? 'control_failed', response.message ?? '本机请求失败')
+      return Schema.decodeUnknownSync(WorkerIPCMessage)(response.result)
+    },
+  }
+}
+
 export async function runLocalCLI(
   args: string[],
   dependencies: {
-    host?: Pick<LocalWorkerHost, 'request'>
+    host?: Pick<DaemonWorkerHost, 'request'>
     probeAgent?: (agent: 'cursor' | 'pi' | 'codex' | 'kiro' | 'antigravity' | 'droid') => Promise<RuntimeAgent>
   } = {},
 ): Promise<void> {
@@ -415,7 +403,7 @@ export async function runLocalCLI(
   const mode = Schema.decodeUnknownSync(Schema.Literals(['queue', 'steer']))(values.mode ?? 'queue')
   if (action === 'message' && mode === 'steer' && values.model) throw new Error('插入消息不能更换模型')
   const threadId = values['thread-id'] ?? (action === 'open' ? randomUUID() : requireValue('thread-id'))
-  const host = dependencies.host ?? new LocalWorkerHost(dataDirectory)
+  const host = dependencies.host ?? makeThreadControlHost(dataDirectory)
   let request: typeof WorkerRequest.Type
   if (action === 'open') {
     const paths = await initializeWorkerDirectory(dataDirectory, threadId)

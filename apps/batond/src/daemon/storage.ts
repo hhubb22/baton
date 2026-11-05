@@ -3,7 +3,7 @@ import { Effect } from 'effect'
 export class DaemonStorageFailure extends Error {
   readonly code?: string
   constructor(cause?: unknown) {
-    super('节点账本不可用，已停止执行，请恢复本地存储后重启')
+    super('节点账本不可用，已停止执行，请恢复本地存储后重启', { cause })
     if (
       cause &&
       typeof cause === 'object' &&

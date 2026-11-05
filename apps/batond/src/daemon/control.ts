@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { dirname, join, resolve } from 'node:path'
 import { Schema } from 'effect'
-import { DeviceLoginCreateInput, UUID } from '@baton/protocol'
+import { DeviceLoginCreateInput, UUID, WorkerRequest } from '@baton/protocol'
 import { coordinatorURL } from './identity.ts'
 
 export type ConnectionState = 'unbound' | 'authorizing' | 'connecting' | 'syncing' | 'online' | 'rejected'
@@ -18,6 +18,7 @@ export type ControlRequest =
   | { readonly method: 'status' | 'shutdown' | 'login_cancel' | 'logout' | 'diagnostics' }
   | { readonly method: 'login_start'; readonly coordinator_url: string; readonly display_name?: string }
   | { readonly method: 'resolve_thread_directory'; readonly thread_id: string }
+  | { readonly method: 'thread_request'; readonly thread_id: string; readonly request: typeof WorkerRequest.Type }
 export interface ControlResponse {
   readonly ok: boolean
   readonly code?: string
@@ -44,6 +45,7 @@ export interface ControlResponse {
   readonly expires_in_seconds?: number
   readonly directory?: string
   readonly logs?: string
+  readonly result?: unknown
 }
 
 const ControlRequestSchema = Schema.Union([
@@ -54,6 +56,7 @@ const ControlRequestSchema = Schema.Union([
     display_name: Schema.optionalKey(DeviceLoginCreateInput.fields.display_name),
   }),
   Schema.Struct({ method: Schema.Literal('resolve_thread_directory'), thread_id: UUID }),
+  Schema.Struct({ method: Schema.Literal('thread_request'), thread_id: UUID, request: WorkerRequest }),
 ])
 const PendingLoginSchema = Schema.Struct({
   status: Schema.Literal('pending'),

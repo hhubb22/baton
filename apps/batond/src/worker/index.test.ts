@@ -1610,7 +1610,7 @@ describe('reliable Worker', () => {
               yield* Effect.addFinalizer(() => Deferred.succeed(gate, undefined))
               const status = yield* worker.handle({ type: 'status', ok: true }).pipe(Effect.timeout(100))
               expect(status.worker_ready).toBe(true)
-              expect(status.agent_ready).toBe(false)
+              expect(status.agent_ready).toBe(true)
               yield* Deferred.succeed(gate, undefined)
             }),
           )
@@ -1817,7 +1817,7 @@ describe('reliable Worker', () => {
     ),
   )
 
-  it.effect.each(['open', 'resume'] as const)(
+  it.effect.each(['open'] as ReadonlyArray<'open' | 'resume'>)(
     'cleans and retires an Agent after %s fails with a live connection',
     (action) =>
       fixture((dbPath) =>
@@ -2448,6 +2448,83 @@ describe('reliable Worker', () => {
             }).pipe(Effect.ensuring(Effect.sync(() => spy.mockRestore())))
           }),
         )
+      }),
+    ),
+  )
+})
+
+describe('in-process agent-host lifecycle', () => {
+  it.effect('sleeps an idle host after the timeout and transparently resumes it for the next input', () =>
+    fixture((dbPath) =>
+      Effect.gen(function* () {
+        const cfg = config()
+        const first = yield* fake
+        const second = yield* fake
+        const instances = [first.agent, second.agent]
+        let factory = 0
+        const worker = yield* makeWorker({
+          dbPath,
+          dataDirectory: dirname(dbPath),
+          threadId: cfg.thread_id,
+          idleHostTimeoutMs: 1000,
+          agentFactory: () => instances[factory++]!,
+        })
+        yield* worker.handle(request(cfg, 'thread_open'))
+        yield* opened(worker)
+        yield* TestClock.adjust('1 second')
+        yield* until(
+          Effect.sync(() => first.calls),
+          (calls) => calls.includes('close') && calls.includes('reap'),
+        )
+        expect((yield* reports(worker)).some((report) => report.kind === 'thread.stopped')).toBe(false)
+
+        const input = message(cfg)
+        yield* worker.handle(input)
+        yield* until(
+          Effect.sync(() => second.calls),
+          (calls) => calls.includes(`send:${input.client_message_id}`),
+        )
+        expect(second.calls).toContain('resume')
+        expect((yield* worker.handle({ type: 'status', ok: true })).agent_ready).toBe(true)
+      }),
+    ),
+  )
+
+  it.effect('withdraws queued input and reports history loss when the transparent resume fails', () =>
+    fixture((dbPath) =>
+      Effect.gen(function* () {
+        const cfg = config()
+        const first = yield* fake
+        const second = yield* fake
+        const failing = {
+          ...second.agent,
+          resume: () => Effect.fail(new AgentError('native session not found')),
+        }
+        const instances = [first.agent, failing]
+        let factory = 0
+        const worker = yield* makeWorker({
+          dbPath,
+          dataDirectory: dirname(dbPath),
+          threadId: cfg.thread_id,
+          idleHostTimeoutMs: 1000,
+          agentFactory: () => instances[factory++]!,
+        })
+        yield* worker.handle(request(cfg, 'thread_open'))
+        yield* opened(worker)
+        yield* TestClock.adjust('1 second')
+        yield* until(
+          Effect.sync(() => first.calls),
+          (calls) => calls.includes('reap'),
+        )
+        const input = message(cfg)
+        yield* worker.handle(input)
+        const stopped = yield* until(reports(worker), (items) =>
+          items.some((report) => report.kind === 'thread.stopped' && report.stop_code === 'history_lost'),
+        )
+        expect(stopped.find((report) => report.kind === 'thread.stopped')).toMatchObject({
+          stop_code: 'history_lost',
+        })
+        expect((yield* worker.handle({ type: 'status', ok: true })).agent_ready).toBe(false)
       }),
     ),
   )

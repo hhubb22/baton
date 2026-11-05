@@ -21,7 +21,7 @@ const unsupported = (kind: string): never => {
 }
 const formatVersion = (kind: string) =>
   Object.hasOwn(LEDGER_VERSIONS, kind) ? LEDGER_VERSIONS[kind as keyof typeof LEDGER_VERSIONS] : unsupported(kind)
-const baselineVersions: Readonly<Record<string, number>> = { node: 2, project: 1, thread: 1, execution: 1 }
+const baselineVersions: Readonly<Record<string, number>> = { node: 4, project: 1, thread: 1, execution: 1 }
 const checksum = (kind: string, statements: readonly string[]) =>
   createHash('sha256')
     .update(JSON.stringify({ kind, version: baselineVersions[kind], payloadVersion: 1, statements }))

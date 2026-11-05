@@ -24,7 +24,7 @@ it('reports the embedded Node and dispatches Runtime arguments independently of 
       node: process.version,
       ...releaseMetadata(),
     })
-    for (const role of ['worker', 'agent-host', 'watchdog', 'project-runtime']) {
+    for (const role of ['agent-host', 'watchdog', 'project-runtime']) {
       output.mockClear()
       await runBatondCLI([role, '--version'])
       expect(JSON.parse(output.mock.calls[0]![0] as string)).toEqual({

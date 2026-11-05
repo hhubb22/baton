@@ -1,116 +1,74 @@
-import { randomBytes } from 'node:crypto'
-import { access, readdir, unlink } from 'node:fs/promises'
-import { setTimeout as delay } from 'node:timers/promises'
-import { Schema } from 'effect'
+import { join } from 'node:path'
+import { ensurePrivateDirectory } from '../platform/private.ts'
+import { Effect, Exit, Scope } from 'effect'
 import {
-  UUID,
   type ExecutionCommand,
   type ExecutionOutputRequest,
   type ExecutionOutputResult,
   type ExecutionReport,
   type ExecutionReportResult,
 } from '@baton/protocol'
-import { acquireProcessLock, processLockIsHeld, ProcessLockBusy } from '../platform/lock.ts'
-import { ensurePrivateDirectory, readPrivateFile, writePrivateFileAtomic } from '../platform/private.ts'
-import { spawnDetachedWorker } from '../platform/process.ts'
+import { startProcessWatchdog, type ProcessWatchdog } from '../platform/process.ts'
 import { FullOutputStore } from '../worker/full-output.ts'
 import { currentBatondCommand, type BatondCommand } from '../daemon/host.ts'
-import { requestAuthenticated } from '../daemon/ipc.ts'
-import { decodeRequest, decodeResponse, type ExecutionRequest } from './ipc.ts'
+import { InProcessExecution } from './in-process.ts'
+import { openExecutionLedger, readExecutionStates, type ExecutionState } from './node-ledger.ts'
 import { executionPaths } from './paths.ts'
-import { readExecutionState, type ExecutionState } from './ledger.ts'
 
 const terminal = (state: ExecutionState) =>
   state.reports.some(({ report }) =>
     ['completed', 'failed', 'cancelled', 'timed_out', 'unknown'].includes(report.status),
   )
 
-export async function inspectExecutions(
-  dataDirectory: string,
-  excludedIds: ReadonlySet<string> = new Set(),
-): Promise<readonly { id: string; state: ExecutionState }[]> {
-  const paths = executionPaths(dataDirectory, '00000000-0000-4000-8000-000000000000')
-  const entries = await readdir(`${paths.root}/executions`).catch((error: unknown) => {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return []
-    throw error
-  })
-  const result: { id: string; state: ExecutionState }[] = []
-  for (const id of entries) {
-    if (!Schema.is(UUID)(id) || excludedIds.has(id)) continue
-    try {
-      const filename = executionPaths(dataDirectory, id).ledger
-      await access(filename)
-      const state = readExecutionState(filename)
-      if (state) result.push({ id, state })
-    } catch (error) {
-      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error
-    }
-  }
-  return result
-}
-
 export function makeExecutionService(options: {
   dataDirectory: string
-  command?: BatondCommand
+  watchdogCommand?: BatondCommand
   excludedIds?: ReadonlySet<string>
+  watchdog?: ProcessWatchdog
 }) {
-  const command = options.command ?? currentBatondCommand()
-  const request = async (id: string, input: ExecutionRequest) => {
-    const paths = executionPaths(options.dataDirectory, id)
-    const token = (await readPrivateFile(paths.token)).toString('utf8')
-    return requestAuthenticated({
-      endpoint: paths.endpoint,
-      token,
-      request: input,
-      decodeRequest,
-      decodeResponse,
-      timeoutMs: 5000,
-    })
+  const nodeDbPath = join(options.dataDirectory, 'node.db')
+  const machines = new Map<string, Promise<{ machine: InProcessExecution; scope: Scope.Closeable }>>()
+  let watchdog = options.watchdog ? Promise.resolve(options.watchdog) : undefined
+  const ensureWatchdog = async () => {
+    if (process.platform === 'win32') return undefined
+    const command = options.watchdogCommand ?? currentBatondCommand()
+    return (watchdog ??= startProcessWatchdog({ file: command.executable, args: [...command.args, 'watchdog'] }))
   }
-  const ensure = async (id: string) => {
-    const paths = executionPaths(options.dataDirectory, id)
-    await ensurePrivateDirectory(paths.root)
-    await ensurePrivateDirectory(`${paths.root}/executions`)
-    await ensurePrivateDirectory(paths.directory)
-    await ensurePrivateDirectory(paths.ipcDirectory)
-    const deadline = Date.now() + 10000
-    const ready = async () =>
-      request(id, { type: 'execution.poll' }).then(
-        () => true,
-        () => false,
+
+  const load = async (id: string): Promise<{ machine: InProcessExecution; scope: Scope.Closeable } | undefined> => {
+    if (options.excludedIds?.has(id)) return undefined
+    await ensurePrivateDirectory(options.dataDirectory)
+    await ensurePrivateDirectory(join(options.dataDirectory, 'executions'))
+    await ensurePrivateDirectory(executionPaths(options.dataDirectory, id).directory)
+    const existing = readExecutionStates(nodeDbPath).find((entry) => entry.id === id)
+    const initial = existing?.state ?? { intent: false, reports: [] }
+    const runningWatchdog = await ensureWatchdog()
+    const scope = await Effect.runPromise(Scope.make())
+    try {
+      const ledger = await Effect.runPromise(
+        openExecutionLedger(nodeDbPath, id).pipe(Effect.provideService(Scope.Scope, scope)),
       )
-    if (await ready()) return
-    while (Date.now() < deadline) {
-      let release: (() => Promise<void>) | undefined
-      try {
-        release = await acquireProcessLock(paths.launchLock)
-        if (await ready()) return
-        if (!(await processLockIsHeld(paths.lock))) {
-          try {
-            await readPrivateFile(paths.token)
-          } catch (error) {
-            if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error
-            await writePrivateFileAtomic(paths.token, randomBytes(32).toString('hex'))
-          }
-          if (process.platform !== 'win32') await unlink(paths.endpoint).catch(() => {})
-          await spawnDetachedWorker({
-            file: command.executable,
-            args: [...command.args, 'execution-worker', '--data-dir', paths.root, '--execution-id', id],
-          })
-        }
-        while (Date.now() < deadline) {
-          if (await ready()) return
-          await delay(30)
-        }
-      } catch (error) {
-        if (!(error instanceof ProcessLockBusy)) throw error
-      } finally {
-        await release?.()
-      }
-      await delay(30)
+      const machine = new InProcessExecution(options.dataDirectory, id, { save: ledger.save }, initial, runningWatchdog)
+      await machine.initialize()
+      return { machine, scope }
+    } catch (cause) {
+      await Effect.runPromise(Scope.close(scope, Exit.fail(cause)))
+      throw cause
     }
-    throw new Error('Execution Worker did not become ready')
   }
+
+  const ensure = (id: string) => {
+    const existing = machines.get(id)
+    if (existing) return existing
+    const created = load(id).then((value) => {
+      if (!value) throw new Error('Execution is excluded from this binding')
+      return value
+    })
+    machines.set(id, created)
+    void created.catch(() => machines.delete(id))
+    return created
+  }
+
   return {
     async command(input: ExecutionCommand) {
       if (options.excludedIds?.has(input.execution_id))
@@ -121,9 +79,7 @@ export function makeExecutionService(options: {
           ok: false,
           code: 'binding_mismatch',
         }
-      const existing = (await inspectExecutions(options.dataDirectory, options.excludedIds)).find(
-        (entry) => entry.id === input.execution_id,
-      )?.state
+      const existing = readExecutionStates(nodeDbPath).find((entry) => entry.id === input.execution_id)?.state
       if (existing && terminal(existing)) {
         const original = existing.command ?? existing.stopped
         const sameGeneration = original?.storage_generation === input.storage_generation
@@ -148,46 +104,43 @@ export function makeExecutionService(options: {
             : {}),
         }
       }
-      await ensure(input.execution_id)
-      const response = await request(input.execution_id, input)
-      if (!response.result) throw new Error('Execution Worker returned no command result')
+      const { machine } = await ensure(input.execution_id)
+      const response = await machine.handle(input)
+      if (!response.result) throw new Error('Execution state machine returned no command result')
       return response.result
     },
     async recover() {
-      for (const { id, state } of await inspectExecutions(options.dataDirectory, options.excludedIds)) {
-        if (!terminal(state) || state.process) {
-          await ensure(id)
-          if (terminal(state) && state.process) await request(id, { type: 'execution.recover' })
-        }
+      for (const { id, state } of readExecutionStates(nodeDbPath)) {
+        if (options.excludedIds?.has(id)) continue
+        if (!terminal(state) || state.process) await ensure(id)
       }
     },
     async collectReports(): Promise<ExecutionReport[]> {
       const reports: ExecutionReport[] = []
-      for (const { id, state } of await inspectExecutions(options.dataDirectory, options.excludedIds)) {
+      for (const { id, state } of readExecutionStates(nodeDbPath)) {
+        if (options.excludedIds?.has(id)) continue
         if (!terminal(state) || state.process) {
-          await ensure(id)
-          if (terminal(state) && state.process) await request(id, { type: 'execution.recover' })
+          const { machine } = await ensure(id)
+          if (terminal(machine.state) && machine.state.process) await machine.handle({ type: 'execution.recover' })
         }
-        const current = readExecutionState(executionPaths(options.dataDirectory, id).ledger)
+        const current = readExecutionStates(nodeDbPath).find((entry) => entry.id === id)?.state
         if (current) reports.push(...current.reports.filter((entry) => !entry.acked).map((entry) => entry.report))
       }
       return reports
     },
     async ack(report: ExecutionReportResult) {
       if (options.excludedIds?.has(report.execution_id)) return
-      const state = (await inspectExecutions(options.dataDirectory, options.excludedIds)).find(
-        (entry) => entry.id === report.execution_id,
-      )?.state
+      const state = readExecutionStates(nodeDbPath).find((entry) => entry.id === report.execution_id)?.state
+      if (!state) return
       if (
         !report.ok ||
-        !state ||
         state.reports.some(
           (entry) => entry.report.seq === report.seq && entry.report.event_id === report.event_id && entry.acked,
         )
       )
         return
-      await ensure(report.execution_id)
-      await request(report.execution_id, report)
+      const { machine } = await ensure(report.execution_id)
+      await machine.ack(report)
     },
     async output(input: ExecutionOutputRequest): Promise<ExecutionOutputResult> {
       if (options.excludedIds?.has(input.execution_id))
@@ -216,6 +169,20 @@ export function makeExecutionService(options: {
         ...(page.code ? { code: page.code } : {}),
         ...(page.full_output ? { full_output: page.full_output } : {}),
       }
+    },
+    async close() {
+      await Promise.allSettled(
+        [...machines.values()].map(async (entry) => {
+          const value = await entry.catch(() => undefined)
+          if (value) {
+            await value.machine.close()
+            await Effect.runPromise(Scope.close(value.scope, Exit.void))
+          }
+        }),
+      )
+      const started = watchdog
+      watchdog = undefined
+      await started?.then((value) => value.close()).catch(() => undefined)
     },
   }
 }

@@ -1,12 +1,10 @@
-import { readdir, stat } from 'node:fs/promises'
+import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { Clock, Effect, Metric } from 'effect'
-import { processLockIsHeld } from '../platform/lock.ts'
 import { isMissing } from './identity.ts'
 import type { NodeLedger } from './ledger.ts'
 import type { ProjectManager } from '../project/types.ts'
-import { workerPaths } from './paths.ts'
 
 const agents = ['codex', 'cursor', 'pi', 'kiro', 'antigravity', 'droid'] as const
 const reasons = ['device_offline', 'approval', 'credential_missing', 'queue', 'lease', 'backoff'] as const
@@ -39,18 +37,7 @@ export const collectNodeMetrics = Effect.fnUntraced(function* (
   const known = yield* ledger.workers()
   const observed = yield* Effect.tryPromise({
     try: async (signal) => {
-      let ids: string[]
-      try {
-        ids = await readdir(join(directory, 'threads'))
-      } catch (error) {
-        if (!isMissing(error)) throw error
-        ids = []
-      }
       const paths = [join(directory, 'node.db'), join(directory, 'project-runtime.db')]
-      for (const id of ids) {
-        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) continue
-        paths.push(workerPaths(directory, id).ledger)
-      }
       let total = 0
       for (const path of paths) {
         signal.throwIfAborted()
@@ -59,30 +46,30 @@ export const collectNodeMetrics = Effect.fnUntraced(function* (
       const active: Record<string, number> = {}
       let queueAge = backlog.oldest_ms === null ? 0 : Math.max(0, (now - backlog.oldest_ms) / 1000)
       let approvalAge = 0
-      for (const worker of known) {
-        signal.throwIfAborted()
-        const path = workerPaths(directory, worker.threadId)
-        if (await processLockIsHeld(path.lock))
-          active[worker.config.agent_type] = (active[worker.config.agent_type] ?? 0) + 1
-        if (!(await size(path.ledger))) continue
-        const db = new DatabaseSync(path.ledger, { readOnly: true })
-        try {
-          const queue = db
-            .prepare(
-              "SELECT min(json_extract(payload,'$.receivedAtMs')) AS started FROM thread_messages WHERE json_extract(payload,'$.state')='queued'",
-            )
-            .get()
-          const approval = db
-            .prepare(
-              "SELECT min(json_extract(q.value,'$.startedAtMs')) AS started FROM thread_meta m, json_each(json_extract(m.payload,'$.questions')) q WHERE json_extract(q.value,'$.state') NOT IN ('resolved','cancelled')",
-            )
-            .get()
-          if (typeof queue?.started === 'number') queueAge = Math.max(queueAge, (now - queue.started) / 1000)
-          if (typeof approval?.started === 'number')
-            approvalAge = Math.max(approvalAge, (now - approval.started) / 1000)
-        } finally {
-          db.close()
+      const db = new DatabaseSync(join(directory, 'node.db'), { readOnly: true })
+      try {
+        for (const worker of known) {
+          signal.throwIfAborted()
+          const processes = db
+            .prepare("SELECT count(*) AS count FROM node_processes WHERE owner_kind='thread' AND owner_id=?")
+            .get(worker.threadId)
+          if (Number(processes?.count ?? 0) > 0)
+            active[worker.config.agent_type] = (active[worker.config.agent_type] ?? 0) + 1
         }
+        const queue = db
+          .prepare(
+            "SELECT min(json_extract(payload,'$.receivedAtMs')) AS started FROM thread_messages WHERE json_extract(payload,'$.state')='queued'",
+          )
+          .get()
+        const approval = db
+          .prepare(
+            "SELECT min(json_extract(q.value,'$.startedAtMs')) AS started FROM threads t, json_each(json_extract(t.meta_json,'$.questions')) q WHERE json_extract(q.value,'$.state') NOT IN ('resolved','cancelled')",
+          )
+          .get()
+        if (typeof queue?.started === 'number') queueAge = Math.max(queueAge, (now - queue.started) / 1000)
+        if (typeof approval?.started === 'number') approvalAge = Math.max(approvalAge, (now - approval.started) / 1000)
+      } finally {
+        db.close()
       }
       return { total, active, queueAge, approvalAge }
     },

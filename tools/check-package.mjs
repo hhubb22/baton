@@ -2,14 +2,11 @@ import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
 import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
-import { createConnection } from 'node:net'
-import { createHash, randomUUID } from 'node:crypto'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { validatePackageManifest } from './package-release.mjs'
 import { validateReleaseMetadata } from './lib/release.mjs'
 import { environment, isolatedEnv, withTemporaryInstallation } from './lib/installation.mjs'
-import { measureWorkerStartup } from './measure/worker-startup.mjs'
 import { scanTelemetryArtifacts } from './lib/telemetry-scan.mjs'
 
 function run(executable, args, options) {
@@ -24,81 +21,6 @@ function run(executable, args, options) {
   assert.ifError(result.error)
   assert.equal(result.signal, null, `${args.join(' ')} terminated by ${result.signal}`)
   return result
-}
-
-async function executionWorkerHandshake(executable, root, options) {
-  const id = randomUUID()
-  const data = join(root, 'execution-check')
-  const directory = join(data, 'executions', id)
-  await mkdir(directory, { recursive: true, mode: 0o700 })
-  await mkdir(join(data, 'ipc'), { mode: 0o700 })
-  const token = 'a'.repeat(64)
-  await writeFile(join(directory, 'ipc.token'), token, { mode: 0o600 })
-  const hash = createHash('sha256').update(`${data}\0execution\0${id}`).digest('hex').slice(0, 24)
-  const endpoint = process.platform === 'win32' ? `\\\\.\\pipe\\baton-${hash}` : join(data, 'ipc', `${hash}.sock`)
-  const child = spawn(executable, ['execution-worker', '--data-dir', data, '--execution-id', id], {
-    ...options,
-    stdio: ['ignore', 'ignore', 'pipe'],
-    windowsHide: true,
-  })
-  let stderr = ''
-  let spawnFailure
-  child.once('error', (error) => {
-    spawnFailure = error
-  })
-  child.stderr.on('data', (chunk) => {
-    stderr += chunk.toString().slice(0, 4096)
-  })
-  const poll = () =>
-    new Promise((resolve, reject) => {
-      const socket = createConnection(endpoint)
-      let buffer = '',
-        authenticated = false
-      socket.setTimeout(1000, () => socket.destroy(new Error('IPC timeout')))
-      socket.once('error', reject)
-      socket.once('connect', () => socket.write(`${JSON.stringify({ type: 'auth', ok: false, token })}\n`))
-      socket.on('data', (chunk) => {
-        buffer += chunk.toString()
-        const index = buffer.indexOf('\n')
-        if (index < 0) return
-        const value = JSON.parse(buffer.slice(0, index))
-        buffer = buffer.slice(index + 1)
-        if (!authenticated) {
-          if (!value.ok) {
-            socket.destroy()
-            reject(new Error('Execution IPC authentication failed'))
-            return
-          }
-          authenticated = true
-          socket.write(`${JSON.stringify({ type: 'execution.poll' })}\n`)
-        } else {
-          socket.destroy()
-          resolve(value)
-        }
-      })
-    })
-  try {
-    const deadline = Date.now() + 15000
-    while (Date.now() < deadline) {
-      if (spawnFailure) throw spawnFailure
-      if (child.exitCode !== null) throw new Error(`Execution Worker exited: ${stderr}`)
-      try {
-        const response = await poll()
-        assert.equal(response.type, 'execution.response')
-        assert.deepEqual(response.reports, [])
-        return { authenticated: true }
-      } catch {
-        await new Promise((resolve) => setTimeout(resolve, 50))
-      }
-    }
-    throw new Error(`Execution Worker IPC did not become ready: ${stderr}`)
-  } finally {
-    child.kill('SIGTERM')
-    await new Promise((resolve) => {
-      if (child.exitCode !== null || spawnFailure) resolve()
-      else child.once('exit', resolve)
-    })
-  }
 }
 
 async function runtimeHandshake(executable, options, mode = 'run') {
@@ -284,18 +206,10 @@ async function runtimeHandshake(executable, options, mode = 'run') {
 
 async function main() {
   const args = process.argv.slice(2)
-  const usage = 'Usage: node tools/check-package.mjs [installation=bin] [--prepared driver-directory]'
+  const usage = 'Usage: node tools/check-package.mjs [installation=bin]'
   if (args.length === 1 && args[0] === '--help') {
     console.log(usage)
     return
-  }
-  const preparedIndex = args.indexOf('--prepared')
-  let preparedDirectory
-  if (preparedIndex !== -1) {
-    const value = args[preparedIndex + 1]
-    assert.ok(value && !value.startsWith('--'), usage)
-    preparedDirectory = resolve(value)
-    args.splice(preparedIndex, 2)
   }
   assert.ok(args.length <= 1 && !args[0]?.startsWith('--'), usage)
   const report = { ...environment(), passed: false, checks: {} }
@@ -347,7 +261,7 @@ async function main() {
       assert.equal(metadata.runtime, 'node-sea')
       assert.equal(metadata.node, report.runtime.node)
       validatePackageManifest(await readFile(join(installed, 'package-manifest.json'), 'utf8'), report.runtime)
-      for (const role of ['worker', 'execution-worker', 'agent-host', 'watchdog', 'project-runtime']) {
+      for (const role of ['agent-host', 'watchdog', 'project-runtime']) {
         const result = run(executable, [role, '--version'], options)
         assert.equal(result.status, 0, result.stderr)
         assert.deepEqual(JSON.parse(result.stdout), report.runtime, `${role} 发布信息不匹配`)
@@ -359,16 +273,9 @@ async function main() {
       validateReleaseMetadata(runtime.release, report.runtime)
       return {
         ...metadata,
-        childProcesses: ['worker', 'execution-worker', 'agent-host', 'watchdog', 'project-runtime'],
+        childProcesses: ['agent-host', 'watchdog', 'project-runtime'],
       }
     })
-    await check('worker', async () => {
-      const result = await measureWorkerStartup({ root, installed, samples: 1, preparedDirectory })
-      assert.equal(result.passed, true, JSON.stringify(result.failure ?? result))
-      validateReleaseMetadata(result.ledger.release, report.runtime)
-      return result
-    })
-    await check('executionWorker', () => executionWorkerHandshake(executable, root, options))
     await check('agentHost', () => {
       const result = run(executable, ['agent-host', '--probe'], options)
       assert.equal(result.status, 0, result.stderr)

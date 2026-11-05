@@ -12,7 +12,7 @@ import { makeThreadService } from './threads.ts'
 import { runDaemon } from './daemon.ts'
 import { ControlClient } from './control-client.ts'
 import { loadBindingFence } from './binding-fence.ts'
-import { openExecutionLedger, readExecutionState } from '../execution/ledger.ts'
+import { openExecutionLedger, readExecutionStates } from '../execution/node-ledger.ts'
 import { executionPaths } from '../execution/paths.ts'
 import { makeExecutionService } from '../execution/service.ts'
 import { FullOutputStore } from '../worker/full-output.ts'
@@ -98,7 +98,7 @@ it('logout fences retained queues, reports and execution outputs from a replacem
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const execution = yield* openExecutionLedger(paths.ledger)
+          const execution = yield* openExecutionLedger(join(directory, 'node.db'), executionId)
           yield* execution.save({
             intent: false,
             command: {
@@ -264,7 +264,9 @@ it('logout fences retained queues, reports and execution outputs from a replacem
         storage_generation: generation,
       }),
     ).toMatchObject({ ok: false, code: 'binding_mismatch' })
-    const retainedReport = readExecutionState(paths.ledger)!.reports[0]!.report
+    const executionState = () =>
+      readExecutionStates(join(directory, 'node.db')).find((entry) => entry.id === executionId)?.state
+    const retainedReport = executionState()!.reports[0]!.report
     const ack = {
       type: 'execution.report_result' as const,
       execution_id: executionId,
@@ -273,7 +275,7 @@ it('logout fences retained queues, reports and execution outputs from a replacem
       ok: true,
     }
     await executions.ack(ack)
-    expect(readExecutionState(paths.ledger)?.reports[0]?.acked).toBe(false)
+    expect(executionState()?.reports[0]?.acked).toBe(false)
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
@@ -319,7 +321,7 @@ it('device login fences retained execution and Project work when identity was lo
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const execution = yield* openExecutionLedger(paths.ledger)
+          const execution = yield* openExecutionLedger(join(directory, 'node.db'), executionId)
           yield* execution.save({
             intent: false,
             command: {
@@ -376,8 +378,9 @@ it('device login fences retained execution and Project work when identity was lo
         }),
       ),
     )
-    expect(readExecutionState(paths.ledger)?.command?.command).toBe('old queued command')
-    expect(readExecutionState(paths.ledger)?.reports[0]?.acked).toBe(false)
+    const state = readExecutionStates(join(directory, 'node.db')).find((entry) => entry.id === executionId)?.state
+    expect(state?.command?.command).toBe('old queued command')
+    expect(state?.reports[0]?.acked).toBe(false)
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

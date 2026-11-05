@@ -3,9 +3,9 @@ import { chmod, lstat, mkdir, readFile, readdir, rm, symlink, unlink } from 'nod
 import { makePrivateTempDirectory } from '../testing/private.ts'
 import { join } from 'node:path'
 import { Schema } from 'effect'
-import { FullOutputReference, SessionResult, UUID, type SessionRequest, type WorkerOpenConfig } from '@baton/protocol'
+import { FullOutputReference, UUID, type SessionRequest, type WorkerOpenConfig } from '@baton/protocol'
 import { afterEach, expect, it } from 'vite-plus/test'
-import { initializeWorkerDirectory, LocalWorkerHost } from '../daemon/host.ts'
+import { ensurePrivateDirectory } from '../platform/private.ts'
 import { writePrivateFileAtomic } from '../platform/private.ts'
 import { BoundedOutput } from '../execution/output.ts'
 import { FullOutputStore, fullOutputPageBytes, pruneDeviceOutputs, readOutputRetentionDays } from './full-output.ts'
@@ -27,7 +27,10 @@ async function fixture() {
     execution_timeout_seconds: 60,
     adapter_config: {},
   }
-  const paths = await initializeWorkerDirectory(root, config.thread_id)
+  await ensurePrivateDirectory(join(root, 'threads'))
+  const threadDirectory = join(root, 'threads', config.thread_id)
+  await ensurePrivateDirectory(threadDirectory)
+  const paths = { threadDirectory }
   const store = new FullOutputStore(paths.threadDirectory)
   const request = (reference: FullOutputReference, cursor?: string): SessionRequest => ({
     type: 'session.request',
@@ -58,14 +61,8 @@ it('retains raw shell chunks including the omitted middle and pages exact bytes 
   const reference = await writer.finish()
   const recovered: Buffer[] = []
   let cursor: string | undefined
-  const host = new LocalWorkerHost(f.root)
   for (let i = 0; i < 100; i++) {
-    const response = await host.request(f.config.thread_id, {
-      type: 'session_request',
-      ok: true,
-      session_request: f.request(reference, cursor),
-    })
-    const result = Schema.decodeUnknownSync(SessionResult)(response.session_result)
+    const result = await f.store.read(f.request(reference, cursor))
     expect(result.ok).toBe(true)
     const page = result.full_output
     if (!page) throw new Error('Expected a full output page')

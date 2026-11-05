@@ -101,8 +101,8 @@ it('resumes ordered migrations after a later transaction fails without changing 
   const baseline = ['CREATE TABLE data (id INTEGER PRIMARY KEY)', 'CREATE TABLE guard (id INTEGER)']
   const catalog = {
     node: [
-      { id: '0002_add_value', from: 2, to: 3, statements: ['ALTER TABLE data ADD COLUMN value TEXT'] },
-      { id: '0003_add_guard', from: 3, to: 4, statements: ['INSERT INTO guard VALUES (1)'] },
+      { id: '0005_add_value', from: 4, to: 5, statements: ['ALTER TABLE data ADD COLUMN value TEXT'] },
+      { id: '0006_add_guard', from: 5, to: 6, statements: ['INSERT INTO guard VALUES (1)'] },
     ],
   }
   const withSql = <A, E>(use: (sql: Sqlite.SqliteClient) => Effect.Effect<A, E>) =>
@@ -117,17 +117,17 @@ it('resumes ordered migrations after a later transaction fails without changing 
   await withSql((sql) => initializeStorage(sql, 'node', baseline))
   edit(filename, "CREATE TRIGGER reject_guard BEFORE INSERT ON guard BEGIN SELECT RAISE(ABORT, 'interrupted'); END")
   await expect(
-    withSql((sql) => applyStorageMigrations(sql, 'node', baseline, { catalog, targetVersion: 4 })),
+    withSql((sql) => applyStorageMigrations(sql, 'node', baseline, { catalog, targetVersion: 6 })),
   ).rejects.toBeDefined()
   const intermediate = metadata(filename)
-  expect(intermediate.format[0]).toMatchObject({ version: 3 })
-  expect(intermediate.migrations.map((row) => row.id)).toEqual(['0001_baseline', '0002_add_value'])
+  expect(intermediate.format[0]).toMatchObject({ version: 5 })
+  expect(intermediate.migrations.map((row) => row.id)).toEqual(['0001_baseline', '0005_add_value'])
   edit(filename, 'DROP TRIGGER reject_guard')
-  await withSql((sql) => applyStorageMigrations(sql, 'node', baseline, { catalog, targetVersion: 4 }))
+  await withSql((sql) => applyStorageMigrations(sql, 'node', baseline, { catalog, targetVersion: 6 }))
   const completed = metadata(filename)
-  expect(completed.format[0]).toMatchObject({ version: 4 })
+  expect(completed.format[0]).toMatchObject({ version: 6 })
   expect(completed.migrations.slice(0, 2)).toEqual(intermediate.migrations)
-  expect(completed.migrations.map((row) => row.id)).toEqual(['0001_baseline', '0002_add_value', '0003_add_guard'])
-  await withSql((sql) => applyStorageMigrations(sql, 'node', baseline, { catalog, targetVersion: 4 }))
+  expect(completed.migrations.map((row) => row.id)).toEqual(['0001_baseline', '0005_add_value', '0006_add_guard'])
+  await withSql((sql) => applyStorageMigrations(sql, 'node', baseline, { catalog, targetVersion: 6 }))
   expect(metadata(filename)).toEqual(completed)
 })

@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { readdir, stat } from 'node:fs/promises'
+import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { defaultDataDirectory } from './platform/layout.ts'
 import { parseArgs } from 'node:util'
@@ -133,13 +133,6 @@ export async function runEnvironmentCLI(args: string[]): Promise<void> {
       }
     }
     await inspect('daemon', join(directory, 'environment-process.json'), join(directory, 'daemon.lock'))
-    const threads = await readdir(join(directory, 'threads')).catch(() => [])
-    for (const thread of threads)
-      await inspect(
-        'worker',
-        join(directory, 'threads', thread, 'environment-process.json'),
-        join(directory, 'threads', thread, 'worker.lock'),
-      )
     console.log(
       JSON.stringify({
         revision: result.revision,

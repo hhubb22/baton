@@ -1,6 +1,6 @@
 # Baton — Agent Guide
 
-Baton 是跨设备 AI Agent 协同系统，由 TypeScript 中心服务（`apps/server`）、节点守护进程（`apps/batond`）、独立 Session Worker、Project Agent Runtime（`runtimes/project-agent`）和 Web UI（`web/`）组成。中心与节点使用 Node 26 和 Effect，Cursor、Pi、Codex、Kiro、Antigravity、Droid 通过 t3code fork 的完整 provider adapter 接入。
+Baton 是跨设备 AI Agent 协同系统，由 TypeScript 中心服务（`apps/server`）、节点守护进程（`apps/batond`）、Project Agent Runtime（`runtimes/project-agent`）和 Web UI（`web/`）组成。中心与节点使用 Node 26 和 Effect，Cursor、Pi、Codex、Kiro、Antigravity、Droid 通过 t3code fork 的完整 provider adapter 接入。
 
 ## 核心架构与目录
 
@@ -9,9 +9,9 @@ Baton 是跨设备 AI Agent 协同系统，由 TypeScript 中心服务（`apps/s
 | `apps/server` | 员工认证、设备、Thread、Project、事项和记忆，PostgreSQL 事务、持久命令与报告、Gateway（`/v1/node` 与 `/api/v1/events`）和网页静态服务；见 `apps/server/README.md` |
 | `apps/batond` | 设备码登录与 WSS、本地控制通道与按需拉起、设备 SQLite 账本、Worker 管理、Agent 探测、文件浏览、Project Runtime 宿主和订阅登录；见 `apps/batond/README.md` |
 | `apps/desktop` | Electron 桌面客户端、接入链接与中心证书校验、受限网页桥接、batond 监管、托盘与登录启动；见 `apps/desktop/README.md` |
-| `apps/batond/src/worker` | Thread 消息队列、命令回执、intent、Turn、回复、outbox 与恢复 |
+| `apps/batond/src/worker` | 运行在 batond 进程内的 Thread 状态机：消息队列、命令回执、intent、Turn、回复、outbox 与恢复 |
 | `apps/batond/src/agent-host`、`src/agents` | t3code provider 宿主、事件映射与受限 shell；六个 Agent 在程序或 SDK 已安装且认证未明确缺失时开放新建与恢复，版本和系统不设白名单 |
-| `e2e` | 中心、节点、独立 Worker 与 Runtime 的跨 app 集成测试，显式依赖两个 app；见 `e2e/README.md` |
+| `e2e` | 中心、节点、agent-host 与 Runtime 的跨 app 集成测试，显式依赖两个 app；见 `e2e/README.md` |
 | `packages/telemetry` | Effect 原生 OTLP/HTTP 追踪、日志、指标与标准上下文传播，统一导出字段过滤，默认不连接外部采集端 |
 | `packages/{protocol,sqlite}` | Effect 协议 Schema 与 TypeScript 类型，WAL/FULL SQLite 客户端和提交结果核查 |
 | `upstream/t3code` | Baton 的 t3code fork submodule，固定提交；workspace 收录所需 `@t3tools/*` 包、`effect-acp` 和 `effect-codex-app-server` |

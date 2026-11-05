@@ -56,7 +56,7 @@ async function fixture(ledger = true) {
     const next = { ...config, thread_id: randomUUID(), working_directory: workingDirectory, node_id: nodeId }
     const request = {
       type: 'thread_open' as const,
-      ok: false,
+      ok: true,
       command_id: randomUUID(),
       thread_id: next.thread_id,
       storage_generation: next.storage_generation,

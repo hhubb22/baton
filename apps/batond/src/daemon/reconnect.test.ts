@@ -174,7 +174,6 @@ it('reconnects with the same incarnation, retains reports before Worker ACK, and
   const reports: ThreadReport[] = []
   const workerAcks = new Set<string>()
   let openCount = 0,
-    statusCount = 0,
     releaseReports = false,
     generation = ''
   const forwarded: WorkerRequest[] = []
@@ -213,7 +212,6 @@ it('reconnects with the same incarnation, retains reports before Worker ACK, and
         }
       }
       if (req.type === 'status') {
-        statusCount++
         return {
           type: 'result',
           ok: true,
@@ -236,7 +234,7 @@ it('reconnects with the same incarnation, retains reports before Worker ACK, and
       if (req.type === 'thread_ack') {
         const db = new DatabaseSync(join(path, 'node.db'), { readOnly: true })
         try {
-          expect(db.prepare('SELECT event_id FROM node_outbox WHERE event_id=?').get(req.event_id)?.event_id).toBe(
+          expect(db.prepare('SELECT event_id FROM thread_outbox WHERE event_id=?').get(req.event_id)?.event_id).toBe(
             req.event_id,
           )
         } finally {
@@ -354,7 +352,6 @@ it('reconnects with the same incarnation, retains reports before Worker ACK, and
   const second = start({ host })
   await received.promise
   expect(openCount).toBe(1)
-  expect(statusCount).toBeGreaterThan(0)
   expect(new Set(incarnations)).toHaveLength(2)
   expect(second.failure()).toBeUndefined()
 }, 15_000)
@@ -573,8 +570,8 @@ it.each(['dropped_reply', 'worker_unavailable'])(
     expect(deliveries).toBe(1)
     const db = new DatabaseSync(join(path, 'node.db'), { readOnly: true })
     try {
-      const row = db.prepare('SELECT payload FROM node_commands WHERE id=?').get(commandId)
-      expect((JSON.parse(String(row?.payload)) as { result?: unknown }).result).toBeUndefined()
+      const row = db.prepare('SELECT result_json FROM thread_commands WHERE command_id=?').get(commandId)
+      expect(row?.result_json).toBeNull()
     } finally {
       db.close()
     }
@@ -595,135 +592,16 @@ it.each(['dropped_reply', 'worker_unavailable'])(
     expect(daemon.failure()).toBeUndefined()
     const recovered = new DatabaseSync(join(path, 'node.db'), { readOnly: true })
     try {
-      const payload = JSON.parse(
-        String(recovered.prepare('SELECT payload FROM node_commands WHERE id=?').get(commandId)?.payload),
-      ) as { result: { ok: boolean }; receipt: unknown }
-      expect(payload.result.ok).toBe(true)
-      expect(payload.receipt).toEqual(receipt)
+      const saved = recovered
+        .prepare('SELECT result_json,receipt_json FROM thread_commands WHERE command_id=?')
+        .get(commandId)
+      expect(JSON.parse(String(saved?.result_json))).toMatchObject({ ok: true })
+      expect(JSON.parse(String(saved?.receipt_json))).toEqual(receipt)
     } finally {
       recovered.close()
     }
   },
 )
-
-it('reports lost Worker history while keeping control connected and withholding a fabricated command receipt', async () => {
-  const { path, wss, start } = await setup()
-  const threadId = randomUUID(),
-    openId = randomUUID(),
-    stopId = randomUUID()
-  let alive = false,
-    generation: string | undefined,
-    launches = 0,
-    connections = 0
-  let historyLost = false
-  const historyReported = Promise.withResolvers<void>()
-  const delivered: string[] = [],
-    receipts: string[] = []
-  const host: DaemonWorkerHost = {
-    async ensureWorker() {
-      launches++
-      alive = true
-    },
-    async request(_threadId, request) {
-      if (!alive) throw new IPCError('closed', 'Worker is no longer reachable')
-      if (request.type === 'status')
-        return {
-          type: 'result',
-          ok: true,
-          worker_ready: true,
-          ...(generation
-            ? { storage_generation: generation, session_id: threadId, runtime_mode: 'full-access' as const }
-            : {}),
-        }
-      if (request.type === 'thread_open') {
-        delivered.push(request.type)
-        generation = request.storage_generation
-        return {
-          type: 'result',
-          ok: true,
-          receipt: {
-            command_id: request.command_id,
-            thread_id: threadId,
-            storage_generation: generation,
-            action: 'open',
-          },
-          command_status: { command_id: request.command_id, state: 'accepted' },
-        }
-      }
-      if (request.type === 'thread_stop') delivered.push(request.type)
-      return { type: 'result', ok: true, thread_reports: [] }
-    },
-  }
-  let sent = false
-  wss.on('connection', (socket) => {
-    connections++
-    socket.on('message', (raw) => {
-      const frame = JSON.parse(webSocketText(raw)) as Frame
-      if (frame.kind === 'auth') {
-        socket.send(JSON.stringify({ kind: 'auth_result', ok: true }))
-        return
-      }
-      const body = bodyOf(frame),
-        env = frame.envelope as unknown as Envelope
-      if (body?.type === 'node.sync') control(socket, { type: 'node.sync_result', ok: true }, env.message_id)
-      if (body?.type === 'node.runtime_report') {
-        control(socket, { type: 'node.runtime_report_result', ok: true, report_version: 1 }, env.message_id)
-        const report = body.report as { agents: RuntimeAgent[] }
-        if (!sent && report.agents[0]?.status === 'available') {
-          sent = true
-          control(
-            socket,
-            {
-              type: 'thread.command',
-              thread_id: threadId,
-              action: 'open',
-              agent_type: 'cursor',
-              runtime_mode: 'full-access',
-              working_directory: path,
-            },
-            undefined,
-            openId,
-          )
-        }
-      }
-      if (body?.type === 'thread.command_result') {
-        receipts.push(env.correlation_id!)
-        if (env.correlation_id === openId) {
-          alive = false
-          control(
-            socket,
-            { type: 'thread.command', thread_id: threadId, action: 'stop', storage_generation: generation },
-            undefined,
-            stopId,
-          )
-        }
-      }
-      if (body?.type === 'thread.report') {
-        historyLost = body.history_unavailable === true
-        if (historyLost) historyReported.resolve()
-        control(
-          socket,
-          {
-            type: 'thread.report_result',
-            thread_id: threadId,
-            event_id: body.event_id,
-            worker_seq: body.worker_seq,
-            ok: true,
-          },
-          env.message_id,
-        )
-      }
-    })
-  })
-  const daemon = start({ host })
-  await historyReported.promise
-  expect(historyLost).toBe(true)
-  expect(delivered).toEqual(['thread_open'])
-  expect(receipts).toEqual([openId])
-  expect(launches).toBe(1)
-  expect(connections).toBe(1)
-  expect(daemon.failure()).toBeUndefined()
-})
 
 describe('daemon admission and ownership', () => {
   it('serves commands from the completed capability snapshot while a probe is slow', async () => {
@@ -955,8 +833,8 @@ it('retains local control and durable reports after terminal protocol rejection'
     const db = new DatabaseSync(join(path, 'node.db'), { readOnly: true })
     try {
       return {
-        commands: db.prepare('SELECT * FROM node_commands ORDER BY id').all(),
-        reports: db.prepare('SELECT * FROM node_outbox ORDER BY seq').all(),
+        commands: db.prepare('SELECT * FROM thread_commands ORDER BY command_id').all(),
+        reports: db.prepare('SELECT * FROM thread_outbox ORDER BY thread_id,seq').all(),
       }
     } finally {
       db.close()

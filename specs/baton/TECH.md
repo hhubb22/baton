@@ -224,7 +224,7 @@ Turn 从一条 `queue` 消息被 Agent 接受开始，到 `agent-host` 驱动报
 | `threads` | `thread_id`、`storage_generation`、`startup_phase`（`awaiting_open` \| `open_attempted`）、`config_json`（工作目录、Agent、模型、`runtime_mode`、时限）与 `meta_json`（阶段、原生会话标识、控制 `epoch`、Turn 序号、活动输入、停止与恢复状态） |
 | `thread_commands` | `command_id`、`thread_id`、`hash`、持久接收回执 `receipt_json` 与终态执行结果 `status_json` |
 | `thread_messages` | `(thread_id, message_id)`、`seq`、方式、模型与思考选项、正文、`InputPreparation` 证据、状态（`queued` \| `intent` \| `sent` \| `withdrawn` \| `unknown`）、`status_reason`、所属 Turn 与执行身份 |
-| `thread_outbox` | `(thread_id, seq)`、唯一 `event_id`、内容摘要、报告 JSON、`acked` 标记及 `replyEvidence`；状态变迁与上行报告在同一事务原子写入，WSS 直接读取未确认行投递 |
+| `thread_outbox` | `(thread_id, seq)`、唯一 `event_id`、内容摘要、报告 JSON、中心确认 `acked`、本地消费确认 `worker_acked` 及 `replyEvidence`；状态变迁与上行报告在同一事务原子写入，WSS 直接读取未确认行投递 |
 | `executions` | `execution_id`、命令配置、启动 `intent`、停止标记与待确认 `ExecutionReport` 列表 |
 | `node_processes` | `(owner_kind, owner_id, pid, creation_time, role)`，持久登记 `agent-host`、`execution` 与 `probe` 所属子进程身份，确认回收后按完整身份删除 |
 
