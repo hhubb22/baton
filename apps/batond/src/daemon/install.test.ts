@@ -165,9 +165,8 @@ posixOnly('彻底卸载拒绝删除不像 Baton 数据的指定目录', async ()
   expect(await readFile(join(other, 'notes.txt'), 'utf8')).toBe('keep')
 })
 
-posixOnly('诊断报告程序和旧目录，服务不可用时照常输出', async () => {
+posixOnly('诊断报告程序位置和服务状态', async () => {
   const data = await installed()
-  await mkdir(join(home, '.baton-ts'))
   const report = await diagnoseInstallation(data)
   expect(report).toMatchObject({
     data_directory: data,
@@ -175,5 +174,5 @@ posixOnly('诊断报告程序和旧目录，服务不可用时照常输出', asy
     installed: true,
     service: { installed: true },
   })
-  expect(report.warnings.join('\n')).toContain(join(home, '.baton-ts'))
+  expect(report.warnings).toEqual([])
 })

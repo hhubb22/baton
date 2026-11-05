@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
 import { Effect } from 'effect'
 import * as SqlClient from 'effect/sql/SqlClient'
 import * as P from '@baton/protocol'
@@ -176,64 +175,4 @@ it('requires a fresh connection-bound Worker status challenge for a long turn', 
     expect(
       await run(query("SELECT id FROM thread_events WHERE kind IN ('turn.activity_check','turn.activity_checked')")),
     ).toEqual([])
-  }))
-
-it('migrates live and acknowledged challenges without changing business history or message bodies', () =>
-  withTestDatabase(async ({ run }) => {
-    const f = await fixture(run)
-    const history = await run(query('SELECT * FROM thread_events ORDER BY id'))
-    const messages = await run(query('SELECT * FROM thread_messages ORDER BY id'))
-    await run(query('DROP TABLE thread_activity_probes'))
-    await run(query('DROP SEQUENCE thread_activity_check_seq'))
-    const commands = [randomUUID(), randomUUID(), randomUUID()]
-    const checks = await run(
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        const rows: { check_seq: number }[] = []
-        for (const command of commands) {
-          const [row] = yield* sql<{
-            check_seq: number
-          }>`INSERT INTO thread_events(employee_id,thread_id,kind,actor,actor_id,payload)
-          VALUES(${f.employeeId},${f.thread.id},'turn.activity_check','system',${f.nodeId},
-            ${JSON.stringify({ command_id: command, conn_id: f.source.conn_id, worker_turn_seq: 1 })}::jsonb)
-          RETURNING id::float8 AS check_seq`
-          rows.push(row!)
-        }
-        return rows
-      }),
-    )
-    const result: P.ThreadCommandResult = {
-      ...f.receipt,
-      ok: false,
-      code: 'worker_unavailable',
-      activity_check_seq: checks[0]!.check_seq,
-    }
-    await run(
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        yield* sql`INSERT INTO thread_events(employee_id,thread_id,kind,actor,actor_id,payload)
-        VALUES(${f.employeeId},${f.thread.id},'turn.activity_checked','device',${f.nodeId},${JSON.stringify(result)}::jsonb)`
-      }),
-    )
-    const migration = await readFile(
-      new URL('../../../../migrations/0009_thread_activity_probes.sql', import.meta.url),
-      'utf8',
-    )
-    for (const statement of migration.split(';').filter((part) => part.trim())) await run(query(statement))
-    expect(await run(query('SELECT * FROM thread_events ORDER BY id'))).toEqual(history)
-    expect(await run(query('SELECT * FROM thread_messages ORDER BY id'))).toEqual(messages)
-    await run(threads.processReceipt(f.source, commands[0]!, result))
-    await run(threads.processReceipt(f.source, commands[2]!, { ...result, activity_check_seq: checks[2]!.check_seq }))
-    await expect(
-      run(threads.processReceipt(f.source, commands[1]!, { ...result, activity_check_seq: checks[1]!.check_seq })),
-    ).rejects.toMatchObject({ code: 'activity_check_rejected' })
-    const [sequence] = await run(
-      query<{ value: number }>("SELECT nextval('thread_activity_check_seq')::float8 AS value"),
-    )
-    expect(sequence!.value).toBeGreaterThan(checks[2]!.check_seq)
-    await expect(
-      run(threads.processReceipt(f.source, commands[0]!, { ...result, code: 'different' })),
-    ).rejects.toMatchObject({ code: 'thread_conflict' })
-    expect(await run(query('SELECT thread_id FROM thread_activity_probes'))).toEqual([{ thread_id: f.thread.id }])
-    await expect(run(query('DELETE FROM thread_events'))).rejects.toBeDefined()
   }))

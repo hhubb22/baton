@@ -1,1 +1,0 @@
-ALTER TABLE projects ADD COLUMN emoji text NOT NULL DEFAULT '📁';

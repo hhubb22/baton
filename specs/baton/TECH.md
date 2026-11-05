@@ -176,7 +176,7 @@ Turn 从一条 `queue` 消息被 Agent 接受开始，到 `agent-host` 驱动报
 
 ### 迁移
 
-中心迁移从 `migrations/0001_initial.sql` 的当前 schema 基线创建员工、设备、Thread、Project、主对话和记忆表。内部开发阶段允许按当前基线重建实验数据；正式发布后冻结已发布迁移，通过新增版本迁移演进。迁移校验、SQLite 格式版本与失败恢复按 [发布升级设计](../release/TECH.md#32-存储格式与事务核验)实施。
+中心迁移只有 `migrations/0001_initial.sql` 一个文件，按员工、设备、Project、Thread、Execution、记忆和网页通知分段创建全部表。内部开发阶段结构变化直接修改这个基线并重建实验数据库；正式发布后冻结已发布迁移，通过新增版本迁移演进。迁移校验、SQLite 格式版本与失败恢复按 [发布升级设计](../release/TECH.md#32-存储格式与事务核验)实施。
 
 `thread_reports` 保存 `(thread_id, event_id)`、连续序号 `worker_seq`、报告内容摘要及原 ACK，用于检测相同事件身份下的内容冲突。`thread_events` 只追加审计与时间线事件，回复事件保存限长正文。`threads.request_hash` 用于比较规范化的新建请求，读取接口不返回它。Turn 的 ID 与 `worker_turn_seq` 使用同一个含员工身份的复合外键。
 

@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
 import { Effect, Exit, Schema, Scope } from 'effect'
 import * as HttpEffect from 'effect/http/HttpEffect'
 import * as SqlClient from 'effect/sql/SqlClient'
@@ -311,77 +310,6 @@ it('returns persisted stop codes over HTTP and clears them after resume', () =>
     } finally {
       await Effect.runPromise(Scope.close(scope, Exit.void))
     }
-  }))
-
-it('backfills published stop reasons and report facts without changing thread data', () =>
-  withTestDatabase(async ({ run }) => {
-    const f = await fixture(run)
-    await run(query('ALTER TABLE threads DROP COLUMN stop_code'))
-    const cases: {
-      reason: string
-      code: P.ThreadStopCode | null
-      unopened?: boolean
-      confirmed?: boolean
-      history?: boolean
-      status?: P.Thread['status']
-    }[] = [
-      { reason: 'native Agent history missing', code: 'history_lost', confirmed: true },
-      { reason: 'history_lost', code: 'history_lost' },
-      { reason: '对话记录已丢失', code: 'history_lost' },
-      { reason: 'working_directory_missing', code: 'folder_missing', unopened: true },
-      { reason: '找不到工作目录', code: 'folder_missing' },
-      { reason: 'Agent 没有在 1 分钟内停下，已结束进程', code: 'forced_stop', confirmed: true },
-      { reason: 'forced', code: 'forced_stop' },
-      { reason: '', code: 'user_stopped', confirmed: true, unopened: true },
-      { reason: 'Could not launch Agent', code: 'start_failed', unopened: true },
-      { reason: 'Unrecognized interruption', code: 'interrupted' },
-      { reason: '', code: 'interrupted' },
-      { reason: 'Ledger unavailable', code: 'history_lost', status: 'unknown', history: true },
-      { reason: 'history_missing', code: null, status: 'idle' },
-    ]
-    const expected: { id: string; status_reason: string; stop_code: P.ThreadStopCode | null }[] = []
-    for (const item of cases) {
-      const { thread: t } = await run(threads.create(f.employee, { ...f.input, client_thread_id: randomUUID() }))
-      await run(
-        query(
-          `UPDATE threads SET status=$2,status_reason=$3,
-          opened_at=CASE WHEN $4::boolean THEN NULL ELSE now() END,
-          stop_confirmed_at=CASE WHEN $5::boolean THEN now() ELSE NULL END WHERE id=$1`,
-          t.id,
-          item.status ?? 'stopped',
-          item.reason,
-          String(!!item.unopened),
-          String(!!item.confirmed),
-        ),
-      )
-      if (item.history)
-        await run(
-          query(
-            `INSERT INTO thread_events(employee_id,thread_id,kind,actor,actor_id,payload)
-          VALUES($1,$2,'thread.unknown','device',$3,$4::jsonb)`,
-            f.employee,
-            t.id,
-            f.node,
-            JSON.stringify({ reason: item.reason, history_unavailable: true }),
-          ),
-        )
-      expected.push({ id: t.id, status_reason: item.reason, stop_code: item.code })
-    }
-    const snapshot = () =>
-      run(query<{ value: object }>("SELECT to_jsonb(t)-'stop_code' AS value FROM threads t ORDER BY id"))
-    const before = await snapshot()
-    const migration = await readFile(
-      new URL('../../../../migrations/0008_thread_stop_code.sql', import.meta.url),
-      'utf8',
-    )
-    await run(query(`DO $stop_migration$ BEGIN ${migration} END $stop_migration$`))
-    expect(await snapshot()).toEqual(before)
-    const saved = await run(
-      query<{ id: string; status_reason: string; stop_code: P.ThreadStopCode | null }>(
-        'SELECT id,status_reason,stop_code FROM threads ORDER BY id',
-      ),
-    )
-    expect(saved).toEqual(expected.sort((a, b) => a.id.localeCompare(b.id)))
   }))
 
 it('keeps idempotent durable commands and retries after database runtime restart', () =>
@@ -708,6 +636,30 @@ it('retries opening after a durable pre-Worker rejection without replaying the o
     await resumed(threads.addMessage(f.employee, t.id, { client_message_id: randomUUID(), content: 'continue' }))
     expect((await resumed(threads.claimCommands())).map((c) => c.body.action)).toEqual(['message'])
   }))
+
+it.each([
+  ['working_directory_missing', 'folder_missing'],
+  ['agent_unavailable', 'start_failed'],
+] as const)('maps open rejection %s to stop code %s', (code, stopCode) =>
+  withTestDatabase(async ({ run }) => {
+    const f = await fixture(run)
+    const { thread: t } = await f.create()
+    const [open] = await run(threads.claimCommands())
+    if (!open) throw new Error('Missing open command')
+    await run(
+      threads.processReceipt(f.source, open.message_id, {
+        type: 'thread.command_result',
+        thread_id: t.id,
+        ok: false,
+        code,
+      }),
+    )
+    expect(await run(threads.view({ employeeId: f.employee }, t.id))).toMatchObject({
+      status: 'stopped',
+      stop_code: stopCode,
+    })
+  }),
+)
 
 it.each(['worker-accepted', 'identity-conflict', 'message-dispatched'])(
   'rejects reopening when persistent evidence is unsafe: %s',

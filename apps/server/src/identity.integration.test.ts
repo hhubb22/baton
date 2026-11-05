@@ -54,137 +54,21 @@ describe('identity storage on local PostgreSQL', () => {
   it('applies migrations in order, records versions, skips applied scripts and rolls back failures inside the selected schema', async () => {
     await Promise.all([run(migrateDatabase()), run(migrateDatabase())])
     const rows = await run(query<{ version: string }>('SELECT version FROM schema_migrations ORDER BY version'))
-    expect(rows.map((row) => row.version)).toEqual([
-      '0001_initial.sql',
-      '0002_ts_threads.sql',
-      '0003_thread_tracing.sql',
-      '0004_inbox_options.sql',
-      '0005_thread_settings.sql',
-      '0006_thread_answers.sql',
-      '0007_thread_turn_items.sql',
-      '0008_thread_stop_code.sql',
-      '0009_thread_activity_probes.sql',
-      '0010_browser_notifications.sql',
-      '0011_project_emoji.sql',
-      '0012_project_model_source.sql',
-      '0013_thread_thinking.sql',
-      '0014_remove_agent_inbox.sql',
-      '0015_project_read.sql',
-      '0016_project_trace.sql',
-      '0017_outbox_created_at.sql',
-      '0018_executions.sql',
-      '0020_device_login.sql',
-      '0021_drop_node_enrollments.sql',
-      '0022_stop_replace_updates.sql',
-    ])
+    expect(rows.map((row) => row.version)).toEqual(['0001_initial.sql'])
     const names = await run(query<{ current: string }>('SELECT current_schema() AS current'))
     expect(names[0].current).toBe(schema)
-    const columns = await run(
-      query<{ column_name: string }>(
-        `SELECT column_name FROM information_schema.columns
-      WHERE table_schema=$1 AND table_name='thread_outbox' AND column_name IN ('completed_at','completion','trace_context') ORDER BY column_name`,
-        [schema],
-      ),
-    )
-    expect(columns.map((row) => row.column_name)).toEqual(['completed_at', 'completion', 'trace_context'])
     const directory = await mkdtemp(join(tmpdir(), 'baton-migrations-'))
     try {
       const initial = await readFile(new URL('../../../migrations/0001_initial.sql', import.meta.url), 'utf8')
-      const completion = await readFile(new URL('../../../migrations/0002_ts_threads.sql', import.meta.url), 'utf8')
       await writeFile(join(directory, '0001_initial.sql'), initial)
-      await writeFile(join(directory, '0002_ts_threads.sql'), completion)
-      const tracing = await readFile(new URL('../../../migrations/0003_thread_tracing.sql', import.meta.url), 'utf8')
-      await writeFile(join(directory, '0003_thread_tracing.sql'), tracing)
-      const inboxOptions = await readFile(
-        new URL('../../../migrations/0004_inbox_options.sql', import.meta.url),
-        'utf8',
-      )
-      await writeFile(join(directory, '0004_inbox_options.sql'), inboxOptions)
-      const threadSettings = await readFile(
-        new URL('../../../migrations/0005_thread_settings.sql', import.meta.url),
-        'utf8',
-      )
-      await writeFile(join(directory, '0005_thread_settings.sql'), threadSettings)
-      const threadAnswers = await readFile(
-        new URL('../../../migrations/0006_thread_answers.sql', import.meta.url),
-        'utf8',
-      )
-      await writeFile(join(directory, '0006_thread_answers.sql'), threadAnswers)
-      const threadItems = await readFile(
-        new URL('../../../migrations/0007_thread_turn_items.sql', import.meta.url),
-        'utf8',
-      )
-      await writeFile(join(directory, '0007_thread_turn_items.sql'), threadItems)
-      const threadStopCode = await readFile(
-        new URL('../../../migrations/0008_thread_stop_code.sql', import.meta.url),
-        'utf8',
-      )
-      await writeFile(join(directory, '0008_thread_stop_code.sql'), threadStopCode)
-      const activityProbes = await readFile(
-        new URL('../../../migrations/0009_thread_activity_probes.sql', import.meta.url),
-        'utf8',
-      )
-      await writeFile(join(directory, '0009_thread_activity_probes.sql'), activityProbes)
-      const browserNotifications = await readFile(
-        new URL('../../../migrations/0010_browser_notifications.sql', import.meta.url),
-        'utf8',
-      )
-      await writeFile(join(directory, '0010_browser_notifications.sql'), browserNotifications)
-      const projectEmoji = await readFile(
-        new URL('../../../migrations/0011_project_emoji.sql', import.meta.url),
-        'utf8',
-      )
-      await writeFile(join(directory, '0011_project_emoji.sql'), projectEmoji)
-      const modelSource = await readFile(
-        new URL('../../../migrations/0012_project_model_source.sql', import.meta.url),
-        'utf8',
-      )
-      await writeFile(join(directory, '0012_project_model_source.sql'), modelSource)
-      const threadThinking = await readFile(
-        new URL('../../../migrations/0013_thread_thinking.sql', import.meta.url),
-        'utf8',
-      )
-      await writeFile(join(directory, '0013_thread_thinking.sql'), threadThinking)
-      const removeInbox = await readFile(
-        new URL('../../../migrations/0014_remove_agent_inbox.sql', import.meta.url),
-        'utf8',
-      )
-      await writeFile(join(directory, '0014_remove_agent_inbox.sql'), removeInbox)
-      const projectRead = await readFile(new URL('../../../migrations/0015_project_read.sql', import.meta.url), 'utf8')
-      await writeFile(join(directory, '0015_project_read.sql'), projectRead)
-      const projectTrace = await readFile(
-        new URL('../../../migrations/0016_project_trace.sql', import.meta.url),
-        'utf8',
-      )
-      await writeFile(join(directory, '0016_project_trace.sql'), projectTrace)
-      const outboxCreated = await readFile(
-        new URL('../../../migrations/0017_outbox_created_at.sql', import.meta.url),
-        'utf8',
-      )
-      await writeFile(join(directory, '0017_outbox_created_at.sql'), outboxCreated)
-      const executions = await readFile(new URL('../../../migrations/0018_executions.sql', import.meta.url), 'utf8')
-      await writeFile(join(directory, '0018_executions.sql'), executions)
-      const deviceLogin = await readFile(new URL('../../../migrations/0020_device_login.sql', import.meta.url), 'utf8')
-      await writeFile(join(directory, '0020_device_login.sql'), deviceLogin)
-      const dropEnrollments = await readFile(
-        new URL('../../../migrations/0021_drop_node_enrollments.sql', import.meta.url),
-        'utf8',
-      )
-      await writeFile(join(directory, '0021_drop_node_enrollments.sql'), dropEnrollments)
-      const stopReplaceUpdates = await readFile(
-        new URL('../../../migrations/0022_stop_replace_updates.sql', import.meta.url),
-        'utf8',
-      )
-      await writeFile(join(directory, '0022_stop_replace_updates.sql'), stopReplaceUpdates)
       const checksums = await run(
         query<{ version: string; checksum: string }>(
           'SELECT version, checksum FROM schema_migrations ORDER BY version',
         ),
       )
-      expect(checksums[0]!.checksum).toBe(createHash('sha256').update(initial).digest('hex'))
-      expect(checksums.find((row) => row.version === '0008_thread_stop_code.sql')?.checksum).toBe(
-        createHash('sha256').update(threadStopCode).digest('hex'),
-      )
+      expect(checksums).toEqual([
+        { version: '0001_initial.sql', checksum: createHash('sha256').update(initial).digest('hex') },
+      ])
       await writeFile(join(directory, '0001_initial.sql'), `${initial}\n-- changed SQL\n`)
       await expect(run(migrateDatabase(directory))).rejects.toMatchObject({ code: 'migration_checksum_mismatch' })
       expect(await run(query('SELECT version, checksum FROM schema_migrations ORDER BY version'))).toEqual(checksums)
@@ -201,39 +85,35 @@ describe('identity storage on local PostgreSQL', () => {
       await expect(run(migrateDatabase(directory))).rejects.toMatchObject({ code: 'storage_version_unsupported' })
       expect(await run(query("SELECT version FROM schema_migrations WHERE version='9999_future.sql'"))).toHaveLength(1)
       await run(query("DELETE FROM schema_migrations WHERE version='9999_future.sql'"))
-      await run(query("DELETE FROM schema_migrations WHERE version='0004_inbox_options.sql'"))
-      await expect(run(migrateDatabase(directory))).rejects.toMatchObject({ code: 'storage_version_unsupported' })
-      await run(
-        query('INSERT INTO schema_migrations (version, checksum, applied_at) VALUES ($1, $2, now())', [
-          checksums[3]!.version,
-          checksums[3]!.checksum,
-        ]),
-      )
       await writeFile(
-        join(directory, '0023_ordered.sql'),
+        join(directory, '0002_ordered.sql'),
         "CREATE TABLE migration_order (position integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY, step text NOT NULL); INSERT INTO migration_order(step) VALUES ('first');",
       )
-      await writeFile(join(directory, '0024_ordered.sql'), "INSERT INTO migration_order(step) VALUES ('second');")
+      await writeFile(join(directory, '0003_ordered.sql'), "INSERT INTO migration_order(step) VALUES ('second');")
       await run(migrateDatabase(directory))
       const versions = await run(
-        query<{ version: string; applied_at: string }>(
-          'SELECT version, applied_at::text FROM schema_migrations ORDER BY version',
+        query<{ version: string; checksum: string; applied_at: string }>(
+          'SELECT version, checksum, applied_at::text FROM schema_migrations ORDER BY version',
         ),
       )
-      expect(versions.map((row) => row.version)).toEqual([
-        ...rows.map((row) => row.version),
-        '0023_ordered.sql',
-        '0024_ordered.sql',
-      ])
+      expect(versions.map((row) => row.version)).toEqual(['0001_initial.sql', '0002_ordered.sql', '0003_ordered.sql'])
       await Promise.all([run(migrateDatabase(directory)), run(migrateDatabase(directory))])
       expect(await run(query('SELECT step FROM migration_order ORDER BY position'))).toEqual([
         { step: 'first' },
         { step: 'second' },
       ])
-      expect(await run(query('SELECT version, applied_at::text FROM schema_migrations ORDER BY version'))).toEqual(
-        versions,
+      expect(
+        await run(query('SELECT version, checksum, applied_at::text FROM schema_migrations ORDER BY version')),
+      ).toEqual(versions)
+      await run(query("DELETE FROM schema_migrations WHERE version='0002_ordered.sql'"))
+      await expect(run(migrateDatabase(directory))).rejects.toMatchObject({ code: 'storage_version_unsupported' })
+      await run(
+        query('INSERT INTO schema_migrations (version, checksum, applied_at) VALUES ($1, $2, now())', [
+          versions[1]!.version,
+          versions[1]!.checksum,
+        ]),
       )
-      await writeFile(join(directory, '0025_rollback.sql'), 'CREATE TABLE migration_rollback (id int); SELECT 1/0;')
+      await writeFile(join(directory, '0004_rollback.sql'), 'CREATE TABLE migration_rollback (id int); SELECT 1/0;')
       await expect(run(migrateDatabase(directory))).rejects.toMatchObject({ code: 'unavailable' })
       const rolledBack = await run(
         query<{ exists: boolean }>(
@@ -244,7 +124,7 @@ describe('identity storage on local PostgreSQL', () => {
       )
       expect(rolledBack[0].exists).toBe(false)
       expect(
-        await run(query('SELECT version FROM schema_migrations WHERE version=$1', ['0023_rollback.sql'])),
+        await run(query('SELECT version FROM schema_migrations WHERE version=$1', ['0004_rollback.sql'])),
       ).toHaveLength(0)
     } finally {
       await rm(directory, { recursive: true, force: true })

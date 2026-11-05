@@ -19,7 +19,6 @@ export function notificationCause(reason: string): string {
     case 'failed':
       return ''
     case 'history_lost':
-    case 'history_missing':
     case 'history_unavailable':
       return 'The Agent conversation history is missing.'
     case 'folder_missing':

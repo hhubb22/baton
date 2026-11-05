@@ -66,13 +66,6 @@ export const migrateDatabase = (
       Effect.gen(function* () {
         yield* sql`SELECT pg_advisory_xact_lock(4815162342)`
         yield* sql`CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL)`
-        const columns = yield* sql<{
-          column_name: string
-        }>`SELECT column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='schema_migrations'`
-        if (!columns.some((column) => column.column_name === 'checksum'))
-          return yield* Effect.fail(
-            new AppError(503, 'storage_version_unsupported', '数据库缺少迁移摘要，实验格式需要重建'),
-          )
         const applied = yield* sql<{
           version: string
           checksum: string

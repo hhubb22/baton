@@ -5,7 +5,7 @@ import { delimiter, dirname, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { BUILD } from '@baton/protocol/release'
 import { processLockIsHeld } from '../platform/lock.ts'
-import { batonHome, defaultDataDirectory, isDefaultDataDirectory, programRoot } from '../platform/layout.ts'
+import { defaultDataDirectory, isDefaultDataDirectory, programRoot } from '../platform/layout.ts'
 import { isMissing } from './identity.ts'
 
 const shimMarker = '# Baton 固定入口，由 batond install 生成'
@@ -148,8 +148,6 @@ export async function diagnoseInstallation(dataDirectory: string) {
   const warnings: string[] = []
   if (service?.data_directory && !sameDirectory(service.data_directory, dataDirectory))
     warnings.push(`服务使用的数据目录是 ${service.data_directory}，当前查看的是 ${dataDirectory}，请加上 --data-dir`)
-  for (const legacy of [join(homedir(), '.baton-ts'), join(batonHome(), 'project-runtime')])
-    if (await exists(legacy)) warnings.push(`发现旧目录 ${legacy}，确认不再需要后可以删除`)
   return {
     version: BUILD.version,
     commit: BUILD.commit,
